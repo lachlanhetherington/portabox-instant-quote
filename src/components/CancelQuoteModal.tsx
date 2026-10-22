@@ -12,7 +12,7 @@ export const CancelQuoteModal: React.FC<CancelQuoteModalProps> = ({
   isOpen,
   onClose,
   onConfirm,
-  websiteUrl = (import.meta.env.VITE_SITE_URL as string) || 'https://portabox-website.vercel.app/',
+  websiteUrl = (import.meta.env.VITE_SITE_URL as string) || 'https://portabox-website-ten.vercel.app/',
 }) => {
   if (!isOpen) return null;
 
