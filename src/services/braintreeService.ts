@@ -16,7 +16,8 @@ export type BraintreePaymentMethodType =
   | 'credit_card'
   | 'paypal'
   | 'google_pay'
-  | 'apple_pay';
+  | 'apple_pay'
+  | 'eft_zepto';
 
 export interface BraintreeCardInput {
   cardNumber: string;

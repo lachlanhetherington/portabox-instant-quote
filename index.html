@@ -2,7 +2,66 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <script>
+      (function() {
+        // 1. Intercept Vite HMR WebSocket connections so they never reject or error in container iframe
+        var OriginalWebSocket = window.WebSocket;
+        if (OriginalWebSocket) {
+          function MockViteWebSocket(url, protocols) {
+            if (protocols === 'vite-hmr' || (typeof url === 'string' && (url.includes('token=') || url.includes('vite-hmr')))) {
+              var listeners = {};
+              return {
+                url: url,
+                readyState: 1, // WebSocket.OPEN
+                protocol: 'vite-hmr',
+                extensions: '',
+                bufferedAmount: 0,
+                onopen: null,
+                onclose: null,
+                onerror: null,
+                onmessage: null,
+                addEventListener: function(type, fn) {
+                  listeners[type] = listeners[type] || [];
+                  listeners[type].push(fn);
+                  if (type === 'open') {
+                    setTimeout(function() { fn({ type: 'open' }); }, 0);
+                  }
+                },
+                removeEventListener: function(type, fn) {
+                  if (listeners[type]) {
+                    listeners[type] = listeners[type].filter(function(cb) { return cb !== fn; });
+                  }
+                },
+                dispatchEvent: function() { return true; },
+                send: function() {},
+                close: function() {}
+              };
+            }
+            return new OriginalWebSocket(url, protocols);
+          }
+          MockViteWebSocket.CONNECTING = 0;
+          MockViteWebSocket.OPEN = 1;
+          MockViteWebSocket.CLOSING = 2;
+          MockViteWebSocket.CLOSED = 3;
+          MockViteWebSocket.prototype = OriginalWebSocket.prototype;
+          window.WebSocket = MockViteWebSocket;
+        }
+
+        // 2. Suppress any unhandled rejections related to @vite/client or WebSocket
+        window.addEventListener('unhandledrejection', function(event) {
+          var msg = event && event.reason && (event.reason.message || String(event.reason));
+          var stack = event && event.reason && event.reason.stack;
+          if (
+            (typeof msg === 'string' && (msg.includes('WebSocket') || msg.includes('closed without opened'))) ||
+            (typeof stack === 'string' && stack.includes('@vite/client'))
+          ) {
+            event.preventDefault();
+            if (event.stopImmediatePropagation) event.stopImmediatePropagation();
+          }
+        });
+      })();
+    </script>
     <title>Portabox Instant Quote</title>
     <meta name="description" content="Instant quote calculator and booking app for Portabox portable storage containers across Australia with distance calculation, dynamic rates, and admin management." />
     <meta property="og:title" content="Portabox Instant Quote" />
@@ -13,7 +72,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Cabinet+Grotesk:wght@700;800;900&display=swap" rel="stylesheet">
   </head>
-  <body class="bg-[#f0f4f8] text-[#0f2c4a] antialiased selection:bg-[#00c0f3] selection:text-white">
+  <body class="bg-[#f0f4f8] text-[#15385E] antialiased selection:bg-[#5CC1EF] selection:text-[#15385E]">
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

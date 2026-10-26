@@ -1,0 +1,28 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isSignedIn() { return request.auth != null; }
+    function isValidId(id) { return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$'); }
+    function isValidMessage(data) {
+      return data.from is string && data.from.size() <= 32 &&
+             data.to is string && data.to.size() <= 32 &&
+             data.body is string && data.body.size() <= 10000 &&
+             data.contactId is string && data.contactId.size() <= 128 &&
+             data.direction in ['inbound', 'outbound'] &&
+             data.timestamp is string;
+    }
+    function incoming() { return request.resource.data; }
+
+    match /{document=**} { allow read, write: if false; }
+
+    match /contacts/{contactId} {
+      allow read: if isSignedIn();
+      
+      match /messages/{messageId} {
+        allow read: if isSignedIn();
+        allow create: if isSignedIn() && isValidId(contactId) && isValidId(messageId) && isValidMessage(incoming());
+        allow update, delete: if false;
+      }
+    }
+  }
+}

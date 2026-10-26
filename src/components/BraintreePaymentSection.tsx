@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   CreditCard,
   Lock,
@@ -10,6 +10,9 @@ import {
   ExternalLink,
   ChevronRight,
   Zap,
+  Landmark,
+  Copy,
+  Check,
 } from 'lucide-react';
 import {
   processBraintreePayment,
@@ -18,9 +21,16 @@ import {
   BraintreePaymentMethodType,
   BraintreePaymentResult,
 } from '../services/braintreeService';
+import { initiateDunning } from '../services/dunningService';
+import { loadCustomerAccounts } from '../services/customerPortalService';
+import {
+  generateZeptoEftInstruction,
+  settleOrRegisterZeptoEftPayment,
+} from '../services/zeptoEftService';
 
 interface BraintreePaymentSectionProps {
   amount: number;
+  customerId?: string;
   customerName?: string;
   customerEmail?: string;
   customerPhone?: string;
@@ -32,6 +42,7 @@ interface BraintreePaymentSectionProps {
 
 export const BraintreePaymentSection: React.FC<BraintreePaymentSectionProps> = ({
   amount,
+  customerId,
   customerName = 'Portabox Customer',
   customerEmail = 'customer@portabox.com.au',
   customerPhone = '1800 467 637',
@@ -52,6 +63,69 @@ export const BraintreePaymentSection: React.FC<BraintreePaymentSectionProps> = (
   const [isProcessing, setIsProcessing] = useState(false);
   const [paymentError, setPaymentError] = useState<string | null>(null);
   const [paymentSuccessData, setPaymentSuccessData] = useState<BraintreePaymentResult | null>(null);
+  const [copiedField, setCopiedField] = useState<string | null>(null);
+  const [bankReceiptInput, setBankReceiptInput] = useState<string>('');
+  const [remittanceNoticeMessage, setRemittanceNoticeMessage] = useState<string | null>(null);
+
+  // Auto-generated Zepto NPP / PayID & Virtual Account instruction (Option 1)
+  const zeptoInstruction = useMemo(
+    () =>
+      generateZeptoEftInstruction({
+        amountAud: amount,
+        customerName,
+        customerEmail,
+        customerPhone,
+        orderDescription,
+      }),
+    [amount, customerName, customerEmail, customerPhone, orderDescription]
+  );
+
+  const handleCopyText = (label: string, text: string) => {
+    if (navigator?.clipboard) {
+      navigator.clipboard.writeText(text);
+    }
+    setCopiedField(label);
+    setTimeout(() => setCopiedField(null), 2000);
+  };
+
+  // Process Zepto NPP / PayID EFT (Option 1: Instant Webhook Settlement or Remittance Lodgement)
+  const handleZeptoEftSubmit = async (mode: 'instant_npp_webhook' | 'remittance_submitted') => {
+    setIsProcessing(true);
+    setPaymentError(null);
+    setRemittanceNoticeMessage(null);
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 750));
+      const { updatedInstruction, nppTransactionId } = settleOrRegisterZeptoEftPayment({
+        instruction: zeptoInstruction,
+        mode,
+        bankReceiptRef: bankReceiptInput.trim() || zeptoInstruction.referenceCode,
+      });
+
+      if (mode === 'instant_npp_webhook') {
+        const result: BraintreePaymentResult = {
+          success: true,
+          transactionId: `${updatedInstruction.referenceCode} (${nppTransactionId})`,
+          status: 'settled',
+          paymentMethod: `EFT / PayID (${updatedInstruction.referenceCode} via Zepto NPP)`,
+          paymentMethodType: 'eft_zepto',
+          amount,
+          currency: 'AUD',
+          settledAt: new Date().toISOString(),
+          vaultToken: `zepto_acct_${updatedInstruction.virtualAccountNumber}`,
+        };
+        setPaymentSuccessData(result);
+        onPaymentSuccess(result);
+      } else {
+        setRemittanceNoticeMessage(
+          `✓ Transfer lodged with Reference ${updatedInstruction.referenceCode}. Your container is reserved in Smartsheet and will auto-reconcile as soon as Zepto NPP detects the deposit.`
+        );
+      }
+    } catch {
+      setPaymentError('Could not register EFT payment instruction.');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
 
   const cardBrand = detectBraintreeCardBrand(cardNumber);
 
@@ -124,6 +198,13 @@ export const BraintreePaymentSection: React.FC<BraintreePaymentSectionProps> = (
       } else {
         setPaymentError(result.error || 'Braintree authorization failed.');
         if (onPaymentError) onPaymentError(result.error || 'Braintree authorization failed.');
+        if (customerId) {
+          const accounts = loadCustomerAccounts();
+          const customer = accounts.find(a => a.id === customerId);
+          if (customer) {
+            await initiateDunning(customer);
+          }
+        }
       }
     } catch {
       setPaymentError('An error occurred connecting to Braintree. Please check card details.');
@@ -188,23 +269,23 @@ export const BraintreePaymentSection: React.FC<BraintreePaymentSectionProps> = (
   };
 
   return (
-    <div className="bg-white rounded-3xl border border-slate-200 shadow-sm p-6 sm:p-8 space-y-6">
+    <div className="bg-white rounded-3xl border-2 border-[#DAD7D1] shadow-xs p-6 sm:p-8 space-y-6">
       {/* Top Banner: Braintree Gateway Verified */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-5">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-2xl bg-[#00c0f3] text-white flex items-center justify-center font-black shadow-xs">
-            <Lock className="w-5 h-5" />
+          <div className="w-10 h-10 rounded-2xl bg-[#5CC1EF] text-[#15385E] flex items-center justify-center font-black shadow-xs">
+            <Lock className="w-5 h-5 stroke-[2.5]" />
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <span className="text-[10px] font-black uppercase tracking-wider bg-slate-900 text-white px-2 py-0.5 rounded">
+              <span className="text-[10px] font-black uppercase tracking-wider bg-[#15385E] text-white px-2 py-0.5 rounded">
                 BRAINTREE PAYMENTS
               </span>
               <span className="text-[10px] font-bold text-slate-500">
                 A PayPal Company · Level 1 PCI-DSS
               </span>
             </div>
-            <h3 className="text-base sm:text-lg font-black text-[#0b2942]">
+            <h3 className="text-base sm:text-lg font-black text-[#15385E]">
               Secure Payment & Container Reservation
             </h3>
           </div>
@@ -214,7 +295,7 @@ export const BraintreePaymentSection: React.FC<BraintreePaymentSectionProps> = (
           <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
             Payable Now
           </span>
-          <span className="text-2xl font-black text-[#0b2942] font-mono">${amount} AUD</span>
+          <span className="text-2xl font-black text-[#15385E] font-mono">${amount} AUD</span>
           <span className="text-[10px] text-emerald-600 font-bold block">
             GST Inclusive · Instant Confirmation
           </span>
@@ -237,14 +318,14 @@ export const BraintreePaymentSection: React.FC<BraintreePaymentSectionProps> = (
       )}
 
       {/* Payment Method Selector Tabs */}
-      <div className="grid grid-cols-3 gap-2">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
         <button
           type="button"
           onClick={() => {
             setActiveMethod('credit_card');
             setPaymentError(null);
           }}
-          className={`py-3 px-2 sm:px-4 rounded-2xl border text-xs font-bold transition-all cursor-pointer flex flex-col sm:flex-row items-center justify-center gap-2 ${
+          className={`py-3 px-2 sm:px-3 rounded-2xl border text-xs font-bold transition-all cursor-pointer flex flex-col sm:flex-row items-center justify-center gap-1.5 ${
             activeMethod === 'credit_card'
               ? 'border-[#00c0f3] bg-sky-50/50 text-[#0b2942] shadow-2xs'
               : 'border-slate-200 text-slate-600 hover:bg-slate-50'
@@ -257,17 +338,33 @@ export const BraintreePaymentSection: React.FC<BraintreePaymentSectionProps> = (
         <button
           type="button"
           onClick={() => {
+            setActiveMethod('eft_zepto');
+            setPaymentError(null);
+          }}
+          className={`py-3 px-2 sm:px-3 rounded-2xl border text-xs font-bold transition-all cursor-pointer flex flex-col sm:flex-row items-center justify-center gap-1.5 ${
+            activeMethod === 'eft_zepto'
+              ? 'border-emerald-500 bg-emerald-50/70 text-[#0b2942] shadow-2xs ring-2 ring-emerald-500/20'
+              : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+          }`}
+        >
+          <Landmark className="w-4 h-4 text-emerald-600" />
+          <span>EFT / PayID (Zepto)</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => {
             setActiveMethod('paypal');
             setPaymentError(null);
           }}
-          className={`py-3 px-2 sm:px-4 rounded-2xl border text-xs font-bold transition-all cursor-pointer flex flex-col sm:flex-row items-center justify-center gap-2 ${
+          className={`py-3 px-2 sm:px-3 rounded-2xl border text-xs font-bold transition-all cursor-pointer flex flex-col sm:flex-row items-center justify-center gap-1.5 ${
             activeMethod === 'paypal'
               ? 'border-blue-500 bg-blue-50/50 text-[#0b2942] shadow-2xs'
               : 'border-slate-200 text-slate-600 hover:bg-slate-50'
           }`}
         >
           <span className="font-extrabold text-blue-600 font-sans italic text-sm">P</span>
-          <span>PayPal (Braintree)</span>
+          <span>PayPal</span>
         </button>
 
         <button
@@ -276,7 +373,7 @@ export const BraintreePaymentSection: React.FC<BraintreePaymentSectionProps> = (
             setActiveMethod('google_pay');
             setPaymentError(null);
           }}
-          className={`py-3 px-2 sm:px-4 rounded-2xl border text-xs font-bold transition-all cursor-pointer flex flex-col sm:flex-row items-center justify-center gap-2 ${
+          className={`py-3 px-2 sm:px-3 rounded-2xl border text-xs font-bold transition-all cursor-pointer flex flex-col sm:flex-row items-center justify-center gap-1.5 ${
             activeMethod === 'google_pay' || activeMethod === 'apple_pay'
               ? 'border-slate-800 bg-slate-900 text-white shadow-2xs'
               : 'border-slate-200 text-slate-600 hover:bg-slate-50'
@@ -399,30 +496,31 @@ export const BraintreePaymentSection: React.FC<BraintreePaymentSectionProps> = (
               type="checkbox"
               checked={vaultMethod}
               onChange={(e) => setVaultMethod(e.target.checked)}
-              className="w-4 h-4 rounded text-[#00c0f3] focus:ring-[#00c0f3]"
+              className="w-4 h-4 rounded text-[#5CC1EF] focus:ring-[#5CC1EF]"
             />
             <div className="text-xs">
-              <span className="font-extrabold text-[#0b2942]">Save to Braintree Vault</span>
+              <span className="font-extrabold text-[#15385E]">Save to Braintree Vault</span>
               <span className="text-slate-500 block">
                 Store payment token safely for recurring {billingCycleLabel} automatic debit. Cancel anytime.
               </span>
             </div>
           </label>
 
+          {/* CTA Pay Now Button: #F7D347 Vibrant Gold / Yellow with #1A1A1A text */}
           <button
             type="submit"
             disabled={isProcessing}
-            className="w-full py-4 bg-[#ffd000] hover:bg-[#ffdc26] active:bg-[#eab308] text-[#0f3353] rounded-2xl font-black text-sm sm:text-base tracking-wide shadow-lg hover:shadow-xl transition-all cursor-pointer flex items-center justify-center gap-2 border-2 border-amber-300 disabled:opacity-60"
+            className="w-full py-4 bg-[#F7D347] hover:bg-[#eed235] text-[#1A1A1A] border-2 border-[#e6c338] rounded-2xl font-black text-sm tracking-wide shadow-sm hover:shadow-md transition-all cursor-pointer flex items-center justify-center gap-2 active:scale-98"
           >
             {isProcessing ? (
               <>
-                <RefreshCw className="w-4 h-4 animate-spin text-[#0f3353]" />
-                <span>Authorizing with Braintree Gateway...</span>
+                <RefreshCw className="w-4 h-4 animate-spin text-[#15385E]" />
+                <span className="font-black text-[#1A1A1A]">Authorizing with Braintree Gateway...</span>
               </>
             ) : (
               <>
-                <Lock className="w-4 h-4 text-[#0f3353]" />
-                <span>Pay ${amount} AUD Now via Braintree</span>
+                <Lock className="w-4 h-4 text-[#15385E]" />
+                <span className="font-black text-[#1A1A1A]">Pay ${amount} AUD Now via Braintree</span>
               </>
             )}
           </button>
@@ -490,6 +588,166 @@ export const BraintreePaymentSection: React.FC<BraintreePaymentSectionProps> = (
             >
               <span>Pay with Apple Pay</span>
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* TAB 4: EFT / PayID with Zepto Auto-Generated Reference & Virtual Account (Option 1) */}
+      {activeMethod === 'eft_zepto' && (
+        <div className="space-y-4 animate-in fade-in duration-150">
+          <div className="p-5 rounded-2xl bg-emerald-50/70 border border-emerald-200 space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-emerald-200/80 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 rounded-xl bg-emerald-600 text-white">
+                  <Landmark className="w-4 h-4" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-[10px] font-black uppercase tracking-wider bg-emerald-700 text-white px-2 py-0.5 rounded">
+                      ZEPTO NPP / PAYID AUTO-RECONCILIATION
+                    </span>
+                    <span className="text-[10px] font-bold text-emerald-800">
+                      Zero Card Merchant Fees · Osko Instant
+                    </span>
+                  </div>
+                  <h4 className="text-sm font-black text-[#0b2942] mt-0.5">
+                    Electronic Funds Transfer (Unique Reference &amp; Virtual Account)
+                  </h4>
+                </div>
+              </div>
+              <div className="text-left sm:text-right">
+                <span className="text-[10px] uppercase font-bold text-emerald-700 block">Exact Transfer Amount</span>
+                <span className="text-lg font-black font-mono text-[#0b2942]">${amount}.00 AUD</span>
+              </div>
+            </div>
+
+            {/* Auto-Generated Reference Code Highlight Box */}
+            <div className="p-4 rounded-2xl bg-white border-2 border-[#FF9900] shadow-2xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 block">
+                  Auto-Generated EFT Reference Code (Include in Bank Description)
+                </span>
+                <div className="text-xl sm:text-2xl font-black font-mono text-[#0b2942] tracking-wider mt-0.5">
+                  {zeptoInstruction.referenceCode}
+                </div>
+                <span className="text-[11px] text-slate-500">
+                  Automatically matches your payment to this quote &amp; releases container dispatch in Smartsheet
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => handleCopyText('ref', zeptoInstruction.referenceCode)}
+                className="px-4 py-2.5 rounded-xl bg-[#FF9900] hover:bg-[#e68a00] text-[#0b2942] border border-[#FEBD69] font-extrabold text-xs flex items-center gap-1.5 cursor-pointer shrink-0 self-start sm:self-center shadow-2xs"
+              >
+                {copiedField === 'ref' ? (
+                  <>
+                    <Check className="w-3.5 h-3.5 text-[#0b2942]" />
+                    <span>Copied Reference!</span>
+                  </>
+                ) : (
+                  <>
+                    <Copy className="w-3.5 h-3.5 text-[#0b2942]" />
+                    <span>Copy Reference</span>
+                  </>
+                )}
+              </button>
+            </div>
+
+            {/* Dynamic PayID & Virtual BSB/Account Grid */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+              <div className="p-3.5 rounded-xl bg-white border border-emerald-200 flex items-center justify-between gap-2">
+                <div>
+                  <span className="text-[10px] font-bold uppercase text-slate-400 block">Dynamic PayID (Osko)</span>
+                  <span className="font-mono font-bold text-[#0b2942] break-all">{zeptoInstruction.payIdEmail}</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => handleCopyText('payid', zeptoInstruction.payIdEmail)}
+                  className="p-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 cursor-pointer shrink-0"
+                  title="Copy PayID"
+                >
+                  {copiedField === 'payid' ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+                </button>
+              </div>
+
+              <div className="p-3.5 rounded-xl bg-white border border-emerald-200 flex items-center justify-between gap-2">
+                <div>
+                  <span className="text-[10px] font-bold uppercase text-slate-400 block">Zepto Virtual BSB</span>
+                  <span className="font-mono font-bold text-sm text-[#0b2942]">{zeptoInstruction.virtualBsb}</span>
+                  <span className="block text-[10px] text-slate-400">{zeptoInstruction.accountName}</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => handleCopyText('bsb', zeptoInstruction.virtualBsb)}
+                  className="p-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 cursor-pointer shrink-0"
+                  title="Copy BSB"
+                >
+                  {copiedField === 'bsb' ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+                </button>
+              </div>
+
+              <div className="p-3.5 rounded-xl bg-white border border-emerald-200 flex items-center justify-between gap-2">
+                <div>
+                  <span className="text-[10px] font-bold uppercase text-slate-400 block">Unique Virtual Account #</span>
+                  <span className="font-mono font-bold text-sm text-[#0b2942]">{zeptoInstruction.virtualAccountNumber}</span>
+                  <span className="block text-[10px] text-emerald-700 font-semibold">Dedicated to this order</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => handleCopyText('acct', zeptoInstruction.virtualAccountNumber)}
+                  className="p-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 cursor-pointer shrink-0"
+                  title="Copy Account Number"
+                >
+                  {copiedField === 'acct' ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+                </button>
+              </div>
+            </div>
+
+            {/* Optional Customer Bank Receipt / Remittance Input */}
+            <div className="pt-1">
+              <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                Optional: Your Bank Receipt Number (if already transferred via netbanking)
+              </label>
+              <input
+                type="text"
+                value={bankReceiptInput}
+                onChange={(e) => setBankReceiptInput(e.target.value)}
+                placeholder={`e.g. OSKO-991824 or leave blank to use ${zeptoInstruction.referenceCode}`}
+                className="w-full px-3.5 py-2 rounded-xl border border-emerald-200 bg-white text-xs font-mono"
+              />
+            </div>
+
+            {remittanceNoticeMessage && (
+              <div className="p-3.5 rounded-xl bg-amber-50 border border-amber-300 text-amber-950 text-xs font-bold flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-amber-600 shrink-0" />
+                <span>{remittanceNoticeMessage}</span>
+              </div>
+            )}
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+              <button
+                type="button"
+                disabled={isProcessing}
+                onClick={() => handleZeptoEftSubmit('instant_npp_webhook')}
+                className="py-3.5 px-4 bg-emerald-600 hover:bg-emerald-700 text-white rounded-2xl font-extrabold text-xs shadow-sm transition-all cursor-pointer flex items-center justify-center gap-2"
+              >
+                {isProcessing ? (
+                  <RefreshCw className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Zap className="w-4 h-4 text-amber-300" />
+                )}
+                <span>Confirm Instant PayID / NPP Transfer (${amount} AUD)</span>
+              </button>
+
+              <button
+                type="button"
+                disabled={isProcessing}
+                onClick={() => handleZeptoEftSubmit('remittance_submitted')}
+                className="py-3.5 px-4 bg-white hover:bg-emerald-100/60 text-[#0b2942] border border-emerald-300 rounded-2xl font-extrabold text-xs transition-all cursor-pointer flex items-center justify-center gap-2"
+              >
+                <span>Lodge EFT Remittance (Pending Bank Clearance)</span>
+              </button>
+            </div>
           </div>
         </div>
       )}

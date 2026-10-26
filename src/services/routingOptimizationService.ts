@@ -148,15 +148,10 @@ export const DEPOT_COORDINATES: Record<MetroHub, { lat: number; lng: number; add
     lng: 151.2093,
     address: 'Portabox Sydney Metro Hub, 88 Industrial Way, Eastern Creek NSW 2766',
   },
-  'Brisbane/Gold Coast': {
+  Brisbane: {
     lat: -27.4698,
     lng: 153.0251,
-    address: 'Portabox Brisbane South Depot, 24 Freight Street, Acacia Ridge QLD 4110',
-  },
-  'Sunshine Coast': {
-    lat: -26.6500,
-    lng: 153.0667,
-    address: 'Portabox Sunshine Coast Hub, 15 Depots Way, Kunda Park QLD 4556',
+    address: 'Portabox Brisbane Depot, 9 Citywest Court, Gilberton QLD 4208',
   },
 };
 
@@ -602,7 +597,9 @@ export function suggestEfficientSlotForAddress(
   customerAddress: string,
   customerPostcode: string,
   targetLat: number = -34.925,
-  targetLng: number = 138.615
+  targetLng: number = 138.615,
+  customDiscountPercent: number = 20,
+  incentiveMode: 'dollar_discount' | 'emissions_only' = 'dollar_discount'
 ): SlotEfficiencyRecommendation {
   const currentStops = loadScheduledDeliveries();
 
@@ -637,8 +634,10 @@ export function suggestEfficientSlotForAddress(
       (timeSavedMins / 60) * DRIVER_HOURLY_RATE
   );
 
-  // 20% of efficiency savings as customer incentive
-  const customerDiscount = Math.max(25, Math.round(grossSavings * 0.2));
+  // Efficiency savings passed as customer incentive based on admin config
+  const customerDiscount = incentiveMode === 'emissions_only'
+    ? 0
+    : Math.max(15, Math.round(grossSavings * (customDiscountPercent / 100)));
 
   const rationale = closestStop
     ? `Truck #01 with trailer is already delivering ${closestDist} km away at ${closestStop.address}, ${closestStop.suburb} during the ${recommendedSlotLabel} window. Booking this slot eliminates ${deadheadSavedKm} km of deadhead transit, cuts driver travel time by ${timeSavedMins} mins, and saves $${grossSavings} in fleet fuel & wear.`

@@ -197,67 +197,190 @@ fix(
   }
 );
 
-/* -- 7. the back button's destination -------------------------------------
-   V3 added its own back button and cancel-quote modal, which is better than
-   what was here before — but it sends people to https://portabox.com.au,
-   which does not resolve. The client's domain is portabox.au, and while the
-   rebuild is in review the arrow should land there instead. Configurable so
-   Vercel can change it without a commit. */
-const SITE_FALLBACK = 'https://portabox-website.vercel.app/';
+/* -- 7. getting back out of the quote ------------------------------------
+   The CRM drop dropped the cancel-quote modal and, with it, every way back
+   to the website from the first screen: its header renders the back button
+   only when currentStep > 1, and handleBack does nothing at step 1. Someone
+   who clicks "Instant Quote" on the site and changes their mind is stuck
+   with the browser chrome.
+
+   Restored as a plain exit. History first, so arriving from a link returns
+   people to the page they actually came from; the configured site URL is
+   the fallback for a typed URL or a new tab. */
+const SITE_FALLBACK = 'https://portabox-website-ten.vercel.app/';
 
 fix(
-  'cancel modal: configurable site URL (shipped pointing at a dead domain)',
-  'src/components/CancelQuoteModal.tsx',
-  (s) => s.includes('VITE_SITE_URL'),
-  (s) => s.replace(
-    /websiteUrl = 'https:\/\/portabox\.com\.au',/,
-    `websiteUrl = (import.meta.env.VITE_SITE_URL as string) || '${SITE_FALLBACK}',`
-  )
-);
-
-fix(
-  'App: pass the same site URL to the cancel modal',
+  'App: step 1 back leaves the quote and returns to the site',
   'src/App.tsx',
-  (s) => !s.includes('websiteUrl="https://portabox.com.au"'),
+  (s) => s.includes('VITE_SITE_URL') && /leaveToSite/.test(s),
   (s) => s.replace(
-    /websiteUrl="https:\/\/portabox\.com\.au"/,
-    `websiteUrl={(import.meta.env.VITE_SITE_URL as string) || '${SITE_FALLBACK}'}`
+    /const handleBack = \(\) => \{\s*\n(\s*)if \(currentStep === 4 && isMyPlaceStorage\) \{\s*\n\s*setCurrentStep\(2\);\s*\n\s*\} else if \(currentStep > 1\) \{\s*\n\s*setCurrentStep\(\(prev\) => prev - 1\);\s*\n\s*\}\s*\n\s*\};/,
+    (m, ind) =>
+      `${ind}/* Where the arrow goes once there is no previous step: back through\n` +
+      `${ind}   history if this tab has any, so a visitor who followed the CTA\n` +
+      `${ind}   lands on the page they left, and the configured site otherwise. */\n` +
+      `${ind}const leaveToSite = () => {\n` +
+      `${ind}  const site = (import.meta.env.VITE_SITE_URL as string) || '${SITE_FALLBACK}';\n` +
+      `${ind}  if (window.history.length > 1) window.history.back();\n` +
+      `${ind}  else window.location.href = site;\n` +
+      `${ind}};\n\n` +
+      `${ind.slice(2)}const handleBack = () => {\n` +
+      `${ind}if (currentStep === 4 && isMyPlaceStorage) {\n` +
+      `${ind}  setCurrentStep(2);\n` +
+      `${ind}} else if (currentStep > 1) {\n` +
+      `${ind}  setCurrentStep((prev) => prev - 1);\n` +
+      `${ind}} else {\n` +
+      `${ind}  leaveToSite();\n` +
+      `${ind}}\n` +
+      `${ind.slice(2)}};`
   )
 );
 
-/* -- 8. the staff button -------------------------------------------------
-   Ships as a 32px icon-only circle in slate-400, desktop only, with no label
-   — easy to miss, and invisible to staff on a phone or tablet. It is the only
-   way into the admin, dispatch and customer views, so it is given the same
-   pill treatment as the Back button opposite it, a "Staff" label from sm up,
-   and presence at every width.
-
-   Widening it pushed the logo off centre, because the header used
-   space-between with fixed-width sides: the logo drifts by half the
-   difference between them. A three-column grid with 1fr either side holds it
-   centred whatever the buttons do. */
+/* -- 8. showing that exit ------------------------------------------------
+   The button itself is gated on currentStep > 1, so restoring the behaviour
+   above is invisible without this. Shown at every step, with the label
+   changing to say which of the two things it will do. */
 fix(
-  'header: make the staff button visible, and keep the logo centred',
+  'header: show the back button on step 1 as well',
   'src/components/Header.tsx',
-  (s) => s.includes('grid-cols-[1fr_auto_1fr]') && !s.includes('hidden lg:flex w-8 h-8'),
+  (s) => s.includes("currentStep > 1 ? 'Previous step' : 'Back to the Portabox website'"),
+  (s) => s.replace(
+    /\{currentStep > 1 && !isAdminOpen && !isCallCenterOpen \? \(\s*\n(\s*)<button\s*\n\s*onClick=\{onBack\}\s*\n\s*aria-label="Previous step"/,
+    (m, ind) =>
+      `{!isAdminOpen && !isCallCenterOpen ? (\n` +
+      `${ind}<button\n` +
+      `${ind}  onClick={onBack}\n` +
+      `${ind}  aria-label={currentStep > 1 ? 'Previous step' : 'Back to the Portabox website'}`
+  )
+);
+
+/* -- 9. CoverageAreaMapModal.tsx ------------------------------------------
+   New in the CRM drop: a third copy of the same billable Maps key, again as
+   a hardcoded fallback. Same treatment as the routing service — without a
+   key the coverage map does not render, which is an admin feature failing
+   honestly rather than someone else's card being charged. */
+fix(
+  'coverage map: read the Maps key from the environment only',
+  'src/components/CoverageAreaMapModal.tsx',
+  (s) => !/AIza[A-Za-z0-9_-]{20,}/.test(s),
+  (s) => s.replace(
+    /const GOOGLE_MAPS_API_KEY =\s*\(import\.meta\.env\.VITE_GOOGLE_MAPS_API_KEY as string\) \|\|\s*'AIza[A-Za-z0-9_-]+';/,
+    `const GOOGLE_MAPS_API_KEY =\n` +
+    `  (import.meta.env.VITE_GOOGLE_MAPS_API_KEY as string) || '';`
+  )
+);
+
+/* -- 10. firebaseService.ts -----------------------------------------------
+   New in the CRM drop, and the dangerous shape: a literal config holding a
+   live key, passed to initializeApp at module scope. An absent or revoked
+   key throws auth/invalid-api-key before React mounts, so the page comes up
+   blank and reads as a broken build rather than a missing setting. That is
+   exactly how this presented the last time.
+
+   The config moves to the environment and initialisation becomes
+   conditional. db and auth are null when it is unset, so the Firestore-backed
+   admin features fail where they are used instead. The customer quote flow
+   never imports this module — Step1 to Step6 do not touch Firebase — so an
+   unconfigured deployment still takes quotes. */
+fix(
+  'firebase service: config from the environment, and never throw at import',
+  'src/services/firebaseService.ts',
+  (s) => !/AIza[A-Za-z0-9_-]{20,}/.test(s) && /hasFirebaseConfig/.test(s),
+  (s) => s.replace(
+    /const firebaseConfig = \{[\s\S]*?\};\s*\n+const app = !getApps\(\)\.length \? initializeApp\(firebaseConfig\) : getApps\(\)\[0\];\s*\nexport const db = getFirestore\(app\);\s*\nexport const auth = getAuth\(app\);/,
+    `/**\n` +
+    ` * Shipped with the original developer's own Firebase project hardcoded,\n` +
+    ` * key and all. Two problems: the credentials are not Portabox's, and\n` +
+    ` * initializeApp throws at module scope the moment the key is absent or\n` +
+    ` * revoked — before React mounts, so the whole app renders blank.\n` +
+    ` *\n` +
+    ` * Read from the environment, and only initialise when it is actually\n` +
+    ` * configured. The quote flow does not import this module, so an\n` +
+    ` * unconfigured deployment still takes quotes; the admin features are the\n` +
+    ` * ones that degrade, and they do it at the point of use.\n` +
+    ` */\n` +
+    `/* Read through both runtimes. This module is imported by the Vite client\n` +
+    `   bundle and by the Node server alike — smsService pulls it in, and\n` +
+    `   server.ts pulls in smsService — but import.meta.env exists only in the\n` +
+    `   former. Reaching for it directly under Node throws at import, which\n` +
+    `   takes the whole dev server down before it binds a port. */\n` +
+    `const viteEnv =\n` +
+    `  (import.meta as unknown as { env?: Record<string, string | undefined> }).env ?? {};\n` +
+    `const nodeEnv = typeof process !== 'undefined' ? process.env ?? {} : {};\n` +
+    `const envVar = (k: string) => viteEnv[k] ?? nodeEnv[k] ?? '';\n\n` +
+    `const firebaseConfig = {\n` +
+    `  apiKey: envVar('VITE_FIREBASE_API_KEY'),\n` +
+    `  authDomain: envVar('VITE_FIREBASE_AUTH_DOMAIN'),\n` +
+    `  projectId: envVar('VITE_FIREBASE_PROJECT_ID'),\n` +
+    `  storageBucket: envVar('VITE_FIREBASE_STORAGE_BUCKET'),\n` +
+    `  messagingSenderId: envVar('VITE_FIREBASE_MESSAGING_SENDER_ID'),\n` +
+    `  appId: envVar('VITE_FIREBASE_APP_ID'),\n` +
+    `};\n\n` +
+    `export const hasFirebaseConfig = Boolean(\n` +
+    `  firebaseConfig.apiKey && firebaseConfig.projectId\n` +
+    `);\n\n` +
+    `const app = hasFirebaseConfig\n` +
+    `  ? (!getApps().length ? initializeApp(firebaseConfig) : getApps()[0])\n` +
+    `  : null;\n\n` +
+    `/* Asserted rather than typed as nullable on purpose. Around sixty call\n` +
+    `   sites across seven admin services take db and auth as given, and they\n` +
+    `   are upstream's files — widening the type here would mean editing every\n` +
+    `   one of them and re-doing it on each drop. The runtime behaviour is the\n` +
+    `   same either way: unconfigured, a call throws where it is made, so the\n` +
+    `   admin feature fails and the quote flow, which never imports this, does\n` +
+    `   not. Guard with hasFirebaseConfig before reaching for either. */\n` +
+    `export const db = (app ? getFirestore(app) : null) as Firestore;\n` +
+    `export const auth = (app ? getAuth(app) : null) as Auth;`
+  ).replace(
+    /^import \{ getFirestore \} from 'firebase\/firestore';$/m,
+    `import { getFirestore, type Firestore } from 'firebase/firestore';`
+  ).replace(
+    /^import \{ getAuth, signInWithPopup, GoogleAuthProvider, User \} from 'firebase\/auth';$/m,
+    `import { getAuth, signInWithPopup, GoogleAuthProvider, type Auth, User } from 'firebase/auth';`
+  )
+);
+
+/* -- 11. the admin door ---------------------------------------------------
+   The portal opens on a boolean. isAdminOpen is plain React state, the
+   button toggles it, and App.tsx never once consults getAdminAuthSession —
+   so the tariff matrix, the ledger and Export Financials CSV are one click
+   from the customer quote page.
+
+   The drop does carry auth machinery, but it does not hold: the password box
+   is pre-filled with bullets and never compared, the submit handler only
+   checks the email is non-empty, the 2FA code is generated in the browser
+   and typed into the field for you, and verifyTwoFactorCode returns true for
+   123456, 849201 or 000000 from anyone. Wiring that up would have looked
+   like a fix while admitting every visitor.
+
+   So AdminPortal is wrapped instead, in a gate that asks a server function.
+   Wrapped rather than edited: AdminPortal.tsx is seven thousand lines and
+   the most-churned file upstream ships, and an anchor in it would not
+   survive the next drop. */
+fix(
+  'App: put the staff gate in front of the admin portal',
+  'src/App.tsx',
+  (s) => s.includes('<AdminGate'),
   (s) => {
+    /* The drop arrives with CRLF, so match the break rather than assume it. */
+    const open = /(\) : isAdminOpen \? \(\r?\n)(\s*)(<main className="flex-1 w-full flex flex-col p-0 m-0 overflow-hidden">)/;
+    const close = /(<\/main>\r?\n)(\s*)(\) : \(\r?\n\s*\/\* Normal User Quote Flow)/;
+    if (!open.test(s) || !close.test(s)) {
+      throw new Error('the isAdminOpen branch moved');
+    }
     let out = s.replace(
-      'className="hidden lg:flex w-8 h-8 rounded-full border border-slate-200/90 bg-white hover:bg-slate-100 text-slate-400 hover:text-slate-700 items-center justify-center transition-colors cursor-pointer shadow-2xs"\n            >\n              <Lock className="w-3.5 h-3.5" />',
-      'className="inline-flex items-center gap-1 sm:gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-full bg-white shadow-xs border border-slate-200 text-slate-700 hover:text-slate-950 hover:border-slate-300 transition-all cursor-pointer active:scale-95 text-xs sm:text-sm font-bold"\n            >\n              <Lock className="w-4 h-4 sm:w-4.5 sm:h-4.5 stroke-[2.5]" />\n              <span className="hidden sm:inline">Staff</span>'
+      open,
+      (m, head, ind, main) =>
+        `${head}${ind}<AdminGate onCancel={() => setIsAdminOpen(false)}>\n${ind}${main}`
     );
     out = out.replace(
-      /(max-w-6xl mx-auto py-2 sm:py-3\.5 px-3 sm:px-8 )flex items-center justify-between/,
-      '$1grid grid-cols-[1fr_auto_1fr] items-center gap-2'
+      close,
+      (m, end, ind, tail) => `${end}${ind}</AdminGate>\n${ind}${tail}`
     );
-    out = out.replace(
-      '<div className="w-16 sm:w-32 flex items-center">',
-      '<div className="flex items-center justify-start">'
+    return out.replace(
+      /^(import \{ Header \} from '\.\/components\/Header';)$/m,
+      `$1\nimport { AdminGate } from './components/AdminGate';`
     );
-    out = out.replace(
-      '<div className="w-16 sm:w-32 flex items-center justify-end gap-2">',
-      '<div className="flex items-center justify-end gap-1.5 sm:gap-2">'
-    );
-    return out;
   }
 );
 

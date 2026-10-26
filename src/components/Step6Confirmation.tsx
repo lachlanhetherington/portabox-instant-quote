@@ -17,9 +17,15 @@ export const Step6Confirmation: React.FC<Step6ConfirmationProps> = ({
   const [activePreviewTab, setActivePreviewTab] = useState<'sms' | 'email'>('sms');
   const quote = lead.quote;
 
-  // Calculate expiry date (14 days from now)
-  const expiryDate = new Date();
-  expiryDate.setDate(expiryDate.getDate() + 14);
+  // Calculate expiry date (30 days guaranteed price lock)
+  const validityDays = quote.quoteValidityDays || 30;
+  const expiryDate = quote.quoteExpiresAt
+    ? new Date(quote.quoteExpiresAt)
+    : (() => {
+        const d = new Date();
+        d.setDate(d.getDate() + validityDays);
+        return d;
+      })();
   const formattedExpiry = expiryDate.toLocaleDateString('en-AU', {
     day: 'numeric',
     month: 'long',
@@ -30,20 +36,20 @@ export const Step6Confirmation: React.FC<Step6ConfirmationProps> = ({
   return (
     <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
       {/* Left Column: Confirmation Banner & Action Buttons */}
-      <div className="lg:col-span-7 bg-white rounded-3xl p-6 sm:p-10 shadow-xs border border-slate-200/80 text-center sm:text-left">
-        {/* Animated Checkmark Circle */}
-        <div className="w-16 h-16 rounded-full bg-[#00c0f3] text-white flex items-center justify-center mx-auto sm:mx-0 shadow-lg shadow-sky-200 animate-in zoom-in-75 duration-300">
+      <div className="lg:col-span-7 bg-white rounded-3xl p-6 sm:p-10 shadow-xs border-2 border-[#DAD7D1] text-center sm:text-left">
+        {/* Animated Checkmark Circle: #5CC1EF with #15385E check */}
+        <div className="w-16 h-16 rounded-full bg-[#5CC1EF] text-[#15385E] flex items-center justify-center mx-auto sm:mx-0 shadow-lg shadow-sky-200 animate-in zoom-in-75 duration-300">
           <Check className="w-9 h-9 stroke-[3]" />
         </div>
 
-        <h1 className="text-2xl sm:text-4xl font-extrabold text-[#0b2942] tracking-tight mt-6">
+        <h1 className="text-2xl sm:text-4xl font-black text-[#15385E] tracking-tight mt-6">
           Sent. Check your phone, {lead.firstName}.
         </h1>
 
         <p className="text-sm sm:text-base text-slate-600 mt-3 leading-relaxed">
-          Your quote for a <span className="font-bold text-[#0b2942]">{quote.containerName}</span> at{' '}
-          <span className="font-bold text-[#0b2942]">{quote.originPostcode.suburb}</span> is on its way to{' '}
-          <span className="font-bold font-mono text-[#0b2942]">{lead.mobile}</span> and your inbox{' '}
+          Your quote for a <span className="font-bold text-[#15385E]">{quote.containerName}</span> at{' '}
+          <span className="font-bold text-[#15385E]">{quote.originPostcode.suburb}</span> is on its way to{' '}
+          <span className="font-bold font-mono text-[#15385E]">{lead.mobile}</span> and your inbox{' '}
           <span className="font-semibold text-slate-800">({lead.email})</span>.
         </p>
 
@@ -51,19 +57,19 @@ export const Step6Confirmation: React.FC<Step6ConfirmationProps> = ({
           ✓ This price is locked and held until {formattedExpiry}.
         </p>
 
-        {/* CTA Buttons */}
+        {/* CTA Buttons: #F7D347 Vibrant Gold / Yellow with #1A1A1A text */}
         <div className="mt-8 flex flex-col sm:flex-row items-center gap-3">
           <a
             href={`tel:${phone.replace(/\s+/g, '')}`}
-            className="w-full sm:w-auto px-6 py-3.5 bg-[#0b2942] hover:bg-[#081e30] text-white font-bold rounded-2xl flex items-center justify-center gap-2 transition-all cursor-pointer shadow-xs active:scale-98"
+            className="w-full sm:w-auto px-6 py-3.5 bg-[#F7D347] hover:bg-[#eed235] text-[#1A1A1A] font-black rounded-2xl border-2 border-[#e6c338] flex items-center justify-center gap-2 transition-all cursor-pointer shadow-sm hover:shadow-md active:scale-98"
           >
-            <Phone className="w-4 h-4 fill-white" />
+            <Phone className="w-4 h-4 fill-[#1A1A1A]" />
             <span>Book it now on {phone}</span>
           </a>
 
           <button
             onClick={onQuoteAnotherSize}
-            className="w-full sm:w-auto px-6 py-3.5 bg-white hover:bg-slate-50 border border-slate-300 text-slate-700 font-bold rounded-2xl flex items-center justify-center gap-2 transition-all cursor-pointer shadow-xs"
+            className="w-full sm:w-auto px-6 py-3.5 bg-white hover:bg-slate-50 border border-[#DAD7D1] text-[#15385E] font-bold rounded-2xl flex items-center justify-center gap-2 transition-all cursor-pointer shadow-2xs"
           >
             <span>Quote another size</span>
           </button>
@@ -71,11 +77,11 @@ export const Step6Confirmation: React.FC<Step6ConfirmationProps> = ({
 
         {/* Got a question box */}
         <div className="mt-8 p-4 bg-sky-50/70 rounded-2xl border border-sky-100 flex items-start gap-3">
-          <div className="p-2 rounded-xl bg-white text-[#00c0f3] shadow-xs mt-0.5">
-            <MessageSquare className="w-4 h-4" />
+          <div className="p-2 rounded-xl bg-white text-[#5CC1EF] shadow-xs mt-0.5">
+            <MessageSquare className="w-4 h-4 text-[#15385E]" />
           </div>
           <div className="text-xs">
-            <p className="font-bold text-[#0b2942]">Got a question about access, dates or the driveway?</p>
+            <p className="font-bold text-[#15385E]">Got a question about access, dates or the driveway?</p>
             <p className="text-slate-600 mt-0.5 leading-relaxed">
               Reply directly to the text and the {cityTeam} team will answer.
             </p>

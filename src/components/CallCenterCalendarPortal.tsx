@@ -29,6 +29,7 @@ import {
   Send,
   MessageSquare,
   Check,
+  FileSpreadsheet,
 } from 'lucide-react';
 import {
   RouteStop,
@@ -48,10 +49,16 @@ import {
   GOOGLE_MAPS_API_KEY,
 } from '../services/routingOptimizationService';
 import { MetroHub, DeliverySlotWindow } from '../types/quote';
+import { loadAppConfig, saveAppConfig, loadCustomerLeads } from '../services/pricingEngine';
+import { updateSmartsheetBookingRowTwoWay } from '../services/smartsheetService';
+import { SmartsheetWorkspace } from './SmartsheetWorkspace';
+import { AdminPhoneIntakeDrawer } from './admin/AdminPhoneIntakeDrawer';
+import { AdminCopilotChat } from './admin/AdminCopilotChat';
 
 interface CallCenterCalendarPortalProps {
   onClose: () => void;
   onApplyCustomerIncentive?: (slot: string, discount: number) => void;
+  onOpenCustomerPortal?: () => void;
 }
 
 const TIME_SLOTS = [
@@ -65,17 +72,25 @@ const DEPOTS_LIST: MetroHub[] = [
   'Adelaide',
   'Melbourne',
   'Sydney',
-  'Brisbane/Gold Coast',
-  'Sunshine Coast',
+  'Brisbane',
 ];
 
 export const CallCenterCalendarPortal: React.FC<CallCenterCalendarPortalProps> = ({
   onClose,
   onApplyCustomerIncentive,
+  onOpenCustomerPortal,
 }) => {
   const [selectedDepot, setSelectedDepot] = useState<MetroHub>('Adelaide');
-  const [activeTab, setActiveTab] = useState<'calendar' | 'smart_48h' | 'optimizer' | 'driver_sheet' | 'smart_booking'>('calendar');
+  const [activeTab, setActiveTab] = useState<'calendar' | 'smartsheet' | 'smart_48h' | 'optimizer' | 'driver_sheet' | 'smart_booking'>('calendar');
   const [scheduledDeliveries, setScheduledDeliveries] = useState<RouteStop[]>(loadScheduledDeliveries());
+
+  React.useEffect(() => {
+    const handleSync = () => {
+      setScheduledDeliveries(loadScheduledDeliveries());
+    };
+    window.addEventListener('portabox-smartsheet-sync', handleSync);
+    return () => window.removeEventListener('portabox-smartsheet-sync', handleSync);
+  }, []);
   const [hasTrailerAttached, setHasTrailerAttached] = useState<boolean>(true);
   const [enableChaining, setEnableChaining] = useState<boolean>(true);
   const [optimizationMode, setOptimizationMode] = useState<'day' | 'week'>('day');
@@ -98,12 +113,16 @@ export const CallCenterCalendarPortal: React.FC<CallCenterCalendarPortalProps> =
   // Move Slot State
   const [movingStopId, setMovingStopId] = useState<string | null>(null);
 
+  const appConfig = useMemo(() => loadAppConfig(), []);
+  const effPct = appConfig.efficiencyDiscountPercentage ?? 20;
+  const ecoIncentiveType = appConfig.ecoIncentiveType || 'dollar_discount';
+
   // Call Center Smart Booking Assistant State
   const [lookupAddress, setLookupAddress] = useState<string>('42 Osmond Terrace, Norwood SA 5067');
   const [lookupPostcode, setLookupPostcode] = useState<string>('5067');
   const [lookupContainerSize, setLookupContainerSize] = useState<string>('25 m³');
   const [smartRecommendation, setSmartRecommendation] = useState<SlotEfficiencyRecommendation | null>(
-    () => suggestEfficientSlotForAddress('42 Osmond Terrace, Norwood SA 5067', '5067')
+    () => suggestEfficientSlotForAddress('42 Osmond Terrace, Norwood SA 5067', '5067', -34.925, 138.615, effPct, ecoIncentiveType)
   );
 
   // 48-Hour Smart Routing Optimizer Modal & Drawer State
@@ -113,6 +132,11 @@ export const CallCenterCalendarPortal: React.FC<CallCenterCalendarPortalProps> =
 
   // Feedback Notification Toast
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  // Call Center Phone Booking Intake & AI Copilot Chatbot
+  const [isPhoneIntakeOpen, setIsPhoneIntakeOpen] = useState<boolean>(false);
+  const [phoneIntakeInitialNoPhoneOrEmail, setPhoneIntakeInitialNoPhoneOrEmail] = useState<boolean>(true);
+  const [isCopilotOpen, setIsCopilotOpen] = useState<boolean>(false);
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
@@ -136,15 +160,36 @@ export const CallCenterCalendarPortal: React.FC<CallCenterCalendarPortalProps> =
   }, [scheduledDeliveries, selectedDepot]);
 
   const handleApplySingleSuggestion = (suggestionId: string) => {
+    const sugg = smart48Summary.suggestions.find((s) => s.id === suggestionId);
     const updated = apply48HourSuggestion(scheduledDeliveries, suggestionId);
     setScheduledDeliveries(updated);
-    showToast('✓ 48-Hour Smart routing change applied! Calendar and truck routes updated.');
+    if (sugg) {
+      updateSmartsheetBookingRowTwoWay(
+        sugg.orderNumber,
+        {
+          deliveryWindow: sugg.suggestedSlot,
+          scheduledDeliveryDate: sugg.suggestedDay,
+        },
+        `Call Center applied 48h Smart Route optimization for #${sugg.orderNumber}: moved to ${sugg.suggestedDay} (${sugg.suggestedSlot}). Synced to Smartsheet & Customer Portal.`
+      );
+    }
+    showToast('✓ 48-Hour Smart routing change applied! Calendar, Smartsheet & Customer Portal updated.');
   };
 
   const handleApplyAll48HourSuggestions = () => {
     const updated = applyAll48HourSuggestions(scheduledDeliveries, smart48Summary.suggestions);
     setScheduledDeliveries(updated);
-    showToast(`✓ All ${smart48Summary.suggestions.length} 48-hour routing optimizations applied! Saved ${smart48Summary.totalKmSaved} km and $${smart48Summary.totalFuelWearSavedAud} AUD.`);
+    smart48Summary.suggestions.forEach((sugg) => {
+      updateSmartsheetBookingRowTwoWay(
+        sugg.orderNumber,
+        {
+          deliveryWindow: sugg.suggestedSlot,
+          scheduledDeliveryDate: sugg.suggestedDay,
+        },
+        `Call Center batch-applied 48h Smart Route optimization for #${sugg.orderNumber} (${sugg.suggestedSlot}).`
+      );
+    });
+    showToast(`✓ All ${smart48Summary.suggestions.length} 48-hour routing optimizations applied & synced to Smartsheet and Customer Portal!`);
     setShow48HourOptimizer(false);
   };
 
@@ -159,7 +204,7 @@ export const CallCenterCalendarPortal: React.FC<CallCenterCalendarPortalProps> =
   // Handle Smart Booking lookup
   const handleRunLookup = (e: React.FormEvent) => {
     e.preventDefault();
-    const rec = suggestEfficientSlotForAddress(lookupAddress, lookupPostcode);
+    const rec = suggestEfficientSlotForAddress(lookupAddress, lookupPostcode, -34.925, 138.615, effPct, ecoIncentiveType);
     setSmartRecommendation(rec);
     showToast(`Calculated optimal route slot: ${rec.recommendedSlotLabel} (Saves $${rec.grossLogisticsSavingsAud} in logistics)`);
   };
@@ -192,7 +237,7 @@ export const CallCenterCalendarPortal: React.FC<CallCenterCalendarPortalProps> =
     if (onApplyCustomerIncentive) {
       onApplyCustomerIncentive(smartRecommendation.recommendedSlotId, smartRecommendation.customerDiscountAud);
     }
-    showToast(`✓ Order booked into ${smartRecommendation.recommendedSlotLabel}! Customer awarded $${smartRecommendation.customerDiscountAud} (20% efficiency incentive).`);
+    showToast(`✓ Order booked into ${smartRecommendation.recommendedSlotLabel}! Customer awarded ${ecoIncentiveType === 'dollar_discount' ? `$${smartRecommendation.customerDiscountAud} (${effPct}% efficiency incentive)` : 'Eco route emissions reduction'}.`);
     setActiveTab('calendar');
   };
 
@@ -235,22 +280,31 @@ export const CallCenterCalendarPortal: React.FC<CallCenterCalendarPortalProps> =
     showToast('Delivery removed from schedule.');
   };
 
-  // Move Delivery to Different Slot
+  // Move Delivery to Different Slot & sync two-way with Smartsheet & Customer Portal
   const handleMoveSlot = (stopId: string, newSlotVal: string) => {
+    let movedOrderNumber = '';
     const updated = scheduledDeliveries.map((s) => {
       if (s.id === stopId) {
+        movedOrderNumber = s.orderNumber;
         return { ...s, preferredSlot: newSlotVal };
       }
       return s;
     });
     setScheduledDeliveries(updated);
     saveScheduledDeliveries(updated);
+    if (movedOrderNumber) {
+      updateSmartsheetBookingRowTwoWay(
+        movedOrderNumber,
+        { deliveryWindow: newSlotVal },
+        `Call Center shifted Order #${movedOrderNumber} delivery window to ${newSlotVal} (Synced to Smartsheet & Customer Portal)`
+      );
+    }
     setMovingStopId(null);
-    showToast(`Delivery shifted to ${newSlotVal}`);
+    showToast(`Delivery shifted to ${newSlotVal} & synced to Smartsheet + Customer Portal`);
   };
 
   return (
-    <div className="bg-white rounded-3xl shadow-2xl border border-slate-200 overflow-hidden mb-12 animate-in fade-in duration-200">
+    <div className="bg-white w-full flex-1 flex flex-col min-h-screen overflow-hidden animate-in fade-in duration-200">
       {/* Top Banner & Header */}
       <div className="bg-[#0b2942] text-white p-6 sm:p-8">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
@@ -303,6 +357,45 @@ export const CallCenterCalendarPortal: React.FC<CallCenterCalendarPortalProps> =
                   {smart48Summary.suggestions.length}
                 </span>
               )}
+            </button>
+
+            {/* 15% Inbound Call Phone Intake (Fill Form, Email, SMS, or Portal Quote) */}
+            <button
+              type="button"
+              onClick={() => {
+                setPhoneIntakeInitialNoPhoneOrEmail(false);
+                setIsPhoneIntakeOpen(true);
+              }}
+              className="flex items-center gap-1.5 px-3.5 py-2 bg-gradient-to-r from-sky-500 to-[#00c0f3] hover:from-sky-600 hover:to-[#00a6d2] text-white rounded-xl text-xs font-black transition-all cursor-pointer shadow-md hover:shadow-lg active:scale-98"
+              title="15% Call-In Intake: Agent fills the form for caller on the phone and sends quote via Email, SMS, or Customer Portal"
+            >
+              <Phone className="w-4 h-4 text-white" />
+              <span>15% Call-In (Email/SMS/Portal)</span>
+            </button>
+
+            {/* Call Center Phone Booking (Credit Card Only - No Phone/Email option) */}
+            <button
+              type="button"
+              onClick={() => {
+                setPhoneIntakeInitialNoPhoneOrEmail(true);
+                setIsPhoneIntakeOpen(true);
+              }}
+              className="flex items-center gap-1.5 px-3.5 py-2 bg-[#F7D347] hover:bg-[#ebd034] text-slate-950 rounded-xl text-xs font-black transition-all cursor-pointer shadow-md hover:shadow-lg active:scale-98"
+              title="Make phone booking with credit card (option for callers without mobile phone or email, produce printable quote)"
+            >
+              <Phone className="w-4 h-4 text-slate-900" />
+              <span>Phone Booking (Credit Card)</span>
+            </button>
+
+            {/* AI Operations Copilot for Call Center */}
+            <button
+              type="button"
+              onClick={() => setIsCopilotOpen(!isCopilotOpen)}
+              className="flex items-center gap-1.5 px-3.5 py-2 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white rounded-xl text-xs font-black transition-all cursor-pointer shadow-md hover:shadow-lg active:scale-98"
+              title="Open Call Center AI Operations Copilot"
+            >
+              <Sparkles className="w-4 h-4 text-amber-300" />
+              <span>AI Copilot</span>
             </button>
 
             <button
@@ -379,6 +472,19 @@ export const CallCenterCalendarPortal: React.FC<CallCenterCalendarPortalProps> =
           >
             <CalendarIcon className="w-3.5 h-3.5 text-[#00c0f3]" />
             <span>Google Calendar Dispatch View ({scheduledDeliveries.length})</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveTab('smartsheet')}
+            className={`px-4 py-2 rounded-xl transition-all cursor-pointer flex items-center gap-2 whitespace-nowrap ${
+              activeTab === 'smartsheet'
+                ? 'bg-[#0b2942] text-white shadow-xs'
+                : 'bg-emerald-50 text-emerald-800 border border-emerald-200 hover:bg-emerald-100'
+            }`}
+          >
+            <FileSpreadsheet className="w-3.5 h-3.5 text-[#00c0f3]" />
+            <span>Two-Way Smartsheets (Bookings, Billing &amp; Portal)</span>
           </button>
 
           <button
@@ -940,7 +1046,7 @@ export const CallCenterCalendarPortal: React.FC<CallCenterCalendarPortalProps> =
                     <option value="10 m³">10 m³ (Studio / Room)</option>
                     <option value="19 m³">19 m³ (1-2 Bedroom)</option>
                     <option value="25 m³">25 m³ (3 Bedroom Standard)</option>
-                    <option value="35 m³">35 m³ Combo (4+ Bedroom)</option>
+                    <option value="50 m³">50 m³ (2× 25m³ Large Units)</option>
                   </select>
                 </div>
               </div>
@@ -979,12 +1085,25 @@ export const CallCenterCalendarPortal: React.FC<CallCenterCalendarPortalProps> =
 
                   <div className="text-left sm:text-right">
                     <span className="text-[10px] font-bold uppercase text-slate-500 block">Customer Incentive</span>
-                    <span className="text-3xl font-black text-emerald-700 font-mono">
-                      -${smartRecommendation.customerDiscountAud} AUD
-                    </span>
-                    <span className="text-[10px] font-bold text-emerald-800 block">
-                      (20% of ${smartRecommendation.grossLogisticsSavingsAud} Fleet Savings)
-                    </span>
+                    {ecoIncentiveType === 'dollar_discount' ? (
+                      <>
+                        <span className="text-3xl font-black text-emerald-700 font-mono">
+                          -${smartRecommendation.customerDiscountAud} AUD
+                        </span>
+                        <span className="text-[10px] font-bold text-emerald-800 block">
+                          ({effPct}% of ${smartRecommendation.grossLogisticsSavingsAud} Fleet Savings)
+                        </span>
+                      </>
+                    ) : (
+                      <>
+                        <span className="text-2xl font-black text-indigo-700 font-mono">
+                          🌱 -27.3 kg CO₂
+                        </span>
+                        <span className="text-[10px] font-bold text-indigo-800 block">
+                          (Emissions Recognition Mode)
+                        </span>
+                      </>
+                    )}
                   </div>
                 </div>
 
@@ -1005,7 +1124,9 @@ export const CallCenterCalendarPortal: React.FC<CallCenterCalendarPortalProps> =
 
                 <div className="flex items-center justify-between pt-2">
                   <span className="text-xs text-slate-600">
-                    Tell customer: <em>"Because we already have our truck in your area during this window, we can apply an instant ${smartRecommendation.customerDiscountAud} efficiency discount today."</em>
+                    Tell customer: <em>{ecoIncentiveType === 'dollar_discount'
+                      ? `"Because we already have our truck in your area during this window, we can apply an instant $${smartRecommendation.customerDiscountAud} efficiency discount today."`
+                      : `"Because we already have our level-lift truck in your area during this window, choosing this slot eliminates redundant driving and prevents ~27 kg of CO₂ emissions."`}</em>
                   </span>
 
                   <button
@@ -1274,6 +1395,16 @@ export const CallCenterCalendarPortal: React.FC<CallCenterCalendarPortalProps> =
             </div>
           </div>
         )}
+
+        {/* ================= TAB 5: TWO-WAY INTERMEDIARY SMARTSHEETS ================= */}
+        {activeTab === 'smartsheet' && (
+          <SmartsheetWorkspace
+            compactHeader
+            onOpenCustomerPortalForCustomer={() => {
+              if (onOpenCustomerPortal) onOpenCustomerPortal();
+            }}
+          />
+        )}
       </div>
 
       {/* ================= MODAL: ADD DELIVERY ================= */}
@@ -1366,7 +1497,7 @@ export const CallCenterCalendarPortal: React.FC<CallCenterCalendarPortalProps> =
                     <option value="10 m³">10 m³</option>
                     <option value="19 m³">19 m³</option>
                     <option value="25 m³">25 m³</option>
-                    <option value="35 m³">35 m³ Combo</option>
+                    <option value="50 m³">50 m³ (2x 25m³)</option>
                   </select>
                 </div>
 
@@ -1493,6 +1624,58 @@ export const CallCenterCalendarPortal: React.FC<CallCenterCalendarPortalProps> =
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Call Center Phone Intake Drawer (Supports Option for Callers without Mobile/Email with Credit Card & Quote Production) */}
+      <AdminPhoneIntakeDrawer
+        isOpen={isPhoneIntakeOpen}
+        onClose={() => setIsPhoneIntakeOpen(false)}
+        config={appConfig}
+        initialNoPhoneOrEmail={phoneIntakeInitialNoPhoneOrEmail}
+        onBookingCreated={(newRow) => {
+          const newStop: RouteStop = {
+            id: `stop-${Date.now()}`,
+            orderNumber: newRow.orderNumber,
+            customerName: newRow.customerName,
+            customerPhone: newRow.customerPhone,
+            address: newRow.deliveryAddress || `${newRow.suburb || 'Adelaide'} SA ${newRow.postcode || '5000'}`,
+            suburb: newRow.suburb || 'Adelaide',
+            postcode: newRow.postcode || '5000',
+            lat: -34.93 + (Math.random() - 0.5) * 0.05,
+            lng: 138.61 + (Math.random() - 0.5) * 0.05,
+            action: 'dropoff_full' as const,
+            containerId: newRow.containerId,
+            containerSize: newRow.containerSize,
+            preferredSlot: newRow.deliveryWindow?.includes('09:00')
+              ? '09:00 AM – 11:30 AM'
+              : newRow.deliveryWindow?.includes('11:30')
+              ? '11:30 AM – 02:00 PM'
+              : '02:00 PM – 04:30 PM',
+            serviceDurationMins: 30,
+            isTrailerSlot: hasTrailerAttached && scheduledDeliveries.length % 2 === 1,
+            notes: newRow.accessNotes,
+          };
+          const updated = [newStop, ...scheduledDeliveries];
+          setScheduledDeliveries(updated);
+          saveScheduledDeliveries(updated);
+          showToast(`✓ Phone Booking #${newRow.orderNumber} added to Call Center Calendar!`);
+        }}
+      />
+
+      {/* Call Center AI Operations Copilot */}
+      {isCopilotOpen && (
+        <div className="fixed inset-y-0 right-0 z-50 w-full max-w-md bg-white shadow-2xl border-l border-slate-200 animate-in slide-in-from-right duration-200 flex flex-col">
+          <AdminCopilotChat
+            config={appConfig}
+            leads={loadCustomerLeads()}
+            onSaveConfig={(newCfg) => {
+              saveAppConfig(newCfg);
+              showToast('✓ App configuration updated by Copilot.');
+            }}
+            isFloating={true}
+            onCloseFloating={() => setIsCopilotOpen(false)}
+          />
         </div>
       )}
     </div>

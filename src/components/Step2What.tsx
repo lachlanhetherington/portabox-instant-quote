@@ -22,7 +22,7 @@ import {
   searchPostcodes,
 } from '../data/australianPostcodes';
 import { AppConfig, BlockedPostcode, ServiceType } from '../types/quote';
-import { getMetroHubForPostcode, isPostcodeBlocked } from '../services/pricingEngine';
+import { getLocationPricingForHub, getMetroHubForPostcode, isPostcodeBlocked, calculateLegFuelSurcharge } from '../services/pricingEngine';
 
 import { AreYouStuckBanner } from './AreYouStuckBanner';
 
@@ -76,6 +76,8 @@ export const Step2What: React.FC<Step2WhatProps> = ({
       setDestQuery(`${destinationPostcode.postcode} ${destinationPostcode.suburb}`);
     }
   }, [destinationPostcode]);
+
+  const enableSunshineCoast = false;
 
   // Search logic for destination postcode/suburb
   useEffect(() => {
@@ -140,37 +142,54 @@ export const Step2What: React.FC<Step2WhatProps> = ({
     : null;
 
   // Origin and destination metro hubs
-  const originHub = getMetroHubForPostcode(originPostcode);
-  const destHub = destinationPostcode ? getMetroHubForPostcode(destinationPostcode) : null;
+  const originHub = getMetroHubForPostcode(originPostcode, enableSunshineCoast);
+  const originLocConfig = getLocationPricingForHub(config, originHub);
+  const destHub = destinationPostcode ? getMetroHubForPostcode(destinationPostcode, enableSunshineCoast) : null;
   const isInterstateMove = destHub ? originHub !== destHub : false;
   const interstateKey = destHub ? `${originHub}->${destHub}` : '';
   const interstatePrice = isInterstateMove && config.interstateRates[interstateKey] ? config.interstateRates[interstateKey] : null;
 
   // Zone determination based on road driving distance
-  const { zone1MaxKm, zone1RatePerKm, zone2MaxKm, zone2RatePerKm, zone3MaxKm, zone3RatePerKm } = config.deliveryZones;
+  const {
+    zoneAMaxKm = 25,
+    zoneARatePerKm = 0,
+    zoneBMaxKm = 50,
+    zoneBRatePerKm = 0,
+    zoneCMaxKm = 75,
+    zoneCRatePerKm = 0,
+    zoneDMaxKm = 100,
+    zoneDRatePerKm = 0,
+    zoneERatePerKm = 0,
+  } = originLocConfig.deliveryZones;
 
-  let movingZone = 1;
-  let movingRatePerKm = zone1RatePerKm;
+  let movingZone = 'A';
+  let movingRatePerKm = zoneARatePerKm;
   let movingKmRatePerContainer = 0;
-  let isZone4Call = false;
+  let isZoneECall = false;
 
   if (movingDistanceKm !== null) {
-    if (movingDistanceKm <= zone1MaxKm) {
-      movingZone = 1;
-      movingRatePerKm = zone1RatePerKm;
-      movingKmRatePerContainer = 0;
-    } else if (movingDistanceKm <= zone2MaxKm) {
-      movingZone = 2;
-      movingRatePerKm = zone2RatePerKm;
-      movingKmRatePerContainer = Math.round(movingDistanceKm * zone2RatePerKm);
-    } else if (movingDistanceKm <= zone3MaxKm) {
-      movingZone = 3;
-      movingRatePerKm = zone3RatePerKm;
-      movingKmRatePerContainer = Math.round(movingDistanceKm * zone3RatePerKm);
+    if (movingDistanceKm < zoneAMaxKm) {
+      movingZone = 'A';
+      movingRatePerKm = zoneARatePerKm;
+      movingKmRatePerContainer = Math.round(movingDistanceKm * zoneARatePerKm);
+    } else if (movingDistanceKm < zoneBMaxKm) {
+      movingZone = 'B';
+      movingRatePerKm = zoneBRatePerKm;
+      movingKmRatePerContainer = Math.round(movingDistanceKm * zoneBRatePerKm);
+    } else if (movingDistanceKm < zoneCMaxKm) {
+      movingZone = 'C';
+      movingRatePerKm = zoneCRatePerKm;
+      movingKmRatePerContainer = Math.round(movingDistanceKm * zoneCRatePerKm);
+    } else if (movingDistanceKm <= zoneDMaxKm) {
+      movingZone = 'D';
+      movingRatePerKm = zoneDRatePerKm;
+      movingKmRatePerContainer = Math.round(movingDistanceKm * zoneDRatePerKm);
     } else {
-      movingZone = 4;
+      movingZone = 'E';
+      movingRatePerKm = zoneERatePerKm;
+      movingKmRatePerContainer = Math.round(movingDistanceKm * zoneERatePerKm);
       if (!isInterstateMove) {
-        isZone4Call = true;
+        isZoneECall = true;
       }
     }
   }
@@ -179,10 +198,15 @@ export const Step2What: React.FC<Step2WhatProps> = ({
   const effectiveContainerCount = containerCount > 0 ? containerCount : 1;
   const movingKmChargeTotal = movingKmRatePerContainer * effectiveContainerCount;
 
-  // Fuel surcharge: $0.50/km travelled assessed per container
-  const fuelRatePerKm = config.fuelSurchargeRatePerKm || 0.50;
-  const fuelSurchargePerContainer = movingDistanceKm !== null ? Math.round(movingDistanceKm * fuelRatePerKm * 100) / 100 : 0;
-  const fuelSurchargeTotal = fuelSurchargePerContainer * effectiveContainerCount;
+  // Fuel surcharge: Zone-based fixed rate OR $0.50/km travelled
+  const legFuel = calculateLegFuelSurcharge({
+    zone: movingZone,
+    distanceKm: movingDistanceKm || 0,
+    containerCount: effectiveContainerCount,
+    config,
+  });
+  const fuelSurchargePerContainer = legFuel.ratePerContainer;
+  const fuelSurchargeTotal = legFuel.totalAmount;
 
   const handleContinueClick = () => {
     if (isMoving && !destinationPostcode) {
@@ -199,45 +223,44 @@ export const Step2What: React.FC<Step2WhatProps> = ({
   };
 
   return (
-    <div className="bg-white rounded-2xl sm:rounded-3xl p-3.5 sm:p-8 lg:p-10 shadow-xs border border-slate-200/80">
-      {/* Header kicker */}
-      <span className="text-[11px] sm:text-xs font-extrabold uppercase tracking-widest text-[#00c0f3] font-['Cabinet_Grotesk',sans-serif] flex items-center gap-1.5">
-        <span>—</span>
-        <span>INSTANT QUOTE</span>
+    <div className="bg-white rounded-2xl sm:rounded-3xl p-4 sm:p-8 lg:p-10 shadow-xs border-2 border-[#DAD7D1]">
+      {/* Header kicker: #F7D347 Vibrant Gold with #1A1A1A text */}
+      <span className="inline-flex items-center gap-1.5 text-xs font-black uppercase tracking-widest text-[#1A1A1A] bg-[#F7D347] border border-[#e6c338] px-2.5 py-0.5 rounded-md font-['Cabinet_Grotesk',sans-serif]">
+        INSTANT QUOTE
       </span>
 
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5 sm:gap-2 mt-0.5 sm:mt-1 mb-2 sm:mb-3">
-        <h1 className="text-xl sm:text-4xl font-extrabold text-[#0b2942] tracking-tight leading-tight">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mt-1 mb-3">
+        <h1 className="text-2xl sm:text-4xl font-black text-[#15385E] tracking-tight">
           What do you need?
         </h1>
 
         {/* Selected location pill */}
         <button
           onClick={onChangeLocation}
-          className="flex items-center gap-1.5 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-full transition-colors cursor-pointer self-start sm:self-auto"
+          className="flex items-center gap-1.5 text-xs font-bold text-[#15385E] bg-sky-50 hover:bg-sky-100 px-3.5 py-1.5 rounded-full transition-colors cursor-pointer self-start sm:self-auto border border-[#5CC1EF]/40"
         >
-          <span className="text-[#00c0f3] font-bold">✓</span>
+          <span className="text-[#15385E] font-black">✓</span>
           <span>{originPostcode.suburb}, {originPostcode.state} {originPostcode.postcode}</span>
-          <span className="text-[#00c0f3] ml-1 underline">Change</span>
+          <span className="text-[#15385E] ml-1 underline font-black">Change</span>
         </button>
       </div>
 
-      {/* 3 Main Choice Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5 sm:gap-5 mt-2.5 sm:mt-6">
+      {/* 2 Main Choice Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-6 max-w-4xl">
         {/* Card 1: Moving */}
         <div
           onClick={() => {
             onSelectServiceType('moving');
             setValidationError(null);
           }}
-          className={`group rounded-xl sm:rounded-2xl border-2 transition-all p-2.5 sm:p-4 flex flex-row md:flex-col items-center md:items-stretch justify-between gap-3 cursor-pointer ${
-            serviceType === 'moving'
-              ? 'border-[#00c0f3] bg-sky-50/20 shadow-xs sm:shadow-md ring-2 ring-[#00c0f3]/20'
-              : 'border-slate-200 hover:border-slate-300 bg-white hover:shadow-xs'
+          className={`group rounded-2xl border-2 transition-all p-5 flex flex-col justify-between cursor-pointer ${
+            serviceType === 'moving' || serviceType === 'moving_storage'
+              ? 'border-[#5CC1EF] bg-sky-50/30 shadow-md ring-2 ring-[#5CC1EF]/30'
+              : 'border-[#DAD7D1] hover:border-slate-300 bg-white hover:shadow-xs'
           }`}
         >
-          <div className="flex flex-row md:flex-col items-center md:items-start gap-3 w-full">
-            <div className="w-14 h-14 sm:w-full sm:aspect-[4/3] rounded-lg sm:rounded-xl overflow-hidden bg-slate-100 shrink-0 relative">
+          <div>
+            <div className="aspect-[4/3] rounded-xl overflow-hidden bg-slate-100 mb-4 relative border border-[#DAD7D1]">
               <img
                 src={PORTABOX_IMAGES.moving}
                 alt="Portabox moving truck"
@@ -245,34 +268,37 @@ export const Step2What: React.FC<Step2WhatProps> = ({
                 className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
               />
             </div>
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center justify-between">
-                <h3 className="text-sm sm:text-lg font-extrabold text-[#0b2942]">Moving</h3>
-                <div className="md:hidden">
-                  <div
-                    className={`w-5 h-5 rounded-full flex items-center justify-center text-xs ${
-                      serviceType === 'moving' ? 'bg-[#00c0f3] text-white font-bold' : 'border border-slate-300'
-                    }`}
-                  >
-                    {serviceType === 'moving' && '✓'}
-                  </div>
-                </div>
-              </div>
-              <p className="text-[11px] sm:text-xs text-slate-500 mt-0.5 sm:mt-2 leading-tight sm:leading-relaxed">
-                We deliver, you pack, we move it door to door.
-              </p>
+            <h3 className="text-lg font-black text-[#15385E]">Moving</h3>
+            <p className="text-xs text-slate-500 mt-2 leading-relaxed">
+              Door-to-door moving, or load at our depot and save delivery legs. Local or interstate.
+            </p>
+
+            {/* Feature Badges: Moving Capabilities */}
+            <div className="flex flex-wrap items-center gap-1.5 mt-3 pt-2.5 border-t border-slate-100">
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-slate-100/90 text-slate-700 text-[10px] font-bold border border-slate-200/80">
+                <Truck className="w-3 h-3 text-[#15385E]" />
+                <span>Door-to-Door</span>
+              </span>
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-slate-100/90 text-slate-700 text-[10px] font-bold border border-slate-200/80">
+                <Navigation className="w-3 h-3 text-[#15385E]" />
+                <span>Local &amp; Interstate</span>
+              </span>
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-800 text-[10px] font-bold border border-emerald-200">
+                <span className="text-emerald-600 font-extrabold">✓</span>
+                <span>Depot Load (Save Delivery Charges)</span>
+              </span>
             </div>
           </div>
 
           <button
             type="button"
-            className={`hidden md:block w-full mt-5 py-2.5 rounded-xl font-black text-xs tracking-wide transition-all cursor-pointer ${
-              serviceType === 'moving'
-                ? 'bg-[#ffd000] text-[#0f3353] border border-amber-300 shadow-xs'
-                : 'border border-slate-300 text-slate-700 group-hover:bg-slate-50'
+            className={`w-full mt-5 py-2.5 rounded-xl font-black text-xs tracking-wide transition-all cursor-pointer ${
+              serviceType === 'moving' || serviceType === 'moving_storage'
+                ? 'bg-[#15385E] text-white shadow-xs'
+                : 'border border-[#DAD7D1] text-slate-700 group-hover:bg-slate-50'
             }`}
           >
-            {serviceType === 'moving' ? 'Selected' : 'Select'}
+            {serviceType === 'moving' || serviceType === 'moving_storage' ? 'Selected' : 'Select'}
           </button>
         </div>
 
@@ -282,162 +308,149 @@ export const Step2What: React.FC<Step2WhatProps> = ({
             onSelectServiceType(storagePlacement === 'my_place' ? 'storage_at_place' : 'storage_facility');
             setValidationError(null);
           }}
-          className={`group rounded-xl sm:rounded-2xl border-2 transition-all p-2.5 sm:p-4 flex flex-row md:flex-col items-center md:items-stretch justify-between gap-3 cursor-pointer relative ${
+          className={`group rounded-2xl border-2 transition-all p-5 flex flex-col justify-between cursor-pointer relative ${
             serviceType === 'storage_at_place' || serviceType === 'storage_facility'
-              ? 'border-[#00c0f3] bg-sky-50/20 shadow-xs sm:shadow-md ring-2 ring-[#00c0f3]/20'
-              : 'border-slate-200 hover:border-slate-300 bg-white hover:shadow-xs'
+              ? 'border-[#5CC1EF] bg-sky-50/30 shadow-md ring-2 ring-[#5CC1EF]/30'
+              : 'border-[#DAD7D1] hover:border-slate-300 bg-white hover:shadow-xs'
           }`}
         >
-          <div className="flex flex-row md:flex-col items-center md:items-start gap-3 w-full">
-            <div className="w-14 h-14 sm:w-full sm:aspect-[4/3] rounded-lg sm:rounded-xl overflow-hidden bg-slate-100 shrink-0 relative">
+          <div>
+            <div className="aspect-[4/3] rounded-xl overflow-hidden bg-slate-100 mb-4 relative border border-[#DAD7D1]">
               <img
                 src={PORTABOX_IMAGES.storage}
                 alt="Portabox storage customers"
                 referrerPolicy="no-referrer"
                 className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
               />
-              <span className="hidden sm:inline-block absolute top-2 right-2 bg-[#00c0f3] text-white font-extrabold text-[10px] tracking-wider uppercase px-2.5 py-1 rounded-md shadow-xs">
+              <span className="absolute top-2 right-2 bg-[#F7D347] text-[#1A1A1A] border border-[#e6c338] font-black text-[10px] tracking-wider uppercase px-2.5 py-1 rounded-md shadow-xs">
                 MOST POPULAR
               </span>
             </div>
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-1.5">
-                  <h3 className="text-sm sm:text-lg font-extrabold text-[#0b2942]">Storage</h3>
-                  <span className="sm:hidden text-[9px] font-extrabold text-[#00c0f3] bg-sky-50 px-1.5 py-0.5 rounded uppercase">
-                    Popular
-                  </span>
-                </div>
-                <div className="md:hidden">
-                  <div
-                    className={`w-5 h-5 rounded-full flex items-center justify-center text-xs ${
-                      serviceType === 'storage_at_place' || serviceType === 'storage_facility'
-                        ? 'bg-[#00c0f3] text-white font-bold'
-                        : 'border border-slate-300'
-                    }`}
-                  >
-                    {(serviceType === 'storage_at_place' || serviceType === 'storage_facility') && '✓'}
-                  </div>
-                </div>
-              </div>
-              <p className="text-[11px] sm:text-xs text-slate-500 mt-0.5 sm:mt-2 leading-tight sm:leading-relaxed">
-                Keep it at your place, or we collect and store it securely.
-              </p>
+            <h3 className="text-lg font-black text-[#15385E]">Storage</h3>
+            <p className="text-xs text-slate-500 mt-2 leading-relaxed">
+              {storagePlacement === 'my_place' && (serviceType === 'storage_at_place' || serviceType === 'storage_facility')
+                ? 'Store on-site at your home, business or worksite with ground-level driveway access.'
+                : 'Store in our secure Portabox facility. Load at home or depot to save delivery charges.'}
+            </p>
+
+            {/* Feature Badges: Loading & Storage Options */}
+            <div className="flex flex-wrap items-center gap-1.5 mt-3 pt-2.5 border-t border-slate-100">
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-slate-100/90 text-slate-700 text-[10px] font-bold border border-slate-200/80">
+                <Home className="w-3 h-3 text-[#15385E]" />
+                <span>On-Site</span>
+              </span>
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-slate-100/90 text-slate-700 text-[10px] font-bold border border-slate-200/80">
+                <Warehouse className="w-3 h-3 text-[#15385E]" />
+                <span>Facility</span>
+              </span>
+              {/* Only display depot load / save delivery charges if Portabox facility is selected (remove if My Place is selected) */}
+              {storagePlacement === 'facility' && (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-800 text-[10px] font-bold border border-emerald-200 animate-in fade-in">
+                  <span className="text-emerald-600 font-extrabold">✓</span>
+                  <span>Depot Load (Save Delivery Charges)</span>
+                </span>
+              )}
+              {storagePlacement === 'my_place' && (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-sky-50 text-sky-800 text-[10px] font-bold border border-sky-200 animate-in fade-in">
+                  <span className="text-sky-600 font-extrabold">✓</span>
+                  <span>Driveway Level-Lift Delivery</span>
+                </span>
+              )}
             </div>
           </div>
 
           <button
             type="button"
-            className={`hidden md:block w-full mt-5 py-2.5 rounded-xl font-black text-xs tracking-wide transition-all cursor-pointer ${
+            className={`w-full mt-5 py-2.5 rounded-xl font-black text-xs tracking-wide transition-all cursor-pointer ${
               serviceType === 'storage_at_place' || serviceType === 'storage_facility'
-                ? 'bg-[#ffd000] text-[#0f3353] border border-amber-300 shadow-xs'
-                : 'border border-slate-300 text-slate-700 group-hover:bg-slate-50'
+                ? 'bg-[#15385E] text-white shadow-xs'
+                : 'border border-[#DAD7D1] text-slate-700 group-hover:bg-slate-50'
             }`}
           >
             {serviceType === 'storage_at_place' || serviceType === 'storage_facility' ? 'Selected' : 'Select'}
-          </button>
-        </div>
-
-        {/* Card 3: Moving and storage */}
-        <div
-          onClick={() => {
-            onSelectServiceType('moving_storage');
-            setValidationError(null);
-          }}
-          className={`group rounded-xl sm:rounded-2xl border-2 transition-all p-2.5 sm:p-4 flex flex-row md:flex-col items-center md:items-stretch justify-between gap-3 cursor-pointer ${
-            serviceType === 'moving_storage'
-              ? 'border-[#00c0f3] bg-sky-50/20 shadow-xs sm:shadow-md ring-2 ring-[#00c0f3]/20'
-              : 'border-slate-200 hover:border-slate-300 bg-white hover:shadow-xs'
-          }`}
-        >
-          <div className="flex flex-row md:flex-col items-center md:items-start gap-3 w-full">
-            <div className="w-14 h-14 sm:w-full sm:aspect-[4/3] rounded-lg sm:rounded-xl overflow-hidden bg-slate-100 shrink-0 relative">
-              <img
-                src={PORTABOX_IMAGES.movingAndStorage}
-                alt="Portabox container on residential driveway"
-                referrerPolicy="no-referrer"
-                className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-              />
-            </div>
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center justify-between">
-                <h3 className="text-sm sm:text-lg font-extrabold text-[#0b2942]">Moving and storage</h3>
-                <div className="md:hidden">
-                  <div
-                    className={`w-5 h-5 rounded-full flex items-center justify-center text-xs ${
-                      serviceType === 'moving_storage' ? 'bg-[#00c0f3] text-white font-bold' : 'border border-slate-300'
-                    }`}
-                  >
-                    {serviceType === 'moving_storage' && '✓'}
-                  </div>
-                </div>
-              </div>
-              <p className="text-[11px] sm:text-xs text-slate-500 mt-0.5 sm:mt-2 leading-tight sm:leading-relaxed">
-                Pack now, store with us, then deliver to new place.
-              </p>
-            </div>
-          </div>
-
-          <button
-            type="button"
-            className={`hidden md:block w-full mt-5 py-2.5 rounded-xl font-black text-xs tracking-wide transition-all cursor-pointer ${
-              serviceType === 'moving_storage'
-                ? 'bg-[#ffd000] text-[#0f3353] border border-amber-300 shadow-xs'
-                : 'border border-slate-300 text-slate-700 group-hover:bg-slate-50'
-            }`}
-          >
-            {serviceType === 'moving_storage' ? 'Selected' : 'Select'}
           </button>
         </div>
       </div>
 
       {/* Sub-question: If Storage is selected, where will it live? */}
       {(serviceType === 'storage_at_place' || serviceType === 'storage_facility') && (
-        <div className="mt-3 sm:mt-8 p-3 sm:p-5 bg-slate-50 rounded-xl sm:rounded-2xl border border-slate-200/80 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 sm:gap-4 animate-in fade-in duration-200">
-          <div>
-            <h4 className="text-xs sm:text-sm font-extrabold text-[#0b2942]">Where will the container live?</h4>
+        <div className="mt-8 p-5 bg-slate-50 rounded-2xl border-2 border-[#DAD7D1] flex flex-col gap-4 animate-in fade-in duration-200">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div>
+              <h4 className="text-sm font-black text-[#15385E]">Where do you want the container stored?</h4>
+              <p className="text-xs text-slate-500 mt-0.5">
+                {storagePlacement === 'my_place'
+                  ? 'Keep the container at your property for convenient on-site access.'
+                  : 'We store your sealed container in our secure, monitored warehouse facility.'}
+              </p>
+            </div>
+
+            <div className="inline-flex p-1 bg-white border border-[#DAD7D1] rounded-xl shadow-xs self-start sm:self-auto">
+              <button
+                type="button"
+                onClick={() => {
+                  onSelectStoragePlacement('my_place');
+                  onSelectServiceType('storage_at_place');
+                }}
+                className={`px-4 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                  storagePlacement === 'my_place'
+                    ? 'bg-[#15385E] text-white shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                My place
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  onSelectStoragePlacement('facility');
+                  onSelectServiceType('storage_facility');
+                }}
+                className={`px-4 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                  storagePlacement === 'facility'
+                    ? 'bg-[#15385E] text-white shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                Portabox facility
+              </button>
+            </div>
           </div>
 
-          <div className="inline-flex p-1 bg-white border border-slate-200 rounded-xl shadow-xs self-start sm:self-auto">
-            <button
-              onClick={() => {
-                onSelectStoragePlacement('my_place');
-                onSelectServiceType('storage_at_place');
-              }}
-              className={`px-3 sm:px-4 py-1.5 sm:py-2 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                storagePlacement === 'my_place'
-                  ? 'bg-[#0b2942] text-white shadow-xs'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              My place
-            </button>
-            <button
-              onClick={() => {
-                onSelectStoragePlacement('facility');
-                onSelectServiceType('storage_facility');
-              }}
-              className={`px-3 sm:px-4 py-1.5 sm:py-2 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                storagePlacement === 'facility'
-                  ? 'bg-[#0b2942] text-white shadow-xs'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              Portabox facility
-            </button>
+          {/* Contextual guidance confirming depot loading availability vs direct home delivery */}
+          <div className="pt-3 border-t border-slate-200/80">
+            {storagePlacement === 'facility' ? (
+              <div className="flex items-start sm:items-center gap-2.5 p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-xs text-emerald-900 animate-in fade-in">
+                <span className="font-extrabold bg-emerald-200 text-emerald-950 px-2 py-0.5 rounded shrink-0">
+                  ✓ Depot Load Available
+                </span>
+                <span className="text-emerald-800">
+                  You can choose <strong>Depot Load (Save Delivery Charges)</strong> by loading directly at our facility, or choose full-service home delivery.
+                </span>
+              </div>
+            ) : (
+              <div className="flex items-start sm:items-center gap-2.5 p-3 rounded-xl bg-sky-50/70 border border-sky-200 text-xs text-slate-700 animate-in fade-in">
+                <span className="font-extrabold bg-[#15385E] text-white px-2 py-0.5 rounded shrink-0">
+                  Direct Home Delivery
+                </span>
+                <span className="text-slate-600">
+                  Full level-lift delivery to your driveway or worksite. <em>(Depot load does not apply when keeping the container at your place).</em>
+                </span>
+              </div>
+            )}
           </div>
         </div>
       )}
 
       {/* Destination Postcode Search Section (for Moving & Moving+Storage) */}
       {isMoving && (
-        <div className="mt-3.5 sm:mt-8 p-3.5 sm:p-6 bg-sky-50/60 rounded-2xl sm:rounded-3xl border border-sky-200 relative animate-in fade-in duration-200">
-          <div className="flex items-center gap-2 mb-1.5 sm:mb-2">
-            <div className="p-1 sm:p-1.5 rounded-lg bg-[#00c0f3] text-white">
-              <Truck className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+        <div className="mt-8 p-6 bg-sky-50/70 rounded-3xl border-2 border-[#DAD7D1] relative animate-in fade-in duration-200">
+          <div className="flex items-center gap-2 mb-2">
+            <div className="p-1.5 rounded-lg bg-[#5CC1EF] text-[#15385E]">
+              <Truck className="h-4 w-4" />
             </div>
             <div>
-              <h3 className="text-sm sm:text-base font-extrabold text-[#0b2942]">
+              <h3 className="text-base font-black text-[#15385E]">
                 Where are you moving to?
               </h3>
             </div>
@@ -445,8 +458,8 @@ export const Step2What: React.FC<Step2WhatProps> = ({
 
           {/* Blocked Postcode Alert */}
           {destBlockedNotice && (
-            <div className="mt-2.5 mb-3 p-3 sm:p-4 rounded-xl sm:rounded-2xl bg-amber-50 border border-amber-200 text-amber-900 flex items-start gap-2.5 sm:gap-3">
-              <ShieldAlert className="w-4 h-4 sm:w-5 sm:h-5 text-amber-600 shrink-0 mt-0.5" />
+            <div className="mt-3 mb-4 p-4 rounded-2xl bg-amber-50 border border-amber-200 text-amber-900 flex items-start gap-3">
+              <ShieldAlert className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
               <div className="text-xs">
                 <p className="font-bold">Destination {destBlockedNotice.postcode} is restricted</p>
                 <p className="mt-0.5 text-amber-800">{destBlockedNotice.reason}</p>
@@ -457,20 +470,20 @@ export const Step2What: React.FC<Step2WhatProps> = ({
 
           {/* Validation Error if user clicks continue without selecting */}
           {validationError && (
-            <div className="mt-2 mb-2.5 p-2.5 rounded-xl bg-red-50 border border-red-200 text-red-700 text-xs font-semibold">
+            <div className="mt-2 mb-3 p-3 rounded-xl bg-red-50 border border-red-200 text-red-700 text-xs font-semibold">
               {validationError}
             </div>
           )}
 
           {/* Autocomplete Input Container */}
-          <div className="mt-2.5 sm:mt-4 relative" ref={destDropdownRef}>
-            <label className="block text-[11px] sm:text-xs font-bold text-slate-700 mb-1">
+          <div className="mt-4 relative" ref={destDropdownRef}>
+            <label className="block text-xs font-black text-[#15385E] uppercase tracking-wider mb-1.5">
               Destination suburb or postcode
             </label>
 
             <div className="relative">
-              <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                <MapPin className="h-4 w-4 sm:h-5 sm:w-5 text-[#00c0f3]" />
+              <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none">
+                <MapPin className="h-5 w-5 text-[#15385E]" />
               </div>
               <input
                 type="text"
@@ -482,14 +495,14 @@ export const Step2What: React.FC<Step2WhatProps> = ({
                   setValidationError(null);
                 }}
                 onFocus={() => setIsDestOpen(true)}
-                placeholder="Search destination e.g. 3000 Melbourne, 2000 Sydney..."
-                className="w-full pl-9 pr-9 sm:pl-11 sm:pr-10 py-2.5 sm:py-3.5 rounded-xl sm:rounded-2xl bg-white border-2 border-[#00c0f3] text-xs sm:text-sm font-semibold text-slate-900 focus:outline-none focus:ring-4 focus:ring-[#00c0f3]/20 shadow-xs"
+                placeholder="Search destination e.g. 3000 Melbourne, 2000 Sydney, 4000 Brisbane..."
+                className="w-full pl-11 pr-10 py-3.5 rounded-2xl bg-white border-2 border-[#5CC1EF] text-sm font-bold text-slate-900 focus:outline-none focus:ring-4 focus:ring-[#5CC1EF]/30 shadow-xs"
               />
               {destQuery && (
                 <button
                   type="button"
                   onClick={handleClearDestination}
-                  className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600 cursor-pointer"
+                  className="absolute inset-y-0 right-0 pr-3.5 flex items-center text-slate-400 hover:text-slate-600 cursor-pointer"
                 >
                   <X className="w-4 h-4" />
                 </button>
@@ -498,8 +511,8 @@ export const Step2What: React.FC<Step2WhatProps> = ({
 
             {/* Suggestions Dropdown (Identical to Step 1 Where) */}
             {isDestOpen && destSuggestions.length > 0 && (
-              <div className="absolute z-30 mt-1.5 sm:mt-2 w-full bg-white rounded-xl sm:rounded-2xl shadow-xl border border-slate-200 overflow-hidden divide-y divide-slate-100 max-h-64 overflow-y-auto animate-in fade-in slide-in-from-top-2 duration-150">
-                <div className="px-3.5 py-1.5 sm:px-4 sm:py-2 bg-slate-50 text-[10px] sm:text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+              <div className="absolute z-30 mt-2 w-full bg-white rounded-2xl shadow-xl border border-slate-200 overflow-hidden divide-y divide-slate-100 max-h-64 overflow-y-auto animate-in fade-in slide-in-from-top-2 duration-150">
+                <div className="px-4 py-2 bg-slate-50 text-[11px] font-bold text-slate-400 uppercase tracking-wider">
                   Suggested Destination Locations
                 </div>
                 {destSuggestions.map((p) => {
@@ -509,17 +522,17 @@ export const Step2What: React.FC<Step2WhatProps> = ({
                       key={`dest-${p.postcode}-${p.suburb}`}
                       type="button"
                       onClick={() => handleSelectDestination(p)}
-                      className={`w-full px-3.5 py-2.5 sm:px-4 sm:py-3 text-left flex items-center justify-between hover:bg-sky-50 transition-colors cursor-pointer ${
+                      className={`w-full px-4 py-3 text-left flex items-center justify-between hover:bg-sky-50 transition-colors cursor-pointer ${
                         isSelected ? 'bg-sky-50 font-bold' : ''
                       }`}
                     >
-                      <div className="flex items-center gap-2 sm:gap-2.5">
-                        <MapPin className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-[#00c0f3]" />
-                        <span className="text-xs sm:text-sm font-semibold text-slate-900">
-                          <span className="font-bold text-[#0b2942]">{p.postcode}</span> {p.suburb}
+                      <div className="flex items-center gap-2.5">
+                        <MapPin className="w-4 h-4 text-[#15385E]" />
+                        <span className="text-sm font-semibold text-slate-900">
+                          <span className="font-bold text-[#15385E]">{p.postcode}</span> {p.suburb}
                         </span>
                       </div>
-                      <span className="text-[10px] sm:text-xs font-bold px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">
+                      <span className="text-xs font-bold px-2 py-0.5 rounded bg-slate-100 text-[#15385E]">
                         {p.state}
                       </span>
                     </button>
@@ -531,16 +544,16 @@ export const Step2What: React.FC<Step2WhatProps> = ({
 
           {/* Clean Destination Confirmation */}
           {destinationPostcode && !destBlockedNotice && (
-            <div className="mt-2.5 sm:mt-4 p-2.5 sm:p-4 rounded-xl sm:rounded-2xl bg-white border border-sky-200 flex items-center justify-between gap-2.5 sm:gap-3 shadow-2xs">
-              <div className="flex items-center gap-2.5 sm:gap-3">
-                <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg sm:rounded-xl bg-[#00c0f3] text-white flex items-center justify-center font-bold text-xs">
+            <div className="mt-4 p-4 rounded-2xl bg-white border border-[#5CC1EF]/50 flex items-center justify-between gap-3 shadow-2xs">
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 rounded-xl bg-[#5CC1EF] text-[#15385E] flex items-center justify-center font-black">
                   ✓
                 </div>
                 <div>
-                  <p className="text-xs sm:text-sm font-bold text-[#0b2942]">
+                  <p className="text-sm font-bold text-[#15385E]">
                     Moving to {destinationPostcode.suburb}, {destinationPostcode.state} {destinationPostcode.postcode}
                   </p>
-                  <p className="text-[10px] sm:text-xs text-slate-500">
+                  <p className="text-xs text-slate-500">
                     Destination confirmed
                   </p>
                 </div>
@@ -548,36 +561,78 @@ export const Step2What: React.FC<Step2WhatProps> = ({
               <button
                 type="button"
                 onClick={handleClearDestination}
-                className="text-xs text-slate-500 hover:text-[#0b2942] font-bold px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-lg border border-slate-200 hover:bg-slate-50 transition-colors cursor-pointer"
+                className="text-xs text-slate-600 hover:text-[#15385E] font-bold px-3 py-1.5 rounded-lg border border-slate-200 hover:bg-slate-50 transition-colors cursor-pointer"
               >
                 Change
               </button>
             </div>
           )}
+
+          {/* Optional Interim Storage Checkbox for Movers */}
+          <div className="mt-5 pt-4 border-t border-sky-200/80">
+            <label className={`flex items-start gap-3 p-4 rounded-2xl border-2 transition-all cursor-pointer select-none ${
+              serviceType === 'moving_storage'
+                ? 'bg-sky-100/70 border-[#5CC1EF] ring-2 ring-[#5CC1EF]/30 shadow-xs'
+                : 'bg-white border-[#DAD7D1] hover:border-slate-300'
+            }`}>
+              <input
+                type="checkbox"
+                checked={serviceType === 'moving_storage'}
+                onChange={(e) => {
+                  onSelectServiceType(e.target.checked ? 'moving_storage' : 'moving');
+                }}
+                className="mt-0.5 w-4 h-4 rounded text-[#15385E] focus:ring-[#5CC1EF] cursor-pointer shrink-0"
+              />
+              <div className="space-y-1">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="font-extrabold text-sm text-[#15385E]">
+                    Need interim storage between homes?
+                  </span>
+                  {serviceType === 'moving_storage' ? (
+                    <span className="text-[10px] font-black uppercase tracking-wider bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full border border-emerald-300">
+                      ✓ Interim Storage Added
+                    </span>
+                  ) : (
+                    <span className="text-[10px] font-bold bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full">
+                      Optional
+                    </span>
+                  )}
+                </div>
+                <p className="text-xs text-slate-600 leading-relaxed">
+                  We collect your container from {originPostcode.suburb}, store it securely in our facility, and deliver it to your new address when you&apos;re ready. (Storage duration is configured in Step 5).
+                </p>
+              </div>
+            </label>
+          </div>
         </div>
       )}
 
       {/* Are You Stuck Banner */}
-      <div className="mt-4 sm:mt-8">
-        <AreYouStuckBanner />
+      <div className="mt-8">
+        <AreYouStuckBanner
+          config={config}
+          suburbOrPostcode={`${originPostcode.postcode} ${originPostcode.suburb}`}
+        />
       </div>
 
       {/* Navigation Buttons */}
-      <div className="mt-4 sm:mt-10 flex items-center justify-between pt-3 sm:pt-6 border-t border-slate-100">
+      <div className="mt-10 flex items-center justify-between pt-6 border-t border-slate-100">
         <button
+          type="button"
           onClick={onBack}
-          className="text-xs font-bold text-slate-600 hover:text-slate-900 flex items-center gap-1.5 cursor-pointer py-1.5 px-2.5 rounded-lg hover:bg-slate-100 transition-colors"
+          className="text-xs font-bold text-slate-600 hover:text-slate-900 flex items-center gap-1.5 cursor-pointer py-2 px-3 rounded-lg hover:bg-slate-100 transition-colors"
         >
-          <ArrowLeft className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+          <ArrowLeft className="w-4 h-4" />
           <span>Previous</span>
         </button>
 
+        {/* CTA Continue Button: #F7D347 Vibrant Gold with #1A1A1A text */}
         <button
           onClick={handleContinueClick}
-          className="px-7 sm:px-9 py-2.5 sm:py-3.5 bg-[#ffd000] hover:bg-[#ffdc26] active:bg-[#eab308] text-[#0f3353] font-black rounded-xl sm:rounded-2xl flex items-center gap-2 transition-all cursor-pointer shadow-md hover:shadow-lg active:scale-98 text-sm sm:text-base border-2 border-amber-300 shrink-0"
+          className="px-8 py-3.5 bg-[#F7D347] hover:bg-[#eed235] text-[#1A1A1A] font-black rounded-2xl border-2 border-[#e6c338] flex items-center gap-2 transition-all cursor-pointer shadow-sm hover:shadow-md active:scale-98"
         >
           <span>Continue</span>
-          <ArrowRight className="w-4 h-4 stroke-[3]" />
+          <ArrowRight className="w-4 h-4 stroke-[3] text-[#1A1A1A]" />
         </button>
       </div>
     </div>

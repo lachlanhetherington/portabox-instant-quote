@@ -55,7 +55,7 @@ export const PORTABOX_DEPOTS: DepotLocation[] = [
   },
   {
     id: 'brisbane',
-    name: 'Brisbane & Gold Coast Depot',
+    name: 'Brisbane Depot',
     address: '9 Citywest Court',
     suburb: 'Gilberton',
     postcode: '4208',
@@ -66,8 +66,18 @@ export const PORTABOX_DEPOTS: DepotLocation[] = [
   },
 ];
 
-// Curated list of popular & representative Australian postcodes and suburbs
-export const AUSTRALIAN_POSTCODES: PostcodeRecord[] = [
+export function isSunshineCoastPostcode(_postcode: string, _region?: string): boolean {
+  return false;
+}
+
+export function getActiveDepots(_enableSunshineCoast: boolean = false): DepotLocation[] {
+  return PORTABOX_DEPOTS;
+}
+
+import ALL_AUSTRALIAN_POSTCODES_DATA from './allAustralianPostcodes.json';
+
+// Curated priority list of depot-adjacent & metropolitan suburbs to guarantee instant initial rendering
+const CURATED_PRIORITY_POSTCODES: PostcodeRecord[] = [
   // SA - Adelaide & Surrounds
   { postcode: '5061', suburb: 'Hyde Park', state: 'SA', lat: -34.9542, lng: 138.6019, region: 'Adelaide' },
   { postcode: '5061', suburb: 'Malvern', state: 'SA', lat: -34.9567, lng: 138.6144, region: 'Adelaide' },
@@ -115,7 +125,7 @@ export const AUSTRALIAN_POSTCODES: PostcodeRecord[] = [
   { postcode: '3350', suburb: 'Ballarat', state: 'VIC', lat: -37.5622, lng: 143.8503, region: 'Regional VIC' },
   { postcode: '3550', suburb: 'Bendigo', state: 'VIC', lat: -36.7570, lng: 144.2794, region: 'Regional VIC' },
 
-  // QLD - Brisbane, Gold Coast, Sunshine Coast
+  // QLD - Brisbane & Surrounds
   { postcode: '4000', suburb: 'Brisbane City', state: 'QLD', lat: -27.4698, lng: 153.0251, region: 'Brisbane' },
   { postcode: '4006', suburb: 'Fortitude Valley', state: 'QLD', lat: -27.4578, lng: 153.0361, region: 'Brisbane' },
   { postcode: '4101', suburb: 'West End', state: 'QLD', lat: -27.4833, lng: 153.0125, region: 'Brisbane' },
@@ -127,23 +137,59 @@ export const AUSTRALIAN_POSTCODES: PostcodeRecord[] = [
   { postcode: '4300', suburb: 'Springfield', state: 'QLD', lat: -27.6717, lng: 152.9150, region: 'Ipswich' },
   { postcode: '4305', suburb: 'Ipswich', state: 'QLD', lat: -27.6167, lng: 152.7667, region: 'Ipswich' },
   { postcode: '4350', suburb: 'Toowoomba', state: 'QLD', lat: -27.5606, lng: 151.9547, region: 'Darling Downs' },
-  // Sunshine Coast
-  { postcode: '4551', suburb: 'Caloundra', state: 'QLD', lat: -26.8042, lng: 153.1311, region: 'Sunshine Coast' },
-  { postcode: '4556', suburb: 'Buderim', state: 'QLD', lat: -26.6853, lng: 153.0567, region: 'Sunshine Coast' },
-  { postcode: '4558', suburb: 'Maroochydore', state: 'QLD', lat: -26.6575, lng: 153.0908, region: 'Sunshine Coast' },
-  { postcode: '4560', suburb: 'Nambour', state: 'QLD', lat: -26.6267, lng: 152.9592, region: 'Sunshine Coast' },
-  { postcode: '4567', suburb: 'Noosa Heads', state: 'QLD', lat: -26.3939, lng: 153.0906, region: 'Sunshine Coast' },
 
   // ACT - Canberra
   { postcode: '2600', suburb: 'Canberra (Barton)', state: 'ACT', lat: -35.3056, lng: 149.1350, region: 'Canberra' },
   { postcode: '2601', suburb: 'Acton', state: 'ACT', lat: -35.2819, lng: 149.1189, region: 'Canberra' },
   { postcode: '2612', suburb: 'Braddon', state: 'ACT', lat: -35.2717, lng: 149.1353, region: 'Canberra' },
 
-  // WA - Perth (for interstate / lookup awareness)
+  // WA - Perth
   { postcode: '6000', suburb: 'Perth CBD', state: 'WA', lat: -31.9523, lng: 115.8613, region: 'Perth' },
   { postcode: '6008', suburb: 'Subiaco', state: 'WA', lat: -31.9472, lng: 115.8239, region: 'Perth' },
   { postcode: '6160', suburb: 'Fremantle', state: 'WA', lat: -32.0569, lng: 115.7485, region: 'Perth' },
 ];
+
+/**
+ * Builds the complete unified list of 18,500+ Australian postcodes and suburbs.
+ * Prioritizes curated records at the front to preserve standard defaults.
+ */
+function buildAllAustralianPostcodes(): PostcodeRecord[] {
+  const seen = new Set<string>();
+  const list: PostcodeRecord[] = [];
+
+  for (const item of CURATED_PRIORITY_POSTCODES) {
+    const key = `${item.postcode}_${item.suburb.toLowerCase()}`;
+    seen.add(key);
+    list.push(item);
+  }
+
+  const rawList = ALL_AUSTRALIAN_POSTCODES_DATA as PostcodeRecord[];
+  for (let i = 0; i < rawList.length; i++) {
+    const raw = rawList[i];
+    const key = `${raw.postcode}_${raw.suburb.toLowerCase()}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      list.push(raw);
+    }
+  }
+
+  return list;
+}
+
+// Complete master database of all Australian postcodes (18,500+ suburbs across all states & territories)
+export const AUSTRALIAN_POSTCODES: PostcodeRecord[] = buildAllAustralianPostcodes();
+
+// Fast lookup maps
+const POSTCODES_BY_NUMBER = new Map<string, PostcodeRecord[]>();
+for (let i = 0; i < AUSTRALIAN_POSTCODES.length; i++) {
+  const item = AUSTRALIAN_POSTCODES[i];
+  const list = POSTCODES_BY_NUMBER.get(item.postcode);
+  if (list) {
+    list.push(item);
+  } else {
+    POSTCODES_BY_NUMBER.set(item.postcode, [item]);
+  }
+}
 
 /**
  * Known precise road driving distances for key Australian corridors.
@@ -189,9 +235,6 @@ const KNOWN_DRIVING_DISTANCES: Record<string, number> = {
   // Brisbane Depot Gilberton (4208) to Surfers Paradise (4217)
   '4208-4217': 39,
   '4217-4208': 39,
-  // Sunshine Coast Caloundra (4551) to Noosa Heads (4567)
-  '4551-4567': 62,
-  '4567-4551': 62,
 };
 
 /**
@@ -257,16 +300,18 @@ export function calculateDrivingDistance(
 export function findClosestDepot(
   lat: number,
   lng: number,
-  postcode?: string
+  postcode?: string,
+  enableSunshineCoast: boolean = true
 ): { depot: DepotLocation; distanceKm: number } {
-  let closest = PORTABOX_DEPOTS[0];
+  const depots = getActiveDepots(enableSunshineCoast);
+  let closest = depots[0];
   let minDistance = calculateDrivingDistance(lat, lng, closest.lat, closest.lng, postcode, closest.postcode);
 
-  for (let i = 1; i < PORTABOX_DEPOTS.length; i++) {
-    const d = calculateDrivingDistance(lat, lng, PORTABOX_DEPOTS[i].lat, PORTABOX_DEPOTS[i].lng, postcode, PORTABOX_DEPOTS[i].postcode);
+  for (let i = 1; i < depots.length; i++) {
+    const d = calculateDrivingDistance(lat, lng, depots[i].lat, depots[i].lng, postcode, depots[i].postcode);
     if (d < minDistance) {
       minDistance = d;
-      closest = PORTABOX_DEPOTS[i];
+      closest = depots[i];
     }
   }
 
@@ -275,19 +320,71 @@ export function findClosestDepot(
 
 /**
  * Postcode search utility
+ * Fast multi-tier search across all 18,500+ Australian postcodes & suburbs.
  */
-export function searchPostcodes(query: string): PostcodeRecord[] {
+export function searchPostcodes(query: string, _enableSunshineCoast: boolean = false): PostcodeRecord[] {
   const clean = query.trim().toLowerCase();
   if (!clean) return [];
 
-  const matched = AUSTRALIAN_POSTCODES.filter(
-    (p) =>
-      p.postcode.startsWith(clean) ||
-      p.suburb.toLowerCase().includes(clean)
-  );
+  const results: PostcodeRecord[] = [];
+  const seenKeys = new Set<string>();
 
-  // If query is a 4-digit number not found in our curated list, create a synthetic record so user can test any postcode
-  if (/^\d{4}$/.test(clean) && matched.length === 0) {
+  const addRecord = (p: PostcodeRecord) => {
+    const key = `${p.postcode}_${p.suburb.toLowerCase()}`;
+    if (!seenKeys.has(key)) {
+      seenKeys.add(key);
+      results.push(p);
+    }
+  };
+
+  // 1. Exact 4-digit postcode match via O(1) Map
+  const exactMatches = POSTCODES_BY_NUMBER.get(clean);
+  if (exactMatches) {
+    for (const match of exactMatches) {
+      addRecord(match);
+    }
+    if (results.length >= 10) {
+      return results.slice(0, 10);
+    }
+  }
+
+  // 2. Postcode prefix match (e.g. typing "50" or "21")
+  const isNumericQuery = /^\d+$/.test(clean);
+  if (isNumericQuery) {
+    for (let i = 0; i < AUSTRALIAN_POSTCODES.length; i++) {
+      const p = AUSTRALIAN_POSTCODES[i];
+      if (p.postcode.startsWith(clean)) {
+        addRecord(p);
+        if (results.length >= 12) break;
+      }
+    }
+    if (results.length > 0) {
+      return results.slice(0, 10);
+    }
+  }
+
+  // 3. Suburb prefix match (e.g. typing "hyd" -> "Hyde Park")
+  for (let i = 0; i < AUSTRALIAN_POSTCODES.length; i++) {
+    const p = AUSTRALIAN_POSTCODES[i];
+    if (p.suburb.toLowerCase().startsWith(clean)) {
+      addRecord(p);
+      if (results.length >= 12) break;
+    }
+  }
+
+  // 4. Suburb substring match (if fewer than 10 results)
+  if (results.length < 10) {
+    for (let i = 0; i < AUSTRALIAN_POSTCODES.length; i++) {
+      const p = AUSTRALIAN_POSTCODES[i];
+      if (p.suburb.toLowerCase().includes(clean)) {
+        addRecord(p);
+        if (results.length >= 10) break;
+      }
+    }
+  }
+
+  // 5. Fallback synthetic record if an unusual 4-digit code is typed
+  if (/^\d{4}$/.test(clean) && results.length === 0) {
     const pcNum = parseInt(clean, 10);
     let state: PostcodeRecord['state'] = 'NSW';
     let lat = -33.8688;
@@ -306,15 +403,9 @@ export function searchPostcodes(query: string): PostcodeRecord[] {
       region = 'Melbourne Area';
     } else if (pcNum >= 4000 && pcNum <= 4999) {
       state = 'QLD';
-      if (pcNum >= 4550 && pcNum <= 4575) {
-        lat = -26.65;
-        lng = 153.06;
-        region = 'Sunshine Coast';
-      } else {
-        lat = -27.4698;
-        lng = 153.0251;
-        region = 'Brisbane / Gold Coast Area';
-      }
+      lat = -27.4698;
+      lng = 153.0251;
+      region = 'Brisbane Area';
     } else if (pcNum >= 2600 && pcNum <= 2620) {
       state = 'ACT';
       lat = -35.2819;
@@ -325,6 +416,16 @@ export function searchPostcodes(query: string): PostcodeRecord[] {
       lat = -31.9523;
       lng = 115.8613;
       region = 'Perth Area';
+    } else if (pcNum >= 7000 && pcNum <= 7999) {
+      state = 'TAS';
+      lat = -42.8821;
+      lng = 147.3272;
+      region = 'Tasmania Area';
+    } else if (pcNum >= 800 && pcNum <= 899) {
+      state = 'NT';
+      lat = -12.4634;
+      lng = 130.8456;
+      region = 'Darwin Area';
     }
 
     return [{
@@ -337,5 +438,14 @@ export function searchPostcodes(query: string): PostcodeRecord[] {
     }];
   }
 
-  return matched.slice(0, 8);
+  return results.slice(0, 10);
 }
+
+/**
+ * Direct O(1) postcode record lookup
+ */
+export function getPostcodeRecord(postcode: string): PostcodeRecord | undefined {
+  const matches = POSTCODES_BY_NUMBER.get(postcode.trim());
+  return matches && matches.length > 0 ? matches[0] : undefined;
+}
+

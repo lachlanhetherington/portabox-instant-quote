@@ -58,19 +58,12 @@ export const DEFAULT_DEPOT_CALENDARS: Record<MetroHub, DepotCalendarConfig> = {
     timeZone: 'Australia/Sydney',
     dailyMaxSlots: 6,
   },
-  'Brisbane/Gold Coast': {
+  Brisbane: {
     depotId: 'brisbane',
     depotName: 'Portabox Brisbane Depot',
     calendarId: 'primary',
     timeZone: 'Australia/Brisbane',
     dailyMaxSlots: 4,
-  },
-  'Sunshine Coast': {
-    depotId: 'sunshine_coast',
-    depotName: 'Portabox Sunshine Coast Depot',
-    calendarId: 'primary',
-    timeZone: 'Australia/Brisbane',
-    dailyMaxSlots: 3,
   },
 };
 

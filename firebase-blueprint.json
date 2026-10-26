@@ -1,0 +1,63 @@
+{
+  "entities": {
+    "Container": {
+      "title": "Container",
+      "description": "Portabox container details",
+      "type": "object",
+      "properties": {
+        "container_id": { "type": "string" },
+        "container_size": { "type": "string" },
+        "status": { "type": "string" },
+        "condition": { "type": "string" },
+        "current_location": { "type": "string" },
+        "last_known_lat": { "type": "number" },
+        "last_known_lng": { "type": "number" },
+        "geo_updated_at": { "type": "string", "format": "date-time" },
+        "current_booking_id": { "type": "string" },
+        "placement_photo_url": { "type": "string" }
+      },
+      "required": ["container_id", "status"]
+    },
+    "Delivery": {
+      "title": "Delivery",
+      "description": "Delivery order details",
+      "type": "object",
+      "properties": {
+        "booking_id": { "type": "string" },
+        "container_id": { "type": "string" },
+        "driver_id": { "type": "string" },
+        "status": { "type": "string" },
+        "customer_address": { "type": "string" }
+      },
+      "required": ["booking_id", "status"]
+    },
+    "Message": {
+      "title": "Message",
+      "description": "SMS conversation message",
+      "type": "object",
+      "properties": {
+        "from": { "type": "string" },
+        "to": { "type": "string" },
+        "body": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" },
+        "contactId": { "type": "string" },
+        "direction": { "type": "string", "enum": ["inbound", "outbound"] }
+      },
+      "required": ["from", "to", "body", "timestamp", "contactId", "direction"]
+    }
+  },
+  "firestore": {
+    "containers/{containerId}": {
+      "schema": "Container",
+      "description": "Container inventory and live tracking"
+    },
+    "deliveries/{deliveryId}": {
+      "schema": "Delivery",
+      "description": "Delivery assignments"
+    },
+    "contacts/{contactId}/messages/{messageId}": {
+      "schema": "Message",
+      "description": "Conversation thread for a contact"
+    }
+  }
+}

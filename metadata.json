@@ -1,8 +1,6 @@
 {
-  "name": "Remix Portabox Instant Quote",
+  "name": "Portabox Instant Quote",
   "description": "Instant quote calculator and booking app for Portabox portable storage containers across Australia with distance calculation, dynamic rates, and admin management.",
   "requestFramePermissions": [],
-  "majorCapabilities": [
-    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
-  ]
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }
