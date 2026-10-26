@@ -6,11 +6,18 @@ const accountSid = process.env.TWILIO_ACCOUNT_SID;
 const authToken = process.env.TWILIO_AUTH_TOKEN;
 const twilioPhoneNumber = process.env.TWILIO_PHONE_NUMBER;
 
-const client = twilio(accountSid, authToken);
+let cachedClient: ReturnType<typeof twilio> | null = null;
+function getClient() {
+  if (!accountSid || !authToken) {
+    throw new Error('Twilio is not configured on this deployment.');
+  }
+  if (!cachedClient) cachedClient = twilio(accountSid, authToken);
+  return cachedClient;
+}
 
 export const sendSms = async (contactId: string, to: string, message: string) => {
   try {
-    const response = await client.messages.create({
+    const response = await getClient().messages.create({
       body: message,
       from: twilioPhoneNumber,
       to,

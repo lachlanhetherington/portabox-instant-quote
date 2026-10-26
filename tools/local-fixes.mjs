@@ -384,6 +384,33 @@ fix(
   }
 );
 
+/* -- 12. smsService.ts ----------------------------------------------------
+   The third instance of the same pattern: a client built at module scope
+   from environment variables that may not be set. twilio(undefined,
+   undefined) is evaluated the moment anything imports this file, and
+   server.ts imports it through apiRoutes — so on a deployment without
+   Twilio credentials the entire API function can fail at import rather than
+   the one route that needs SMS.
+
+   Built on first use instead. Nothing else changes: sendSms still throws
+   when it is called unconfigured, which is the honest place for it. */
+fix(
+  'sms service: build the Twilio client on first use, not at import',
+  'src/services/smsService.ts',
+  (s) => s.includes('function getClient()'),
+  (s) => s.replace(
+    /const client = twilio\(accountSid, authToken\);/,
+    `let cachedClient: ReturnType<typeof twilio> | null = null;\n` +
+    `function getClient() {\n` +
+    `  if (!accountSid || !authToken) {\n` +
+    `    throw new Error('Twilio is not configured on this deployment.');\n` +
+    `  }\n` +
+    `  if (!cachedClient) cachedClient = twilio(accountSid, authToken);\n` +
+    `  return cachedClient;\n` +
+    `}`
+  ).replace(/\bclient\.messages\b/g, 'getClient().messages')
+);
+
 /* -- report --------------------------------------------------------------- */
 const line = (mark, xs) => xs.forEach((x) => console.log(`  ${mark} ${x}`));
 if (applied.length) { console.log('applied:'); line('+', applied); }
