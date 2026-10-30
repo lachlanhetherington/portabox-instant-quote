@@ -30,6 +30,7 @@ import { AppConfig } from '../../types/quote';
 
 export type AdminTabId =
   | 'admin_copilot'
+  | 'staff_permissions'
   | 'pricing_matrix'
   | 'pricing'
   | 'competitor_pricing'
@@ -97,6 +98,20 @@ export const AdminSidebar: React.FC<AdminSidebarProps> = ({
   onOpenPhoneIntake,
 }) => {
   const sections: NavSection[] = [
+    {
+      title: 'SECURITY & GOVERNANCE',
+      items: [
+        {
+          id: 'staff_permissions',
+          label: 'Staff Roles & 2FA Governance',
+          shortLabel: 'Permissions',
+          icon: ShieldCheck,
+          highlight: true,
+          badge: 'CEO / Ops',
+          badgeColor: 'bg-[#F7D347] text-[#1A1A1A]',
+        },
+      ],
+    },
     {
       title: 'AI COPILOT (ADMIN ONLY)',
       items: [

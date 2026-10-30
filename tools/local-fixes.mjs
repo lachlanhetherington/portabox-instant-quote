@@ -168,9 +168,15 @@ fix(
   'src/App.tsx',
   (s) => s.includes('postcodeFromUrl'),
   (s) => {
+    /* Match the import by where it comes from, not by what is currently in
+       it. Upstream has added names to this block twice now, and both times
+       a contents-based pattern stopped matching and left searchPostcodes
+       undefined — which only shows up as a type error, never at runtime. */
     let out = s.replace(
-      /import \{\s*AUSTRALIAN_POSTCODES,\s*PostcodeRecord,\s*\} from '\.\/data\/australianPostcodes';/,
-      `import {\n  AUSTRALIAN_POSTCODES,\n  PostcodeRecord,\n  searchPostcodes,\n} from './data/australianPostcodes';`
+      /import \{([^}]*)\} from '\.\/data\/australianPostcodes';/,
+      (m, names) => names.includes('searchPostcodes')
+        ? m
+        : `import {${names.replace(/\s*$/, '')}\n  searchPostcodes,\n} from './data/australianPostcodes';`
     );
     out = out.replace(
       'export default function App() {',

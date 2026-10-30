@@ -215,6 +215,7 @@ export interface AppConfig {
   logoUrl?: string;
   promoBannerSlogan?: string;
   enablePromoBanner?: boolean;
+  lockTopBannerOnScroll?: boolean; // When enabled (default: true), keeps top announcement banner & header locked on scrolling
   enableDrivewayFitGuarantee?: boolean; // Feature flag: 100% Driveway Fit Guarantee & assessment process
   enableGoogleCalendarLink?: boolean; // Feature flag: Google Calendar availability & slot integrations in customer flow (default off)
   quoteValidityDays?: number; // Exactly 30 calendar days

@@ -31,8 +31,8 @@ import {
   AUSTRALIAN_POSTCODES,
   PORTABOX_DEPOTS,
   findClosestDepot,
-  searchPostcodes,
   PostcodeRecord,
+  searchPostcodes,
 } from './data/australianPostcodes';
 import {
   calculateQuote,
@@ -55,6 +55,9 @@ import {
   StorageDuration,
 } from './types/quote';
 import { applyLanguageToDOM, getSavedLanguage } from './services/translationService';
+import { AdminLoginModal } from './components/auth/AdminLoginModal';
+import { StaffSession } from './types/adminAuth';
+import { getStaffSession, clearStaffSession, hasStaffPermission } from './services/adminAuthService';
 
 /**
  * The website's postcode boxes hand off here as ?postcode=3000.
@@ -74,6 +77,12 @@ export default function App() {
   // App Config & Persistent Leads
   const [config, setConfig] = useState<AppConfig>(loadAppConfig());
   const [leads, setLeads] = useState<CustomerLead[]>(loadCustomerLeads());
+
+  // Staff Authentication & Role-Based Access Control (2FA)
+  const [staffSession, setStaffSessionState] = useState<StaffSession | null>(getStaffSession());
+  const [isAdminLoginModalOpen, setIsAdminLoginModalOpen] = useState(false);
+  const [targetFeatureAfterLogin, setTargetFeatureAfterLogin] = useState<string | undefined>(undefined);
+
   const [isAdminOpen, setIsAdminOpen] = useState(false);
   const [adminInitialTab, setAdminInitialTab] = useState<'pricing_matrix' | 'telephony' | string>('pricing_matrix');
   const [isCustomerPortalOpen, setIsCustomerPortalOpen] = useState(false);
@@ -85,6 +94,37 @@ export default function App() {
   const [isSpaceCalculatorOpen, setIsSpaceCalculatorOpen] = useState(false);
   const [isPlacementCheckerOpen, setIsPlacementCheckerOpen] = useState(false);
   const [isCoverageMapModalOpen, setIsCoverageMapModalOpen] = useState(false);
+
+  const handleOpenStaffLogin = (targetFeature?: string) => {
+    setTargetFeatureAfterLogin(targetFeature);
+    setIsAdminLoginModalOpen(true);
+  };
+
+  const handleStaffLoginSuccess = (session: StaffSession) => {
+    setStaffSessionState(session);
+    // Route user directly to their authorized portal or requested feature
+    if (targetFeatureAfterLogin === 'driver' && hasStaffPermission(session.user, 'driver_portal')) {
+      setIsDriverPortalOpen(true);
+    } else if (targetFeatureAfterLogin === 'dispatch' && hasStaffPermission(session.user, 'dispatch_calendar')) {
+      setIsCallCenterOpen(true);
+    } else if (targetFeatureAfterLogin === 'admin' && hasStaffPermission(session.user, 'pricing_and_rates')) {
+      setIsAdminOpen(true);
+    } else if (session.user.role === 'driver') {
+      setIsDriverPortalOpen(true);
+    } else if (session.user.role === 'call_center') {
+      setIsCallCenterOpen(true);
+    } else {
+      setIsAdminOpen(true);
+    }
+  };
+
+  const handleStaffLogout = () => {
+    clearStaffSession();
+    setStaffSessionState(null);
+    setIsAdminOpen(false);
+    setIsCallCenterOpen(false);
+    setIsDriverPortalOpen(false);
+  };
 
   // Quote Flow State
   const [currentStep, setCurrentStep] = useState<number>(1);
@@ -566,8 +606,19 @@ export default function App() {
       <Header
         currentStep={currentStep}
         onBack={handleBack}
+        staffSession={staffSession}
+        onOpenStaffLogin={() => handleOpenStaffLogin()}
+        onStaffLogout={handleStaffLogout}
+        onOpenStaffPermissions={() => {
+          setAdminInitialTab('staff_permissions');
+          setIsAdminOpen(true);
+        }}
         isAdminOpen={isAdminOpen}
         onToggleAdmin={() => {
+          if (!staffSession) {
+            handleOpenStaffLogin('admin');
+            return;
+          }
           setIsAdminOpen(!isAdminOpen);
           if (!isAdminOpen) setIsCallCenterOpen(false);
         }}
@@ -575,17 +626,31 @@ export default function App() {
         onToggleCallCenter={
           config.enableCallCenterDispatch !== false
             ? () => {
+                if (!staffSession) {
+                  handleOpenStaffLogin('dispatch');
+                  return;
+                }
                 setIsCallCenterOpen(!isCallCenterOpen);
                 if (!isCallCenterOpen) setIsAdminOpen(false);
               }
             : undefined
         }
         onOpenCustomerPortal={() => setIsCustomerPortalOpen(true)}
-        onOpenDriverPortal={() => setIsDriverPortalOpen(true)}
+        onOpenDriverPortal={() => {
+          if (!staffSession) {
+            handleOpenStaffLogin('driver');
+            return;
+          }
+          setIsDriverPortalOpen(true);
+        }}
         onOpenSpaceCalculator={() => setIsSpaceCalculatorOpen(true)}
         onOpenPlacementChecker={config.enableDrivewayFitGuarantee ? () => setIsPlacementCheckerOpen(true) : undefined}
         onOpenCoverageMap={() => setIsCoverageMapModalOpen(true)}
         onOpenTelephony={() => {
+          if (!staffSession) {
+            handleOpenStaffLogin('telephony');
+            return;
+          }
           setAdminInitialTab('telephony');
           setIsAdminOpen(true);
           setIsCallCenterOpen(false);
@@ -593,6 +658,7 @@ export default function App() {
         phone={config.phone}
         promoBannerSlogan={config.promoBannerSlogan}
         showPromoBanner={config.enablePromoBanner !== false}
+        lockBannerOnScroll={config.lockTopBannerOnScroll !== false}
       />
 
       {/* Driver Login, Daily Calendar Jobs & Route Portal Modal */}
@@ -727,6 +793,7 @@ export default function App() {
                     onContinue={() => setCurrentStep(4)}
                     onBack={handleBack}
                     config={config}
+                    containerCount={containerCount}
                   />
                 )}
 
@@ -851,7 +918,7 @@ export default function App() {
 
               {/* Right Area: "YOUR QUOTE SO FAR" Tracker (hidden on Steps 9 & 10) */}
               {currentStep < 9 && (
-                <div className="lg:col-span-4 xl:col-span-4 2xl:col-span-4 sticky top-20 sm:top-24">
+                <div className="lg:col-span-4 xl:col-span-4 2xl:col-span-4 sticky top-24 sm:top-28">
                   <RightSidebar
                     currentStep={currentStep}
                     onJumpToStep={handleJumpToStep}
@@ -930,10 +997,16 @@ export default function App() {
                 Customer Portal
               </button>
               <button
-                onClick={() => setIsAdminOpen(true)}
+                onClick={() => {
+                  if (staffSession) {
+                    setIsAdminOpen(true);
+                  } else {
+                    handleOpenStaffLogin('admin');
+                  }
+                }}
                 className="text-slate-600 hover:text-slate-900 font-semibold cursor-pointer"
               >
-                Admin Portal
+                {staffSession ? `Staff Portal (${staffSession.user.name.split(' ')[0]})` : 'Staff & Admin Login (2FA)'}
               </button>
             </div>
           </div>
@@ -1005,19 +1078,21 @@ export default function App() {
         />
       )}
 
-      {/* Floating Twilio Softphone Dialer & Inbound Alert Bar */}
-      <TwilioSoftphoneBar
-        onOpenScreenPop={(cust: CustomerAccount | null, call: TelephonyCall | null) => {
-          setScreenPopCustomer(cust);
-          setActiveTelephonyCall(call);
-          setIsCustomer360Open(true);
-        }}
-        onOpenTelephonyHub={() => {
-          setAdminInitialTab('telephony');
-          setIsAdminOpen(true);
-          setIsCallCenterOpen(false);
-        }}
-      />
+      {/* Floating Twilio Softphone Dialer & Inbound Alert Bar (Only Rendered for 2FA-Authenticated Staff with Telephony Permission) */}
+      {staffSession && hasStaffPermission(staffSession.user, 'softphone_telephony') && (
+        <TwilioSoftphoneBar
+          onOpenScreenPop={(cust: CustomerAccount | null, call: TelephonyCall | null) => {
+            setScreenPopCustomer(cust);
+            setActiveTelephonyCall(call);
+            setIsCustomer360Open(true);
+          }}
+          onOpenTelephonyHub={() => {
+            setAdminInitialTab('telephony');
+            setIsAdminOpen(true);
+            setIsCallCenterOpen(false);
+          }}
+        />
+      )}
 
       {/* Slide-over Customer 360 Screen-Pop Workspace */}
       <Customer360Drawer
@@ -1039,6 +1114,14 @@ export default function App() {
             setOriginPostcode(found);
           }
         }}
+      />
+
+      {/* 2FA Protected Portabox Staff & Admin Login Modal */}
+      <AdminLoginModal
+        isOpen={isAdminLoginModalOpen}
+        onClose={() => setIsAdminLoginModalOpen(false)}
+        onLoginSuccess={handleStaffLoginSuccess}
+        targetFeatureLabel={targetFeatureAfterLogin}
       />
     </div>
   );

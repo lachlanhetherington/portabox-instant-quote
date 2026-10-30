@@ -146,6 +146,8 @@ import { LocationServiceHoursManager } from './admin/LocationServiceHoursManager
 import { AdminCopilotChat } from './admin/AdminCopilotChat';
 import { FinancialDataExportModal } from './admin/FinancialDataExportModal';
 import { CompetitorPricingWorkspace } from './admin/CompetitorPricingWorkspace';
+import { StaffPermissionsWorkspace } from './admin/StaffPermissionsWorkspace';
+import { getStaffSession } from '../services/adminAuthService';
 
 interface AdminPortalProps {
   config: AppConfig;
@@ -1094,6 +1096,8 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
           ? 'Quote Lifecycle & Annual Cap'
           : tabId === 'freeze_management'
           ? 'Frozen Pricing & Revenue Impact'
+          : tabId === 'staff_permissions'
+          ? 'Staff Roles & 2FA Governance'
           : 'Tab');
       const newTab: WorkspaceTab = {
         id: `tab-${tabId}-${Date.now()}`,
@@ -1249,6 +1253,13 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                 onAddLeadNote={onAddLeadNote}
               />
             </div>
+          )}
+
+          {/* ================= TAB: STAFF ROLES & 2FA GOVERNANCE (CEO & OPS MANAGER) ================= */}
+          {activeTab === 'staff_permissions' && (
+            <StaffPermissionsWorkspace
+              currentSession={getStaffSession()}
+            />
           )}
 
           {/* ================= TAB 0: PRICING MATRIX & LIVE SIMULATOR (PRIMARY WORKSPACE) ================= */}

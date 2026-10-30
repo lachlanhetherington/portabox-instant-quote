@@ -10,9 +10,15 @@ import {
   CircleDollarSign,
   Info,
 } from 'lucide-react';
-import { PostcodeRecord, DepotLocation } from '../data/australianPostcodes';
+import { PostcodeRecord, DepotLocation, findClosestDepot } from '../data/australianPostcodes';
 import { LogisticsMethod, ServiceType, AppConfig } from '../types/quote';
 import { TraditionalStorageComparison } from './TraditionalStorageComparison';
+import {
+  getMetroHubForPostcode,
+  getLocationPricingForHub,
+  calculateLegFuelSurcharge,
+  DEFAULT_CONFIG,
+} from '../services/pricingEngine';
 
 interface Step3LoadingLogisticsProps {
   originPostcode: PostcodeRecord;
@@ -31,6 +37,7 @@ interface Step3LoadingLogisticsProps {
   onContinue: () => void;
   onBack: () => void;
   config?: AppConfig;
+  containerCount?: number;
 }
 
 export const Step3LoadingLogistics: React.FC<Step3LoadingLogisticsProps> = ({
@@ -48,6 +55,8 @@ export const Step3LoadingLogistics: React.FC<Step3LoadingLogisticsProps> = ({
   legsSavedDollarTotal = 0,
   onContinue,
   onBack,
+  config,
+  containerCount = 1,
 }) => {
   const isStorageFacility = serviceType === 'storage_facility';
   const isMoving = serviceType === 'moving' || serviceType === 'moving_storage';
@@ -57,6 +66,109 @@ export const Step3LoadingLogistics: React.FC<Step3LoadingLogisticsProps> = ({
   const destSuburbLabel = isStorageFacility 
     ? 'When finished storing' 
     : (destinationPostcode ? destinationPostcode.suburb : 'Destination');
+
+  const activeConfig = config || DEFAULT_CONFIG;
+  const cCount = containerCount > 0 ? containerCount : 1;
+
+  // Origin exact savings: 1 delivery leg to customer + 1 delivery leg back to warehouse + fuel surcharge on each leg
+  const originHub = getMetroHubForPostcode(originPostcode);
+  const originLocConfig = getLocationPricingForHub(activeConfig, originHub);
+  const originDeliveryZones = originLocConfig.deliveryZones;
+  const oDist = originDistanceKm !== undefined ? originDistanceKm : findClosestDepot(originPostcode.lat, originPostcode.lng).distanceKm;
+
+  let oZone = 'A';
+  let oBase = originDeliveryZones.zoneABaseFee ?? 149;
+  let oKm = 0;
+  if (oDist < (originDeliveryZones.zoneAMaxKm ?? 25)) {
+    oZone = 'A';
+    oBase = originDeliveryZones.zoneABaseFee ?? 149;
+    oKm = Math.round(oDist * (originDeliveryZones.zoneARatePerKm ?? 0));
+  } else if (oDist < (originDeliveryZones.zoneBMaxKm ?? 50)) {
+    oZone = 'B';
+    oBase = originDeliveryZones.zoneBBaseFee ?? 199;
+    oKm = Math.round(oDist * (originDeliveryZones.zoneBRatePerKm ?? 0));
+  } else if (oDist < (originDeliveryZones.zoneCMaxKm ?? 75)) {
+    oZone = 'C';
+    oBase = originDeliveryZones.zoneCBaseFee ?? 249;
+    oKm = Math.round(oDist * (originDeliveryZones.zoneCRatePerKm ?? 0));
+  } else if (oDist <= (originDeliveryZones.zoneDMaxKm ?? 100)) {
+    oZone = 'D';
+    oBase = originDeliveryZones.zoneDBaseFee ?? 299;
+    oKm = Math.round(oDist * (originDeliveryZones.zoneDRatePerKm ?? 0));
+  } else {
+    oZone = 'E';
+    oBase = originDeliveryZones.zoneEBaseFee ?? 249;
+    oKm = Math.round(oDist * (originDeliveryZones.zoneERatePerKm ?? 5.0));
+  }
+
+  const oFuel = calculateLegFuelSurcharge({
+    zone: oZone,
+    distanceKm: oDist,
+    containerCount: cCount,
+    config: activeConfig,
+  });
+
+  const oneOriginLegDeliveryFee = oBase + oKm;
+  const oneOriginLegFuel = oFuel.ratePerContainer;
+  const totalOriginSavings = (oneOriginLegDeliveryFee + oneOriginLegFuel) * 2 * cCount;
+
+  // Destination exact savings (for destination unloading):
+  // 1 delivery leg to destination + 1 collection leg back to warehouse + fuel surcharge on each leg
+  const destPostcodeRecord = destinationPostcode || originPostcode;
+  const destHub = getMetroHubForPostcode(destPostcodeRecord);
+  const destLocConfig = getLocationPricingForHub(activeConfig, destHub);
+  const destDeliveryZones = destLocConfig.deliveryZones;
+  const dDist = destinationPostcode
+    ? findClosestDepot(destinationPostcode.lat, destinationPostcode.lng).distanceKm
+    : oDist;
+
+  let dZone = 'A';
+  let dBase = destDeliveryZones.zoneABaseFee ?? 149;
+  let dKm = 0;
+  if (dDist < (destDeliveryZones.zoneAMaxKm ?? 25)) {
+    dZone = 'A';
+    dBase = destDeliveryZones.zoneABaseFee ?? 149;
+    dKm = Math.round(dDist * (destDeliveryZones.zoneARatePerKm ?? 0));
+  } else if (dDist < (destDeliveryZones.zoneBMaxKm ?? 50)) {
+    dZone = 'B';
+    dBase = destDeliveryZones.zoneBBaseFee ?? 199;
+    dKm = Math.round(dDist * (destDeliveryZones.zoneBRatePerKm ?? 0));
+  } else if (dDist < (destDeliveryZones.zoneCMaxKm ?? 75)) {
+    dZone = 'C';
+    dBase = destDeliveryZones.zoneCBaseFee ?? 249;
+    dKm = Math.round(dDist * (destDeliveryZones.zoneCRatePerKm ?? 0));
+  } else if (dDist <= (destDeliveryZones.zoneDMaxKm ?? 100)) {
+    dZone = 'D';
+    dBase = destDeliveryZones.zoneDBaseFee ?? 299;
+    dKm = Math.round(dDist * (destDeliveryZones.zoneDRatePerKm ?? 0));
+  } else {
+    dZone = 'E';
+    dBase = destDeliveryZones.zoneEBaseFee ?? 249;
+    dKm = Math.round(dDist * (destDeliveryZones.zoneERatePerKm ?? 5.0));
+  }
+
+  const dFuel = calculateLegFuelSurcharge({
+    zone: dZone,
+    distanceKm: dDist,
+    containerCount: cCount,
+    config: activeConfig,
+  });
+
+  const oneDestLegDeliveryFee = dBase + dKm;
+  const oneDestLegFuel = dFuel.ratePerContainer;
+  const totalDestSavings = (oneDestLegDeliveryFee + oneDestLegFuel) * 2 * cCount;
+
+  // Dynamic calculated savings for the configured options
+  const isOriginDepot = originLogisticsMethod === 'depot_loading';
+  const isDestDepot = hasDestination && destinationLogisticsMethod === 'depot_loading';
+
+  const dynamicCalculatedSavings =
+    (isOriginDepot ? totalOriginSavings : 0) +
+    (isDestDepot ? totalDestSavings : 0);
+
+  const totalAmountSaved = (legsSavedDollarTotal && legsSavedDollarTotal > 0)
+    ? legsSavedDollarTotal
+    : dynamicCalculatedSavings;
 
   return (
     <div className="bg-white rounded-3xl p-6 sm:p-8 lg:p-10 border border-slate-200/80 shadow-xs">
@@ -69,45 +181,9 @@ export const Step3LoadingLogistics: React.FC<Step3LoadingLogisticsProps> = ({
           Where would you like to load your container?
         </h2>
         <p className="mt-2 text-sm sm:text-base text-slate-600 max-w-2xl leading-relaxed">
-          Load at home for maximum convenience, or bring your items directly to our secure Portabox depot location to eliminate delivery fees and save up to 4 legs!
+          Load at home for maximum convenience or bring your items directly to our location to save delivery charges.
         </p>
       </div>
-
-      {/* Live Savings Alert Banner */}
-      {legsSavedCount > 0 ? (
-        <div className="mb-8 p-4 sm:p-5 rounded-2xl bg-emerald-50 border-2 border-emerald-400 text-emerald-950 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 shadow-xs">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-emerald-500 text-white flex items-center justify-center shrink-0">
-              <CircleDollarSign className="w-6 h-6" />
-            </div>
-            <div>
-              <div className="text-sm sm:text-base font-black text-emerald-900 flex items-center gap-2">
-                <span>Saving {legsSavedCount} Delivery Legs!</span>
-                {legsSavedDollarTotal > 0 && (
-                  <span className="bg-emerald-200 text-emerald-900 px-2 py-0.5 rounded-md text-xs font-black">
-                    Save ~${legsSavedDollarTotal}
-                  </span>
-                )}
-              </div>
-              <p className="text-xs text-emerald-800 mt-0.5">
-                {legsSavedCount === 4
-                  ? 'Maximum savings active! All local delivery and retrieval leg fees are waived.'
-                  : 'Great savings! Local delivery and retrieval fees waived for your chosen depot legs.'}
-              </p>
-            </div>
-          </div>
-          <span className="text-xs font-bold text-emerald-700 bg-white px-3 py-1.5 rounded-lg border border-emerald-300 shrink-0">
-            100% Free Depot Access
-          </span>
-        </div>
-      ) : (
-        <div className="mb-8 p-4 rounded-2xl bg-slate-50 border border-slate-200 text-slate-700 flex items-center gap-3">
-          <Info className="w-5 h-5 text-slate-500 shrink-0" />
-          <p className="text-xs sm:text-sm">
-            <strong className="font-semibold text-slate-900">Pro Tip:</strong> Choosing to load or unload at a Portabox Depot saves between 2 and 4 delivery legs (saving $240 to $500+).
-          </p>
-        </div>
-      )}
 
       {/* SECTION 1: ORIGIN LOADING */}
       <div className="mb-10">
@@ -119,7 +195,7 @@ export const Step3LoadingLogistics: React.FC<Step3LoadingLogisticsProps> = ({
         </div>
 
         <div className={`grid grid-cols-1 ${serviceType !== 'storage_at_place' ? 'md:grid-cols-2' : 'max-w-xl'} gap-4`}>
-          {/* Option A: Home Delivery (Green Focus) */}
+          {/* Option A: Home Delivery */}
           <div
             onClick={() => onSelectOriginLogistics('home_delivery')}
             className={`p-5 rounded-2xl border-2 transition-all cursor-pointer flex flex-col justify-between ${
@@ -150,33 +226,13 @@ export const Step3LoadingLogistics: React.FC<Step3LoadingLogisticsProps> = ({
                 </div>
               </div>
 
-              <p className="text-xs text-slate-600 mb-4 leading-relaxed">
-                We drop the container right at your driveway or street curb. Pack at your own pace over several days before we pick it up.
+              <p className="text-xs text-slate-600 leading-relaxed">
+                We drop the container right at your driveway or street curb. Pack at your own pace.
               </p>
-
-              <div className="space-y-2 text-xs text-slate-600 border-t border-slate-100 pt-3">
-                <div className="flex items-center gap-2">
-                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                  <span>Ground-level easy loading at your front door</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                  <span>No hire trailer or truck rental needed</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                  <span>Convenient scheduled delivery window</span>
-                </div>
-              </div>
-            </div>
-
-            <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between text-xs">
-              <span className="text-slate-500">Delivery Fee</span>
-              <span className={`font-bold ${originLogisticsMethod === 'home_delivery' ? 'text-emerald-700' : 'text-slate-900'}`}>Standard Delivery Rates</span>
             </div>
           </div>
 
-          {/* Option B: Depot Loading (Blue Focus) - Only displayed for Portabox facility or moving, not storage at place */}
+          {/* Option B: Load at Our Location */}
           {serviceType !== 'storage_at_place' && (
             <div
               onClick={() => onSelectOriginLogistics('depot_loading')}
@@ -197,13 +253,13 @@ export const Step3LoadingLogistics: React.FC<Step3LoadingLogisticsProps> = ({
                     <div>
                       <div className="flex items-center gap-1.5 flex-wrap">
                         <h4 className="text-sm sm:text-base font-bold text-slate-900">
-                          Load at Portabox Depot
+                          Load at Our Location
                         </h4>
                         <span className="bg-sky-100 text-[#15385E] border border-sky-200 text-[10px] font-black px-1.5 py-0.5 rounded">
-                          SAVE 2 LEGS
+                          SAVE ${totalOriginSavings}
                         </span>
                       </div>
-                      <span className="text-xs text-sky-800 font-semibold">{originDepot.name}</span>
+                      <span className="text-xs text-sky-800 font-semibold">{originDepot.name.replace(/\s*Depot/i, ' Location')}</span>
                     </div>
                   </div>
                   <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${
@@ -213,12 +269,12 @@ export const Step3LoadingLogistics: React.FC<Step3LoadingLogisticsProps> = ({
                   </div>
                 </div>
 
-                <p className="text-xs text-slate-600 mb-4 leading-relaxed">
-                  Bring your vehicle, ute, or hire van directly to our secure facility. Back straight into a ground-level bay and load directly into your container.
+                <p className="text-xs text-slate-600 mb-3 leading-relaxed">
+                  Bring your vehicle, ute, or hire van directly to our location and load directly into your container.
                 </p>
 
-                {/* Depot Address & Info Card */}
-                <div className="p-3 bg-white rounded-xl border border-sky-200/80 mb-3 space-y-1.5 text-xs">
+                {/* Location Info Card */}
+                <div className="p-3 bg-white rounded-xl border border-sky-200/80 space-y-1.5 text-xs">
                   <div className="flex items-start gap-1.5 text-slate-700">
                     <MapPin className="w-3.5 h-3.5 text-[#15385E] shrink-0 mt-0.5" />
                     <span className="font-semibold">{originDepot.address}, {originDepot.suburb} {originDepot.state} {originDepot.postcode}</span>
@@ -233,31 +289,10 @@ export const Step3LoadingLogistics: React.FC<Step3LoadingLogisticsProps> = ({
                     <span>Mon–Fri: 7:00 AM – 5:00 PM · Sat: 8:00 AM – 2:00 PM</span>
                   </div>
                 </div>
-
-                <div className="space-y-1.5 text-xs text-slate-600">
-                  <div className="flex items-center gap-2">
-                    <CheckCircle2 className="w-3.5 h-3.5 text-[#15385E] shrink-0" />
-                    <span>Zero initial delivery fee &amp; zero pickup fee</span>
-                  </div>
-                </div>
-              </div>
-
-              <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between text-xs">
-                <span className="text-[#15385E] font-semibold">Delivery Fee</span>
-                <span className="font-black text-[#15385E] text-sm">One delivery fee saved</span>
               </div>
             </div>
           )}
         </div>
-
-        {/* Why Portabox Depot Storage Beats Traditional Self-Storage - Only shown when depot loading is applicable */}
-        {serviceType !== 'storage_at_place' && (
-          <TraditionalStorageComparison
-            variant="compact"
-            className="mt-4"
-            defaultExpanded={originLogisticsMethod === 'depot_loading'}
-          />
-        )}
       </div>
 
       {/* SECTION 2: DESTINATION OR STORAGE COMPLETION UNLOADING */}
@@ -273,7 +308,7 @@ export const Step3LoadingLogistics: React.FC<Step3LoadingLogisticsProps> = ({
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {/* Option A: Home Redelivery (Green Focus) */}
+            {/* Option A: Deliver Container to My Address */}
             <div
               onClick={() => onSelectDestinationLogistics('home_delivery')}
               className={`p-5 rounded-2xl border-2 transition-all cursor-pointer flex flex-col justify-between ${
@@ -292,7 +327,7 @@ export const Step3LoadingLogistics: React.FC<Step3LoadingLogisticsProps> = ({
                     </div>
                     <div>
                       <h4 className="text-sm sm:text-base font-bold text-slate-900">
-                        Deliver to Address
+                        {isStorageFacility ? 'Deliver Container to My Home' : 'Deliver Container to My New Address'}
                       </h4>
                       <span className="text-xs text-slate-500">
                         {isStorageFacility ? `Redelivery to ${originPostcode.suburb}` : `Delivery to ${destSuburbLabel}`}
@@ -306,31 +341,15 @@ export const Step3LoadingLogistics: React.FC<Step3LoadingLogisticsProps> = ({
                   </div>
                 </div>
 
-                <p className="text-xs text-slate-600 mb-4 leading-relaxed">
+                <p className="text-xs text-slate-600 leading-relaxed">
                   {isStorageFacility
-                    ? 'When you finish storing, we redeliver the full container directly to your home address, let you unpack, and retrieve the empty container.'
-                    : `We deliver the container directly to your address in ${destSuburbLabel} and return to pick up the empty container once unpacked.`}
+                    ? 'When your storage term ends, we deliver the full container directly to you, let you unpack, and retrieve the empty container.'
+                    : `We deliver the container directly to your new address in ${destSuburbLabel}, let you unpack, and retrieve the empty container.`}
                 </p>
-
-                <div className="space-y-2 text-xs text-slate-600 border-t border-slate-100 pt-3">
-                  <div className="flex items-center gap-2">
-                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                    <span>Unpack comfortably at your home address</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                    <span>Container picked up once unpacked</span>
-                  </div>
-                </div>
-              </div>
-
-              <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between text-xs">
-                <span className="text-slate-500">Delivery Fee</span>
-                <span className={`font-bold ${destinationLogisticsMethod === 'home_delivery' ? 'text-emerald-700' : 'text-slate-900'}`}>Standard Delivery Rates</span>
               </div>
             </div>
 
-            {/* Option B: Depot Unloading (Blue Focus) */}
+            {/* Option B: Unload at Our Location */}
             <div
               onClick={() => onSelectDestinationLogistics('depot_loading')}
               className={`p-5 rounded-2xl border-2 transition-all cursor-pointer flex flex-col justify-between relative ${
@@ -350,13 +369,13 @@ export const Step3LoadingLogistics: React.FC<Step3LoadingLogisticsProps> = ({
                     <div>
                       <div className="flex items-center gap-1.5 flex-wrap">
                         <h4 className="text-sm sm:text-base font-bold text-slate-900">
-                          Unload at Portabox Depot
+                          Unload at Our Location
                         </h4>
                         <span className="bg-sky-100 text-[#15385E] border border-sky-200 text-[10px] font-black px-1.5 py-0.5 rounded">
-                          SAVE 2 LEGS
+                          SAVE ${totalDestSavings}
                         </span>
                       </div>
-                      <span className="text-xs text-sky-800 font-semibold">{destDepotToUse.name}</span>
+                      <span className="text-xs text-sky-800 font-semibold">{destDepotToUse.name.replace(/\s*Depot/i, ' Location')}</span>
                     </div>
                   </div>
                   <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${
@@ -366,14 +385,12 @@ export const Step3LoadingLogistics: React.FC<Step3LoadingLogisticsProps> = ({
                   </div>
                 </div>
 
-                <p className="text-xs text-slate-600 mb-4 leading-relaxed">
-                  {isStorageFacility
-                    ? 'When your storage term ends, drive in to the depot, unpack your container straight into your vehicle, and leave without paying redelivery or collection fees.'
-                    : `Drive in to the destination ${destDepotToUse.name} to unpack your container directly into your vehicle. No local delivery or retrieval fees at destination.`}
+                <p className="text-xs text-slate-600 mb-3 leading-relaxed">
+                  When your storage term ends, unpack at your pace directly into your vehicle.
                 </p>
 
-                {/* Destination Depot Details */}
-                <div className="p-3 bg-white rounded-xl border border-sky-200/80 mb-3 space-y-1.5 text-xs">
+                {/* Location Info Card */}
+                <div className="p-3 bg-white rounded-xl border border-sky-200/80 space-y-1.5 text-xs">
                   <div className="flex items-start gap-1.5 text-slate-700">
                     <MapPin className="w-3.5 h-3.5 text-[#15385E] shrink-0 mt-0.5" />
                     <span className="font-semibold">{destDepotToUse.address}, {destDepotToUse.suburb} {destDepotToUse.state}</span>
@@ -383,18 +400,6 @@ export const Step3LoadingLogistics: React.FC<Step3LoadingLogisticsProps> = ({
                     <span>Mon–Fri: 7:00 AM – 5:00 PM · Sat: 8:00 AM – 2:00 PM</span>
                   </div>
                 </div>
-
-                <div className="space-y-1.5 text-xs text-slate-600">
-                  <div className="flex items-center gap-2">
-                    <CheckCircle2 className="w-3.5 h-3.5 text-[#15385E] shrink-0" />
-                    <span>Eliminates redelivery fee &amp; container collection fee</span>
-                  </div>
-                </div>
-              </div>
-
-              <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between text-xs">
-                <span className="text-[#15385E] font-semibold">Delivery Fee</span>
-                <span className="font-black text-[#15385E] text-sm">One delivery fee saved</span>
               </div>
             </div>
           </div>
@@ -402,24 +407,32 @@ export const Step3LoadingLogistics: React.FC<Step3LoadingLogisticsProps> = ({
       )}
 
       {/* Summary Recap Box */}
-      <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 text-slate-700 text-xs sm:text-sm mb-8 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-        <div>
-          <span className="font-bold text-slate-900">Configured Logistics: </span>
-          <span>
-            {originLogisticsMethod === 'depot_loading' ? 'Self-load at Depot' : 'Home Delivery'}
+      <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 text-slate-800 text-xs sm:text-sm mb-8 flex flex-col md:flex-row items-start md:items-center justify-between gap-3 shadow-2xs">
+        <div className="flex-1">
+          <span className="font-black text-[#15385E]">Configured Logistics: </span>
+          <span className="font-semibold text-slate-700">
+            {originLogisticsMethod === 'depot_loading' ? 'Self-load at Our Location' : 'Home Delivery'}
             {' → '}
             {hasDestination
-              ? (destinationLogisticsMethod === 'depot_loading' ? 'Self-unload at Depot' : 'Home Redelivery')
-              : 'Container Stays at Place'}
+              ? (destinationLogisticsMethod === 'depot_loading' ? 'Self-unload at Our Location' : 'Home Delivery')
+              : 'Container Stays at Home'}
           </span>
         </div>
-        <div className="text-slate-600">
-          {legsSavedCount > 0 ? (
-            <span className="text-emerald-700 font-bold">
-              Total {legsSavedCount} legs waived from delivery quote
+        <div className="shrink-0">
+          {isOriginDepot && isDestDepot ? (
+            <span className="inline-flex items-center gap-1.5 text-emerald-800 font-extrabold bg-emerald-100/90 px-3 py-1.5 rounded-xl border border-emerald-300 shadow-2xs whitespace-nowrap">
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+              <span>Total saved: ${Math.round(totalAmountSaved)}</span>
+            </span>
+          ) : isOriginDepot || isDestDepot ? (
+            <span className="inline-flex items-center gap-1.5 text-emerald-800 font-extrabold bg-emerald-100/90 px-3 py-1.5 rounded-xl border border-emerald-300 shadow-2xs whitespace-nowrap">
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+              <span>Total saved: ${Math.round(totalAmountSaved)}</span>
             </span>
           ) : (
-            <span>Full-service door-to-door delivery</span>
+            <span className="inline-flex items-center px-3 py-1.5 rounded-xl bg-slate-200/70 text-slate-600 font-bold border border-slate-200 whitespace-nowrap">
+              Full-service delivery
+            </span>
           )}
         </div>
       </div>

@@ -409,45 +409,14 @@ export const Step4When: React.FC<Step4WhenProps> = ({
           </p>
         </div>
 
-        {/* 5 Billing Buttons */}
+        {/* 3 Streamlined Billing Buttons: Monthly, 6 Months Upfront, 12 Months Upfront */}
         <div className="space-y-3">
-          {/* 1. Weekly */}
-          <button
-            type="button"
-            onClick={() => onSelectBillingCycle('weekly')}
-            className={`w-full p-4 rounded-2xl border text-left transition-all cursor-pointer flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
-              billingCycle === 'weekly'
-                ? 'border-[#5CC1EF] bg-white ring-2 ring-[#5CC1EF]/30 shadow-sm'
-                : 'border-slate-200 bg-white/70 hover:bg-white'
-            }`}
-          >
-            <div className="flex items-center gap-3">
-              <div
-                className={`w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 ${
-                  billingCycle === 'weekly' ? 'border-[#5CC1EF] bg-[#5CC1EF]' : 'border-slate-300 bg-white'
-                }`}
-              >
-                {billingCycle === 'weekly' && <Check className="w-3.5 h-3.5 text-[#15385E] stroke-[3]" />}
-              </div>
-              <div className="text-sm font-extrabold text-[#15385E]">Weekly</div>
-            </div>
-
-            <div className="flex flex-row sm:flex-col items-baseline sm:items-end justify-between sm:justify-center gap-1 pl-8 sm:pl-0">
-              <div className="text-base font-extrabold text-[#15385E] font-mono">
-                ${weeklyRate}<span className="text-xs font-normal text-slate-500">/wk</span>
-              </div>
-              <span className="text-[11px] font-bold text-slate-400">
-                Standard weekly base rate
-              </span>
-            </div>
-          </button>
-
-          {/* 2. Monthly */}
+          {/* 1. Monthly */}
           <button
             type="button"
             onClick={() => onSelectBillingCycle('monthly')}
             className={`w-full p-4 rounded-2xl border text-left transition-all cursor-pointer flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
-              billingCycle === 'monthly'
+              billingCycle === 'monthly' || billingCycle === 'weekly' || billingCycle === '3_months_upfront'
                 ? 'border-[#5CC1EF] bg-white ring-2 ring-[#5CC1EF]/30 shadow-sm'
                 : 'border-slate-200 bg-white/70 hover:bg-white'
             }`}
@@ -455,15 +424,15 @@ export const Step4When: React.FC<Step4WhenProps> = ({
             <div className="flex items-center gap-3">
               <div
                 className={`w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 ${
-                  billingCycle === 'monthly' ? 'border-[#5CC1EF] bg-[#5CC1EF]' : 'border-slate-300 bg-white'
+                  billingCycle === 'monthly' || billingCycle === 'weekly' || billingCycle === '3_months_upfront' ? 'border-[#5CC1EF] bg-[#5CC1EF]' : 'border-slate-300 bg-white'
                 }`}
               >
-                {billingCycle === 'monthly' && <Check className="w-3.5 h-3.5 text-[#15385E] stroke-[3]" />}
+                {(billingCycle === 'monthly' || billingCycle === 'weekly' || billingCycle === '3_months_upfront') && <Check className="w-3.5 h-3.5 text-[#15385E] stroke-[3]" />}
               </div>
               <div className="text-sm font-extrabold text-[#15385E] flex items-center gap-2">
-                <span>Monthly</span>
+                <span>Monthly Ongoing</span>
                 <span className="text-[10px] font-extrabold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-full border border-emerald-300">
-                  POPULAR
+                  MOST POPULAR
                 </span>
                 {durationDiscountPct > 0 && (
                   <span className="text-[10px] font-black text-[#15385E] bg-[#F7D347] px-2 py-0.5 rounded-full border border-[#e6c338]">
@@ -492,40 +461,7 @@ export const Step4When: React.FC<Step4WhenProps> = ({
                 )}
               </div>
               <span className="text-[11px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
-                {durationDiscountPct > 0 ? `Save $${durationDiscountDollars}/mo (${durationDiscountPct}% duration discount)` : `${monthlySavingsPercent}% savings vs weekly`}
-              </span>
-            </div>
-          </button>
-
-          {/* 3. 3 months upfront then monthly */}
-          <button
-            type="button"
-            onClick={() => onSelectBillingCycle('3_months_upfront')}
-            className={`w-full p-4 rounded-2xl border text-left transition-all cursor-pointer flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
-              billingCycle === '3_months_upfront'
-                ? 'border-[#5CC1EF] bg-white ring-2 ring-[#5CC1EF]/30 shadow-sm'
-                : 'border-slate-200 bg-white/70 hover:bg-white'
-            }`}
-          >
-            <div className="flex items-center gap-3">
-              <div
-                className={`w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 ${
-                  billingCycle === '3_months_upfront' ? 'border-[#5CC1EF] bg-[#5CC1EF]' : 'border-slate-300 bg-white'
-                }`}
-              >
-                {billingCycle === '3_months_upfront' && <Check className="w-3.5 h-3.5 text-[#15385E] stroke-[3]" />}
-              </div>
-              <div className="text-sm font-extrabold text-[#15385E]">
-                3 months upfront then monthly
-              </div>
-            </div>
-
-            <div className="flex flex-row sm:flex-col items-baseline sm:items-end justify-between sm:justify-center gap-1 pl-8 sm:pl-0">
-              <div className="text-base font-extrabold text-[#15385E] font-mono">
-                ${Math.round(threeMonthsUpfrontTotal / 3)}<span className="text-xs font-normal text-slate-500">/mo equiv</span>
-              </div>
-              <span className="text-[11px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
-                {threeMonthsSavingsPercent}% total savings
+                {durationDiscountPct > 0 ? `Save $${durationDiscountDollars}/mo (${durationDiscountPct}% duration discount)` : 'Cancel anytime with 14 days notice'}
               </span>
             </div>
           </button>

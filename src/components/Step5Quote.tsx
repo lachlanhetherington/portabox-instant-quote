@@ -1749,7 +1749,7 @@ export const Step5Quote: React.FC<Step5QuoteProps> = ({
                   </span>
                 </div>
                 <p className="text-xs text-slate-600 mt-0.5">
-                  Horizontal level-lift delivery requires only <strong>3.5m overhead clearance</strong> (safely under tree branches &amp; wires).
+                  Horizontal level-lift delivery requires only <strong>4.5m overhead height clearance</strong> (safely under tree branches &amp; wires).
                 </p>
               </div>
             </div>

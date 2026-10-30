@@ -1,6 +1,23 @@
-import React from 'react';
-import { Phone, PhoneCall, ChevronLeft, ShieldCheck, SlidersHorizontal, User, Calendar, Truck, Calculator, Compass } from 'lucide-react';
+import React, { useState } from 'react';
+import {
+  Phone,
+  PhoneCall,
+  ChevronLeft,
+  ShieldCheck,
+  SlidersHorizontal,
+  User,
+  Calendar,
+  Truck,
+  Calculator,
+  Compass,
+  Lock,
+  LogOut,
+  Shield,
+  ChevronDown,
+} from 'lucide-react';
 import { LanguageSelector } from './LanguageSelector';
+import { StaffSession } from '../types/adminAuth';
+import { hasStaffPermission, canManageStaffPermissions } from '../services/adminAuthService';
 
 interface HeaderProps {
   currentStep: number;
@@ -15,9 +32,14 @@ interface HeaderProps {
   onOpenSpaceCalculator?: () => void;
   onOpenPlacementChecker?: () => void;
   onOpenCoverageMap?: () => void;
+  onOpenStaffLogin: () => void;
+  onStaffLogout: () => void;
+  onOpenStaffPermissions?: () => void;
+  staffSession: StaffSession | null;
   phone?: string;
   promoBannerSlogan?: string;
   showPromoBanner?: boolean;
+  lockBannerOnScroll?: boolean;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -33,14 +55,45 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenSpaceCalculator,
   onOpenPlacementChecker,
   onOpenCoverageMap,
+  onOpenStaffLogin,
+  onStaffLogout,
+  onOpenStaffPermissions,
+  staffSession,
   phone = '1800 467 637',
   promoBannerSlogan,
   showPromoBanner = true,
+  lockBannerOnScroll = true,
 }) => {
   const isBannerVisible = showPromoBanner && (promoBannerSlogan === undefined || promoBannerSlogan.trim().length > 0);
+  const isLocked = lockBannerOnScroll !== false;
+  const [isStaffMenuOpen, setIsStaffMenuOpen] = useState(false);
+
+  const currentUser = staffSession?.user;
+  const canAccessDriver = hasStaffPermission(currentUser, 'driver_portal');
+  const canAccessDispatch = hasStaffPermission(currentUser, 'dispatch_calendar');
+  const canAccessSoftphone = hasStaffPermission(currentUser, 'softphone_telephony');
+  const canAccessPricing = hasStaffPermission(currentUser, 'pricing_and_rates');
+  const canManageAccess = canManageStaffPermissions(currentUser);
+
+  const getRoleBadgeStyle = (role?: string) => {
+    switch (role) {
+      case 'ceo':
+        return 'bg-[#15385E] text-white border-white/20';
+      case 'manager':
+        return 'bg-sky-700 text-white border-white/20';
+      case 'call_center':
+        return 'bg-emerald-700 text-white border-white/20';
+      case 'driver':
+        return 'bg-[#F7D347] text-[#1A1A1A] border-[#e6c338] font-black';
+      case 'admin_pricing':
+        return 'bg-purple-700 text-white border-white/20';
+      default:
+        return 'bg-slate-700 text-white border-white/20';
+    }
+  };
 
   return (
-    <header className="w-full sticky top-0 z-30 shadow-xs">
+    <header className={`w-full transition-all ${isLocked ? 'sticky top-0 z-40 shadow-sm' : 'relative z-30 shadow-xs'}`}>
       {/* Promo Banner: #F7D347 Vibrant Gold / Yellow with #1A1A1A Soft Black / Charcoal Text */}
       {isBannerVisible && (
         <div className="w-full bg-[#F7D347] text-[#1A1A1A] py-1.5 px-4 sm:px-6 md:px-8 lg:px-10 xl:px-12 2xl:px-16 text-xs font-extrabold border-b border-[#e5c235]">
@@ -50,6 +103,12 @@ export const Header: React.FC<HeaderProps> = ({
                 {promoBannerSlogan?.trim() || 'UP TO 50% MORE SPACE · GUARANTEED LOWER COST · PRICE MATCH GUARANTEE'}
               </span>
             </div>
+            {staffSession && (
+              <div className="hidden md:flex items-center gap-2 text-[11px] font-bold text-slate-800">
+                <span className="w-2 h-2 rounded-full bg-emerald-600 animate-pulse" />
+                <span>Staff Mode Active · 2FA Verified ({staffSession.user.name})</span>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -93,51 +152,11 @@ export const Header: React.FC<HeaderProps> = ({
             </span>
           </div>
 
-          {/* Right: Language Selector, Driver Login, Call Center, Customer Portal, Admin & Phone */}
+          {/* Right: Actions, Staff Controls & Phone */}
           <div className="w-auto flex items-center gap-1.5 sm:gap-2 justify-end">
             <LanguageSelector currentStep={currentStep} />
 
-            {/* Driver Login CTA Button: #F7D347 Vibrant Gold / Yellow with #1A1A1A text */}
-            {onOpenDriverPortal && (
-              <button
-                onClick={onOpenDriverPortal}
-                className="flex items-center gap-1.5 px-3 py-2 text-xs font-black rounded-full border border-[#e6c338] bg-[#F7D347] hover:bg-[#eed235] text-[#1A1A1A] transition-all cursor-pointer shadow-xs active:scale-95"
-                title="Driver Login — See daily calendar jobs, optimal route & scan container QR codes"
-              >
-                <Truck className="w-3.5 h-3.5 text-[#15385E]" />
-                <span className="hidden lg:inline font-black">Driver Login</span>
-                <span className="lg:hidden font-black">Driver</span>
-              </button>
-            )}
-
-            {onToggleCallCenter && (
-              <button
-                onClick={onToggleCallCenter}
-                className={`flex items-center gap-1.5 px-3 py-2 text-xs font-bold rounded-full border transition-all cursor-pointer shadow-2xs ${
-                  isCallCenterOpen
-                    ? 'bg-[#15385E] text-white border-[#15385E] shadow-xs'
-                    : 'bg-white text-[#15385E] border-white/80 hover:bg-sky-50'
-                }`}
-                title="Call Center Google Calendar & Routing Optimizer"
-              >
-                <Calendar className={`w-3.5 h-3.5 ${isCallCenterOpen ? 'text-[#F7D347]' : 'text-[#15385E]'}`} />
-                <span className="hidden md:inline font-bold">Call Center Dispatch</span>
-                <span className="md:hidden font-bold">Dispatch</span>
-              </button>
-            )}
-
-            {onOpenTelephony && (
-              <button
-                onClick={onOpenTelephony}
-                className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold rounded-full border border-white/80 bg-white hover:bg-sky-50 text-[#15385E] transition-all cursor-pointer shadow-2xs"
-                title="Twilio Call Center Softphone & Customer Screen-Pop"
-              >
-                <PhoneCall className="w-3.5 h-3.5 text-[#15385E]" />
-                <span className="hidden xl:inline font-bold">Call Center Softphone</span>
-                <span className="xl:hidden font-bold">Telephony</span>
-              </button>
-            )}
-
+            {/* Public Utility Modals */}
             {onOpenSpaceCalculator && (
               <button
                 onClick={onOpenSpaceCalculator}
@@ -149,21 +168,10 @@ export const Header: React.FC<HeaderProps> = ({
               </button>
             )}
 
-            {onOpenPlacementChecker && (
-              <button
-                onClick={onOpenPlacementChecker}
-                className="hidden xl:flex items-center gap-1.5 px-3 py-2 text-xs font-bold rounded-full border border-white/80 bg-white hover:bg-sky-50 text-[#15385E] transition-all cursor-pointer shadow-2xs"
-                title="Driveway Placement & Site Feasibility Checker (Trees, Clearance & Council)"
-              >
-                <Truck className="w-3.5 h-3.5 text-[#15385E]" />
-                <span className="font-bold">Driveway Fit</span>
-              </button>
-            )}
-
             {onOpenCoverageMap && (
               <button
                 onClick={onOpenCoverageMap}
-                className="hidden md:flex items-center gap-1.5 px-3 py-2 text-xs font-bold rounded-full border border-white/80 bg-white hover:bg-sky-50 text-[#15385E] transition-all cursor-pointer shadow-2xs"
+                className="hidden xl:flex items-center gap-1.5 px-3 py-2 text-xs font-bold rounded-full border border-white/80 bg-white hover:bg-sky-50 text-[#15385E] transition-all cursor-pointer shadow-2xs"
                 title="View Portabox Coverage Areas Map"
               >
                 <Compass className="w-3.5 h-3.5 text-[#15385E]" />
@@ -171,6 +179,7 @@ export const Header: React.FC<HeaderProps> = ({
               </button>
             )}
 
+            {/* Customer Portal (Public / Client Facing) */}
             <button
               onClick={onOpenCustomerPortal}
               className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold rounded-full border border-white/80 bg-white hover:bg-sky-50 text-[#15385E] transition-all cursor-pointer shadow-2xs"
@@ -181,18 +190,156 @@ export const Header: React.FC<HeaderProps> = ({
               <span className="sm:hidden font-bold">Portal</span>
             </button>
 
-            <button
-              onClick={onToggleAdmin}
-              className={`hidden md:flex items-center gap-1.5 px-3 py-2 text-xs font-bold rounded-full border transition-all cursor-pointer ${
-                isAdminOpen
-                  ? 'bg-[#15385E] text-white border-[#15385E] shadow-xs'
-                  : 'bg-white/90 text-[#15385E] border-white/80 hover:bg-white'
-              }`}
-              title="Configure pricing, promotions, and view customer leads"
-            >
-              <SlidersHorizontal className="w-3.5 h-3.5 text-[#15385E]" />
-              <span>{isAdminOpen ? 'Close Admin' : 'Admin & Pricing'}</span>
-            </button>
+            {/* ================= RBAC STAFF OPERATIONS DOCK ================= */}
+            {!staffSession ? (
+              /* Public / Unauthenticated: Single Secure Staff Login Button */
+              <button
+                onClick={onOpenStaffLogin}
+                className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold rounded-full border border-[#15385E]/30 bg-[#15385E] hover:bg-[#112F4F] text-white transition-all cursor-pointer shadow-xs active:scale-95"
+                title="Portabox Staff Access — Driver, Dispatch, Softphone & Admin Login (2FA Protected)"
+              >
+                <Lock className="w-3.5 h-3.5 text-[#F7D347]" />
+                <span className="hidden sm:inline font-bold">Staff Access</span>
+                <span className="sm:hidden font-bold">Staff</span>
+              </button>
+            ) : (
+              /* Authenticated Staff User: Display Authorized Quick Action Buttons */
+              <div className="flex items-center gap-1.5 sm:gap-2">
+                {/* 1. Driver Portal (if permitted) */}
+                {canAccessDriver && onOpenDriverPortal && (
+                  <button
+                    onClick={onOpenDriverPortal}
+                    className="flex items-center gap-1.5 px-3 py-2 text-xs font-black rounded-full border border-[#e6c338] bg-[#F7D347] hover:bg-[#eed235] text-[#1A1A1A] transition-all cursor-pointer shadow-xs active:scale-95"
+                    title="Driver Portal — Run sheets & container QR scanning"
+                  >
+                    <Truck className="w-3.5 h-3.5 text-[#15385E]" />
+                    <span className="hidden lg:inline font-black">Driver Portal</span>
+                    <span className="lg:hidden font-black">Driver</span>
+                  </button>
+                )}
+
+                {/* 2. Call Center Dispatch (if permitted) */}
+                {canAccessDispatch && onToggleCallCenter && (
+                  <button
+                    onClick={onToggleCallCenter}
+                    className={`flex items-center gap-1.5 px-3 py-2 text-xs font-bold rounded-full border transition-all cursor-pointer shadow-2xs ${
+                      isCallCenterOpen
+                        ? 'bg-[#15385E] text-white border-[#15385E] shadow-xs'
+                        : 'bg-white text-[#15385E] border-white/80 hover:bg-sky-50'
+                    }`}
+                    title="Call Center Fleet Dispatch Calendar & Routing"
+                  >
+                    <Calendar className={`w-3.5 h-3.5 ${isCallCenterOpen ? 'text-[#F7D347]' : 'text-[#15385E]'}`} />
+                    <span className="hidden md:inline font-bold">Dispatch</span>
+                    <span className="md:hidden font-bold">Dispatch</span>
+                  </button>
+                )}
+
+                {/* 3. Call Center Softphone (if permitted) */}
+                {canAccessSoftphone && onOpenTelephony && (
+                  <button
+                    onClick={onOpenTelephony}
+                    className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold rounded-full border border-white/80 bg-white hover:bg-sky-50 text-[#15385E] transition-all cursor-pointer shadow-2xs"
+                    title="Twilio Softphone Dialer & Telephony Hub"
+                  >
+                    <PhoneCall className="w-3.5 h-3.5 text-[#15385E]" />
+                    <span className="hidden xl:inline font-bold">Softphone</span>
+                    <span className="xl:hidden font-bold">Phone</span>
+                  </button>
+                )}
+
+                {/* 4. Admin & Pricing Matrix (if permitted) */}
+                {canAccessPricing && (
+                  <button
+                    onClick={onToggleAdmin}
+                    className={`flex items-center gap-1.5 px-3 py-2 text-xs font-bold rounded-full border transition-all cursor-pointer ${
+                      isAdminOpen
+                        ? 'bg-[#15385E] text-white border-[#15385E] shadow-xs'
+                        : 'bg-white text-[#15385E] border-white/80 hover:bg-sky-50'
+                    }`}
+                    title="Admin & Pricing Matrix"
+                  >
+                    <SlidersHorizontal className="w-3.5 h-3.5 text-[#15385E]" />
+                    <span className="hidden sm:inline font-bold">{isAdminOpen ? 'Close' : 'Admin'}</span>
+                  </button>
+                )}
+
+                {/* Staff Identity Pill with 2FA Indicator & Dropdown */}
+                <div className="relative">
+                  <button
+                    onClick={() => setIsStaffMenuOpen(!isStaffMenuOpen)}
+                    className="flex items-center gap-1.5 pl-2.5 pr-2 py-1.5 bg-[#15385E] hover:bg-[#112F4F] text-white rounded-full text-xs font-bold transition-all shadow-xs cursor-pointer border border-[#112F4F]"
+                    title="Portabox Staff Session Details"
+                  >
+                    <span className="w-2 h-2 rounded-full bg-emerald-400 shrink-0 shadow-2xs" />
+                    <span className="max-w-[90px] sm:max-w-[130px] truncate font-extrabold text-[11px]">
+                      {staffSession.user.name.split(' ')[0]}
+                    </span>
+                    <span className={`text-[9px] px-1.5 py-0.2 rounded-full uppercase font-black ${getRoleBadgeStyle(staffSession.user.role)}`}>
+                      {staffSession.user.role}
+                    </span>
+                    <ChevronDown className="w-3 h-3 text-slate-300" />
+                  </button>
+
+                  {/* Dropdown Menu */}
+                  {isStaffMenuOpen && (
+                    <div className="absolute right-0 mt-2 w-64 bg-white rounded-2xl shadow-2xl border border-slate-200 py-2 z-50 animate-fade-in text-slate-800">
+                      <div className="px-4 py-2.5 border-b border-slate-100 bg-slate-50">
+                        <div className="font-extrabold text-xs text-slate-900">{staffSession.user.name}</div>
+                        <div className="text-[11px] text-slate-500 font-mono truncate">{staffSession.user.email}</div>
+                        <div className="flex items-center gap-1.5 mt-1.5">
+                          <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded-full ${getRoleBadgeStyle(staffSession.user.role)}`}>
+                            {staffSession.user.title}
+                          </span>
+                          <span className="text-[10px] text-emerald-700 font-bold bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200">
+                            2FA Verified
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="py-1 text-xs">
+                        {canManageAccess && onOpenStaffPermissions && (
+                          <button
+                            onClick={() => {
+                              setIsStaffMenuOpen(false);
+                              onOpenStaffPermissions();
+                            }}
+                            className="w-full text-left px-4 py-2 hover:bg-slate-50 font-bold text-[#15385E] flex items-center gap-2 cursor-pointer"
+                          >
+                            <Shield className="w-4 h-4 text-[#F7D347]" />
+                            <span>Staff Permissions Matrix</span>
+                          </button>
+                        )}
+
+                        <div className="px-4 py-1.5 text-[10px] uppercase font-bold text-slate-400">
+                          Authorized Permissions:
+                        </div>
+                        <div className="px-4 pb-2 flex flex-wrap gap-1">
+                          {canAccessPricing && <span className="text-[10px] bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded">Pricing</span>}
+                          {canAccessDispatch && <span className="text-[10px] bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded">Dispatch</span>}
+                          {canAccessSoftphone && <span className="text-[10px] bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded">Softphone</span>}
+                          {canAccessDriver && <span className="text-[10px] bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded">Driver</span>}
+                          {canManageAccess && <span className="text-[10px] bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded">Governance</span>}
+                        </div>
+                      </div>
+
+                      <div className="border-t border-slate-100 pt-1">
+                        <button
+                          onClick={() => {
+                            setIsStaffMenuOpen(false);
+                            onStaffLogout();
+                          }}
+                          className="w-full text-left px-4 py-2 text-rose-600 hover:bg-rose-50 font-bold text-xs flex items-center gap-2 cursor-pointer"
+                        >
+                          <LogOut className="w-3.5 h-3.5" />
+                          <span>Lock Session / Sign Out</span>
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
 
             {/* Phone Call Button: #15385E Deep Navy Blue with #FFFFFF Pure White Text */}
             <a

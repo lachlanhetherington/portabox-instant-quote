@@ -64,17 +64,20 @@ export const Step5SendQuote: React.FC<Step5SendQuoteProps> = ({
     const newErrors: { email?: string; mobile?: string } = {};
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     const phoneClean = mobile.replace(/[\s\-\(\)]/g, '');
+    const hasEmail = Boolean(email.trim());
+    const hasMobile = Boolean(phoneClean && phoneClean.length >= 8);
 
-    // Phone is mandatory when not in Call Center over-the-phone mode
-    if (!phoneClean || phoneClean.length < 8) {
-      newErrors.mobile = 'Please enter a valid Australian mobile number (e.g. 0412 345 678)';
-      mobileInputRef.current?.focus();
-      mobileInputRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    }
-
-    // Email is optional, validate format only if provided
-    if (email.trim() && !emailRegex.test(email.trim())) {
-      newErrors.email = 'Please enter a valid email address';
+    // Accept either Email OR Mobile Phone per CEO requirements
+    if (!hasEmail && !hasMobile) {
+      newErrors.email = 'Please enter an email address or mobile phone to receive your quote.';
+      newErrors.mobile = 'Please enter a mobile phone or email address to receive your quote.';
+    } else {
+      if (hasEmail && !emailRegex.test(email.trim())) {
+        newErrors.email = 'Please enter a valid email address';
+      }
+      if (mobile.trim() && phoneClean.length < 8) {
+        newErrors.mobile = 'Please enter a valid phone number (e.g. 0412 345 678)';
+      }
     }
 
     setErrors(newErrors);
@@ -133,7 +136,7 @@ export const Step5SendQuote: React.FC<Step5SendQuoteProps> = ({
           {/* Email box */}
           <div className="space-y-1.5">
             <label className="block text-xs font-black text-[#15385E] uppercase tracking-wider">
-              Email Address {hasNoPhoneOrEmail ? <span className="text-slate-400 font-normal normal-case">(Customer has no email)</span> : <span className="text-slate-400 font-normal normal-case">(optional)</span>}
+              Email Address {hasNoPhoneOrEmail ? <span className="text-slate-400 font-normal normal-case">(Customer has no email)</span> : <span className="text-slate-500 font-normal normal-case">(required if no phone)</span>}
             </label>
             <div className="relative">
               <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-[#15385E]">
@@ -168,7 +171,7 @@ export const Step5SendQuote: React.FC<Step5SendQuoteProps> = ({
               {hasNoPhoneOrEmail ? (
                 <>Landline Phone <span className="text-slate-400 font-normal normal-case">(optional · no mobile)</span></>
               ) : (
-                <>Mobile Phone <span className="text-[#5CC1EF]">*</span></>
+                <>Mobile Phone <span className="text-slate-500 font-normal normal-case">(required if no email)</span></>
               )}
             </label>
             <div className="relative">

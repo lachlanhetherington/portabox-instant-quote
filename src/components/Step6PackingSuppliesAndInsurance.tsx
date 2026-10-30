@@ -72,17 +72,17 @@ export const Step6PackingSuppliesAndInsurance: React.FC<Step6PackingSuppliesAndI
     <div className="bg-white rounded-2xl sm:rounded-3xl p-4 sm:p-8 lg:p-10 shadow-xs border-2 border-[#DAD7D1]">
       {/* Header kicker: #F7D347 Vibrant Gold with #1A1A1A text */}
       <span className="inline-flex items-center gap-1.5 text-xs font-black uppercase tracking-widest text-[#1A1A1A] bg-[#F7D347] border border-[#e6c338] px-2.5 py-0.5 rounded-md font-['Cabinet_Grotesk',sans-serif]">
-        STEP 7 OF 8 · PACKING SUPPLIES &amp; INSURANCE
+        STEP 7 OF 8 · PACKING SUPPLIES &amp; PROTECTION
       </span>
 
       <h1 className="text-2xl sm:text-4xl font-black text-[#15385E] tracking-tight mt-1 mb-2">
-        Packing Supplies &amp; Insurance Protection
+        Packing Supplies &amp; Container Protection
       </h1>
       <p className="text-xs sm:text-sm text-slate-500 mb-8 max-w-2xl">
-        Protect your valuable contents with our Container Protection Option (CPO), heavy-duty padlocks, free rental blankets, and durable packing boxes delivered directly inside your container.
+        Protect your valuable contents with our Container Protection Option (CPO / COO), heavy-duty discus locks, and furniture protection blankets.
       </p>
 
-      {/* SECTION 1: CONTAINER PROTECTION OPTION (CPO / INSURANCE) */}
+      {/* SECTION 1: CONTAINER PROTECTION OPTION (CPO / COO) */}
       <div className="mb-8 p-5 sm:p-6 rounded-3xl bg-slate-50/80 border-2 border-slate-200/90 transition-all hover:border-sky-300">
         <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
           <div className="space-y-1.5 flex-1">
@@ -91,22 +91,22 @@ export const Step6PackingSuppliesAndInsurance: React.FC<Step6PackingSuppliesAndI
                 <ShieldCheck className="w-4 h-4 text-[#15385E]" />
               </span>
               <h3 className="text-lg sm:text-xl font-black text-[#15385E] tracking-tight">
-                1. Container Protection Option (CPO Insurance)
+                1. Container Protection Option (CPO &amp; COO)
               </h3>
               {isFreeInsurance ? (
                 <span className="text-[10px] font-black uppercase tracking-wider bg-emerald-100 text-emerald-800 border border-emerald-300 px-2 py-0.5 rounded-full flex items-center gap-1">
                   <Gift className="w-3 h-3 text-emerald-600" />
-                  FREE PROMOTIONAL INCLUSION
+                  FREE INCLUSION
                 </span>
               ) : (
                 <span className="text-[10px] font-bold bg-sky-100 text-[#15385E] border border-sky-200 px-2 py-0.5 rounded-full">
-                  Up to ${(config.insurance?.coverageAmountPerContainer || 10000).toLocaleString()} Cover / Container
+                  $5,000 Standard Contents Protection / Container
                 </span>
               )}
             </div>
 
             <p className="text-xs text-slate-600 leading-relaxed max-w-2xl">
-              Comprehensive contents cover tailored for portable storage. Covers accidental damage, theft, storm, water ingress, and road transit between locations with zero standard deductible.
+              Standard $5,000 contents protection per container tailored for portable storage and road transit. Comprehensive protection covering goods during transport and storage with zero standard deductible.
             </p>
           </div>
 

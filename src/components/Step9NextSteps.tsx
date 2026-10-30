@@ -277,7 +277,7 @@ export const Step9NextSteps: React.FC<Step9NextStepsProps> = ({
                   1. Gate & Path Clearance
                 </span>
                 <p className="text-[11px] text-slate-600">
-                  Ensure minimum <strong>3.0 metres</strong> width clearance through gates and driveways.
+                  Ensure minimum <strong>3.5 metres</strong> width clearance through gates and driveways.
                 </p>
               </div>
 
@@ -287,7 +287,7 @@ export const Step9NextSteps: React.FC<Step9NextStepsProps> = ({
                   2. Overhead Clearance
                 </span>
                 <p className="text-[11px] text-slate-600">
-                  Check for low branches, overhead wires, or carport eaves below <strong>3.5 metres</strong>.
+                  Check for low branches, overhead wires, or carport eaves below <strong>4.5 metres</strong>.
                 </p>
               </div>
 

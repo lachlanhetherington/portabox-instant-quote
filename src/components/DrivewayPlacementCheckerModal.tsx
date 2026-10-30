@@ -102,13 +102,13 @@ export const DrivewayPlacementCheckerModal: React.FC<DrivewayPlacementCheckerMod
 
     // Overhead Tree Branches & Wires
     if (overheadClearance === 'low_tree_branches') {
-      reassurances.push('Portabox Level-Lift system only needs 3.5m clearance (unlike competitor tilt-trays needing 5.5m). Tree-friendly canvas pads protect branches.');
+      reassurances.push('Portabox Level-Lift system only needs 4.5m overhead clearance (unlike competitor tilt-trays needing 5.5m+). Tree-friendly canvas pads protect branches.');
       if (score === 'perfect') score = 'good';
     } else if (overheadClearance === 'overhead_wires') {
       reassurances.push('Hydraulic horizontal delivery operates completely under low-hanging service wires without tilting upwards.');
       if (score === 'perfect') score = 'good';
     } else {
-      reassurances.push('Full 3.5m vertical clearance verified.');
+      reassurances.push('Full 4.5m overhead height clearance verified.');
     }
 
     // Slope
@@ -312,14 +312,14 @@ export const DrivewayPlacementCheckerModal: React.FC<DrivewayPlacementCheckerMod
                       Overhead Trees, Eaves &amp; Wires
                     </label>
                     <span className="text-[11px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded">
-                      Only 3.5m clearance needed
+                      Only 4.5m overhead clearance needed
                     </span>
                   </div>
                   <div className="grid grid-cols-3 gap-2">
                     {[
                       {
                         id: 'clear_over_3.5m',
-                        label: 'Clear Sky (> 3.5m)',
+                        label: 'Clear Sky (> 4.5m)',
                         desc: 'Open driveway, high roofline, no low branches',
                       },
                       {
@@ -541,7 +541,7 @@ export const DrivewayPlacementCheckerModal: React.FC<DrivewayPlacementCheckerMod
                     <span className="text-xs font-black uppercase tracking-wider text-[#15385E] bg-white px-3 py-1 rounded-full border border-[#5CC1EF]">
                       ✓ Portabox Level-Lift
                     </span>
-                    <span className="text-xs font-mono font-black text-emerald-600">3.5m Max Height</span>
+                    <span className="text-xs font-mono font-black text-emerald-600">4.5m Max Overhead Height</span>
                   </div>
 
                   <h5 className="text-lg font-black text-[#15385E]">
@@ -551,7 +551,7 @@ export const DrivewayPlacementCheckerModal: React.FC<DrivewayPlacementCheckerMod
                   <ul className="space-y-2.5 text-xs text-slate-700">
                     <li className="flex items-start gap-2">
                       <Check className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
-                      <span><strong>Clears tree overhangs:</strong> Needs only 3.5m clearance (height of standard garage gutter line).</span>
+                      <span><strong>Clears tree overhangs:</strong> Needs only 4.5m overhead clearance (safely under tree branches &amp; wires, while competitor tilt-trays need 5.5m+).</span>
                     </li>
                     <li className="flex items-start gap-2">
                       <Check className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />

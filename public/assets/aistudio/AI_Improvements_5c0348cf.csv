@@ -1,0 +1,274 @@
+Primary Column,Status,Version,Main Dept,Category,Process,Sub Process,Website Section,Page,Details,Dan Notes,Andrew Notes,Customer Portal,Status of Task,Want/Need,App,Phone,Email,Text,What Programmes are used to complete Process,Who Gets Output,Customer,Documented,Doc Type,SS Name,Form,Rev.,Date of Last Revision,Stability,Efficiency,Est Time (Min),How Often,Project Year
+,Future,1,Call Center,Qouting,Quote Interaction,Postal Codes,Customer Portal,1,"Where are you moving or storing?
+ Start with your suburb or postcode","Want to start with CURRENT postcode:
+1) Current website:  Where do you want to start loading the PODS container?
+2) Taxibox: Enter your postcode
+3) Current AI: Where are you moving or storing? Start with your suburb or postcode
+4) Future AI suggestion: Enter your current postcode
+Why:  Current AI might get people to enter a postcode where they are moving 2 (what we refer to as Address 1), simple.  Need to address SID's.",,,Completed,Clean up,Customer Inputs into AP,Agent Inputs into AP,N/A,N/A,,,,,,,,,,,,,,
+,Future,1,,Qouting,Quote Interaction,Postal Codes,Customer Portal,1,Moving & Storage Containers Delivered Directly to You,"1) Don't need ""Price Match Guarantee"" button and area to the right.  Do we ant this to look clean or busy? Remove one of the price match's in the banner.
+2) Remove ""for real-time fleet availability?  What does this actually mean?",,TRUE,Completed,Clean up,Customer Inputs into AP,Agent Inputs into AP,N/A,N/A,,,,,,,,,,,,,,
+,Future,1,,Qouting,Quote Interaction,Postal Codes,Customer Portal,1,Moving & Storage Containers Delivered Directly to You,"Change Zero-tilt wording to the following:
+1) ""Horizontal level-lift delivery:  your contents stay level during loading and unloading
+2) Remove ""Zero-tilt horizontal delivery""
+3) Change to ""Lock quote price for 30 days""
+4) Add in ""Booked price frozen for 1 year""",,,Completed,,,,,,,,,,,,,,,,,,,
+,Future,1,,Qouting,Quote Interaction,Postal Codes,Customer Portal,1,Moving & Storage Containers Delivered Directly to You,"What is ""Up to 50% more space per box?",,,Completed,,,,,,,,,,,,,,,,,,,
+,Future,1,Call Center,Qouting,Quote Interaction,Postal Codes,Customer Portal,1,Service available to Location...,"Want to address want we want to say here:
+1) Current AI: Doesn't have postcodes outside of 4 states, says we service locations within 4 states that we do not, etc.
+2) Future AI:
+   a) Three tiers for all postcodes in Australia
+   b) Tier I - all locations within 200 km's from our current locations (what we service)
+   c) Tier 2 - all other locations inside 4 states above 200 km's - message:  this is outside our normal service area, but call in as we may be able to accommodate via selling you a container.
+   d) Tier 3 - all other postcodes in other states and territories - we do not service your location",,TRUE,Completed,Want,,,,,,,,,,,,,,,,,,
+,Future,1,,Qouting,Quote Interaction,Postal Codes,Customer Portal,1,What is your current location?,"Let's load all postcodes, suburbs.  Can this be active against a current info?",,TRUE,Completed,,,,,,,,,,,,,,,,,,,
+,Future,1,,Qouting,Quote Interaction,Postal Codes,Customer Portal,1,Price Match Guarantee,Remove 100% Driveway Fit Guarantee section,,TRUE,Completed,,,,,,,,,,,,,,,,,,,
+,Future,1,,Qouting,Quote Interaction,Postal Codes,Customer Portal,1,Price Match Guarantee,"""...guarantee a lower rate per cm3""?",,TRUE,Completed,,,,,,,,,,,,,,,,,,,
+,Future,1,,Qouting,Quote Interaction,Postal Codes,Customer Portal,1,Price Match Guarantee,"Put price match guarantee section on each page.  Was on page 1 of quote, now on page 3 and beyond.  Should be part of core starting on page 1.  Core is 1) Price match guarantee, 2) 30 day quote price lock, 3) 1 year book price lock",,,,,,,,,,,,,,,,,,,,,,
+,Future,1,,Qouting,Quote Interaction,Postal Codes,Customer Portal,1,Price Match Guarantee,Let's walk through where you are getting your pricing info,,,,,,,,,,,,,,,,,,,,,,
+,Future,1,,Qouting,Quote Interaction,Postal Codes,Customer Portal,1,View Coverage Areas & Service Tiers Map,Add link to areas we cover map,,TRUE,Completed,Want,,,,,,,,,,,,,,,,,,
+,Future,1,,Qouting,Quote Interaction,Postal Codes,Customer Portal,1,View Coverage Areas & Service Tiers Map,"Change to ""Vie Coverage Areas Map",,TRUE,Completed,,,,,,,,,,,,,,,,,,,
+,Future,1,,Qouting,Quote Interaction,Postal Codes,Customer Portal,1,View Coverage Areas & Service Tiers Map,"Map - better, but why not a real one?
+Satellite option doesn't work properly",,TRUE,Completed,,,,,,,,,,,,,,,,,,,
+,Future,1,,Qouting,Quote Interaction,Postal Codes,Customer Portal,1,View Coverage Areas & Service Tiers Map,MapSatellite buttons are overlapping wording.,,,Completed,,,,,,,,,,,,,,,,,,,
+,Future,1,,Qouting,Quote Interaction,Postal Codes,Customer Portal,1,View Coverage Areas & Service Tiers Map,"I'll get you local #'s, in addition to 1800.",,,,,,,,,,,,,,,,,,,,,,
+,Future,1,,Qouting,Quote Interaction,Postal Codes,Customer Portal,1,View Coverage Areas & Service Tiers Map,I'll get you local hours,,,,,,,,,,,,,,,,,,,,,,
+,Future,1,,Qouting,Quote Interaction,Postal Codes,Customer Portal,1,View Coverage Areas & Service Tiers Map,Remove Tier 1 wording,,TRUE,Completed,,,,,,,,,,,,,,,,,,,
+,Future,1,Call Center,Qouting,Quote Interaction,Postal Codes,Customer Portal,1,"Are you stuck?
+Text us and we will help you.  Our team is ready to answer any questions.
+Text button","Will cause too many issues as we are not equipped to handle this via manpower or time.  Two options:
+1) Ideally: The system understands the hours we work and gives the correct options for them to select if they are stuck.
+  a) Within hours:  Text, Email, Have us call you back
+  b) Outside of hours:  same options, but set timing of feedback expectations
+2) Could build a Template that has the 4 locations and current times we work that can be updated by an admin that then triggers the various interactions based on within/outside",,TRUE,Completed,Need,Customer Inputs into AP,N/A,N/A,N/A,,,,,,,,,,,,,,
+,Future,1,,Qouting,Quote Interaction,,,,,Can we see a version of what the customer will see?,,,,,,,,,,,,,,,,,,,,,,
+,Future,1,,,,,,,,What is login credential security?,,,,,,,,,,,,,,,,,,,,,,
+,Future,1,,,Quote Interaction,,,,,Use consistent wording on previous page button.,,,Completed,,,,,,,,,,,,,,,,,,,
+,Future,1,,Qouting,Quote Interaction,Your Quote So Far,Customer Portal,1-3,,No issues - this is great,,,,,,,,,,,,,,,,,,,,,,
+,,,,,Taxibox Flow,,,,,"1) Postal Code
+2a) Mobile Storage
+2b) Moving Services
+3a1) Store at Taxibox
+3a2) Store at your place
+3b1) Direct Move
+3b2) Move with Storage
+4a) Estimated storage length
+4b) Does not have this option - must be triggering discounts
+5) How much space?
+6a1) We deliver
+6a2) We Deliver + Load
+6a3) You Load at Our Facility
+
+Incorporate SID, SFPU
+Interstate handled within normal process",,,,,,,,,,,,,,,,,,,,,,
+,Future,1,,Qouting,Quote Interaction,Move Type,Customer Portal,2,"What do you need?
+ - Moving
+*Where are you moving to?",""", or load at our location and save delivery charges.  Local or Interstate.""
+
+Want to stay away from words like depot, facility, indicating warehouse
+Remove green ""Depot Load (Save Delivery Charges)",,,,,Customer Inputs into AP,Agent Inputs into AP,N/A,N/A,,,,,,,,,,,,,,
+,Future,1,,Qouting,Quote Interaction,Move Type,Customer Portal,2,"What do you need?
+ - Moving
+Need interim storage between homes?","""...we collect your container from Hyde Park, store it securely at our location and deliver it to your new address when you're ready.""
+
+Remove ""(Storage duration is configured in Step 5.)",,,,,,,,,,,,,,,,,,,,,,
+,Future,1,,Qouting,Quote Interaction,Move Type,Customer Portal,2,"What do you need?
+ - Storage
+*Where will the container live?","Add in this: ""...or we collect and store it at our location for you"".
+Add in this:  ""Where do you want the container stored?"" instead of ""Where will the container live?""
+Remove ""PODS"" picture of container.",,TRUE,Completed,Clean up,Customer Inputs into AP,Agent Inputs into AP,N/A,N/A,,,,,,,,,,,,,,
+,Future,1,,Qouting,Quote Interaction,Move Type,Customer Portal,2,"What do you need?
+ - Storage","""Store at your location or ours.  Load at our location and save delivery charges"" I don't want to say facility or depot.
+
+Remove green ""Depot Load (Save Delivery Charges)
+Change ""Facility"" to ""Our Location"" and On-Site to ""Your home""",,,,,,,,,,,,,,,,,,,,,,
+,,,,,,,,,"What do you need?
+ - Where do you want the container stored?","""We store your container in our secure location.""  Don't want to say warehouse facility.
+Remove DEpot Load Available portion.  This is not the most popular and we only want to say it on page 3.
+Remove Direct Home Delivery portion.  Simple, not repeating ourselves.",,,,,,,,,,,,,,,,,,,,,,
+,Future,1,,Qouting,Quote Interaction,Move Type,Customer Portal,2,"What do you need?
+ - Moving and Storage
+*Where are you moving to?",No issues,,,Completed,,Customer Inputs into AP,Agent Inputs into AP,N/A,N/A,,,,,,,,,,,,,,
+,Future,1,,Qouting,Quote Interaction,Move Type,Customer Portal,2,"What do you need?
+ - 30-Day Price-Lock Guarantee","""Quoted prices are locked for 30 days from quote date.  Changes to quotes that effect pricing will result in updated pricing and a new 30 days lock period.  This does not include date changes or other non pricing items.""",,,,,,,,,,,,,,,,,,,,,,
+,Future,1,,Qouting,Quote Interaction,Move Type,Customer Portal,2,"What do you need?
+ - 1 Year Booked Price-Lock Guarantee","Add this in below ""1 Year Booked Price Guarantee"". 
+""When a booking is made, prices on all attributes (container rental, delivery fees, ancillaries, etc.) are locked for 1 year.  Beyond 1 year, delivery fees will default to live pricing and container rental prices can go up or down with a 30 day notification.""",,,,,Customer Portal,2,"What do you need?
+ - 30-Day Price-Lock Guarantee",,,,,,,,,,,,,,,
+,Future,1,,Qouting,Quote Interaction,Move Type,Customer Portal,2,"What do you need?
+ - Moving and Storage
+*Where are you moving to?","When I chose an interstate option, it showed the info in the attachment.  Let's remove the distance line.",,TRUE,Completed,,,,,,,,,,,,,,,,,,,
+,Future,1,,Qouting,Quote Interaction,Move Type,Customer Portal,2,Postcode/Suburb,Leave as part of phone visual.,,,Completed,Clean up,,,,,,,,,,,,,,,,,,
+,Future,1,,Qouting,Quote Interaction,Loading,Customer Portal,3,Where would you like to load your container?,"1) ""Load at home for maximum convenience or bring your items directly to our location to save delivery charges.""  No depot words used.
+2) Remove green box - too busy and we need to keep simple.  Can have at end when they are done making their choices.
+3) Remove ProTip",,,,,,,,,,,,,,,,,,,,,,
+,Future,1,,Qouting,Quote Interaction,Loading,Customer Portal,3,"Where would you like to load your container?
+ - Deliver Container to My Home","3) Initial Loading - remove ""Delivery fee and standard delivery rates at bottom.
+3) Initial Loading - ""Pack at your own pace"".  Remove several days before we pick it up - redundant.
+4) Remove all the checkmark items.  Let's make it simple.",,,,,,,,,,,,,,,,,,,,,,
+,Future,1,,Qouting,Quote Interaction,Loading,Customer Portal,3,"Where would you like to load your container?
+ - Load at Portabox Depot","""Load at Our Location"".
+Remove ""Save 2 Legs"" - they don't know what legs are.  I'm ok if you put Save $.
+Remove ""Secure facility"" and just say ""our location.
+Remove 2nd sentence ""Back straight into a ground-level bay... - Don't have bays.
+Remove ""zero initial delivery fee & zero pickup fee.
+Remove Deliver fee and one delivery fee saved (at bottom of this box).",,,,,,,,,,,,,,,,,,,,,,
+,Future,1,,Qouting,Quote Interaction,Loading,Customer Portal,3,"Where would you like to load your container?
+ - Depot Direct Advantage",Remove this section.  Some items are not true and I don't want to open that can now.,,,,,,,,,,,,,,,,,,,,,,
+,Future,1,,Qouting,Quote Interaction,Loading,Customer Portal,3,"Where would you like to load your container?
+ - Deliver to Address","Change Deliver to Address and make it flexible and consistent:
+ - Deliver CONTAINER to My Home (if its a storage with no new address
+ - Deliver CONTAIINER to My New Address (if its a move)
+ - Change""...full container directly to you, let you unpack and retrieve the empty container""
+ - Remove all the check mark items.
+ - Remove Delivery Fee sand Standard Delivery Rates at bottom",,,,,,,,,,,,,,,,,,,,,,
+,Future,1,,Qouting,Quote Interaction,Loading,Customer Portal,3,"Where would you like to load your container?
+ - Deliver to Address","""Unoad at Our Location"".
+Remove ""Save 2 Legs"" - they don't know what legs are.  I'm ok if you put Save $.
+""When your storage term ends, unpack at your pace.
+Remove ""eliminates redelivery * container collection fee""
+Remove Deliver fee and one delivery fee saved (at bottom of this box).",,,,,,,,,,,,,,,,,,,,,,
+,Future,1,,Qouting,Quote Interaction,Loading,Customer Portal,3,"Where would you like to load your container?
+ - Configured Logistics","Just say the following:
+Amount saved Self-load and Self-unload (depending if they choose 1 or 2 self...) $300.  Nothing more,",,,,,,,,,,,,,,,,,,,,,,
+,Future,1,,Qouting,Quote Interaction,Loading,Customer Portal,3,Your Quote So far,"For Loading options - don't say saved 4 legs, just say how much was saved.",,,,,,,,,,,,,,,,,,,,,,
+,Future,1,,Qouting,Quote Interaction,"Which size do you need?
+- Australia's largest containers, so you need fewer of them",Customer Portal,4,Number of Containers,"Remove largest containers as not true
+Move to below selecting a size, what we want here is that they get a quote that they can choose the container and then a quantity button under each size of container.  Gives them flexibility to choose 1 small and 2 medium where current state and this initial AI state do not.",,,Completed,Clean up,Customer Inputs into AP,Agent Inputs into AP,N/A,N/A,,,,,,,,,,,,,,
+,Future,1,,Qouting,Quote Interaction,"Which size do you need?
+- Australia's largest containers, so you need fewer of them",Customer Portal,4,3 container sizes,"Remove one of the m3 as this is redundant.
+Do we list the length size (7', 12', 16' or in meters)
+Do we add the m3 value that will change depending on the price listed?  I say, yes.
+Do we remove week option and make that for version 2?",,,Completed,Clean up,Customer Inputs into AP,Agent Inputs into AP,N/A,N/A,,,,,,,,,,,,,,
+,Future,1,,Qouting,Quote Interaction,"Which size do you need?
+- Australia's largest containers, so you need fewer of them",Customer Portal,4,3 container sizes,"Change the dimensions on each box to:
+1) Small - 2.4m (H), 2.1m (L), 2.1m (W)
+2) Medium - 2.4m (H), 3.6m (L), 2.4m (W)
+3) Large - 2.4m (H), 4.8m (L), 2.4m (W)",,TRUE,Completed,Clean up,,,,,,,,,,,,,,,,,,
+,Future,1,,Qouting,Quote Interaction,"Which size do you need?
+- Australia's largest containers, so you need fewer of them",Customer Portal,4,3 container sizes,"Put Length 1st, then width, then height as length is the main factor.",,,,,,,,,,,,,,,,,,,,,,
+,Future,1,,Qouting,Quote Interaction,"Which size do you need?
+- Australia's largest containers, so you need fewer of them",Customer Portal,4,Which size do you need?,"Remove ""..(e.g. 3x10m3..)",,TRUE,Completed,Clean up,,,,,,,,,,,,,,,,,,
+,Future,1,,Qouting,Quote Interaction,"Which size do you need?
+- Australia's largest containers, so you need fewer of them",Customer Portal,4,Medium Portabox,"2 bedroom home, remove Standard 2-3 bedroom apartment or medium home relocation
+This is not completed.",,TRUE,,Clean up,,,,,,,,,,,,,,,,,,
+,Future,1,,Qouting,Quote Interaction,"Which size do you need?
+- Australia's largest containers, so you need fewer of them",Customer Portal,4,Large Portabox,"3 bedroom home, remove 3-4 bedroom family home, large appliances & furniture
+What is ""up to 50% more space"" referring to?
+This is not completed",,TRUE,,Clean up,,,,,,,,,,,,,,,,,,
+,Future,1,,Qouting,Quote Interaction,"Which size do you need?
+- Australia's largest containers, so you need fewer of them",Customer Portal,4,Space Calculator,Not sure about quick room presets. let's talk.,,TRUE,Completed,Clean up,,,,,,,,,,,,,,,,,,
+,Future,1,,Qouting,Quote Interaction,"Which size do you need?
+- Australia's largest containers, so you need fewer of them",Customer Portal,4,Space Calculator,Let's add the complexity we have in current space calculator - Much improved!! I will run a last check by Lisa next week,,,Completed,Want,Customer Inputs into AP,Agent Inputs into AP,N/A,N/A,,,,,,,,,,,,,,
+,Future,1,,Qouting,Quote Interaction,,,,Ready to Book? Book Now,"Put this below ""Your quote so far"" section
+Change to Book Now
+When they click on book now - we need to do two things:
+ - Send info to a ss for agent processing
+ - Send message to customer (on screen) that 1) how would they like to be contacted to cover items 2a) Delivery dates options, 2b) Placement Criteria 2c) payment options",,,,,,,,,,,,,,,,,,,,,,
+,Future,1,,Qouting,Quote Interaction,,,,,"We need to turn off step 5 and 6 as these are part of the booking process.  Move Supplies and ""Coverage"" - not Insurance up.",,,,,,,,,,,,,,,,,,,,,,
+,Future,1,,Qouting,Quote Interaction,"Which size do you need?
+- Australia's largest containers, so you need fewer of them",Customer Portal,3,Driveway Placement & Site Feasibility Checker,"This is a lot of stuff and many of it is not true.  I would scarp this whole section, but lets talk.  And I want this in the booking section only and not at the quote section, like we have today",,TRUE,,,,,,,,,,,,,,,,,,,,
+,Future,1,,Qouting,Quote Interaction,"Which size do you need?
+- Australia's largest containers, so you need fewer of them",Customer Portal,3,Driveway & Clearance Checker,,,TRUE,,,,,,,,,,,,,,,,,,,,
+,Future,1,,Qouting,Quote Interaction,"Which size do you need?
+- Australia's largest containers, so you need fewer of them",Customer Portal,,,Need to update pricing for choices made (onsite vs portabox site).,,,,Clean up,,,,,,,,,,,,,,,,,,
+,Future,1,,Qouting,Quote Interaction,"How long, and when?",Customer Portal,5,Duration & Billing,"I think this is good and we can link it to discounts that can be applied.  I would make this top section as a separate page and have billing as a different page.
+I would make schedule your container as a separate page in the BOOKING SECTION, Not Quoting section.
+I would make COO/CPO option as separate page and the packing supplies as separate page.  We are offering only blankets for rent or Disc Locks.  I can give you those options.",,TRUE,,Clean up,,,,,,,,,,,,,,,,,,
+,Future,1,,Qouting,Quote Interaction,"How long, and when?",Customer Portal,5,Duration & Billing,"Remove 3 months upfront option on ""Choose type of billing""",,,,,,,,,,,,,,,,,,,,,,
+,,,,,,,,,Duration & Billing,Remove weekly option until we introduce phase 2 as this will become untenable doing it manaully.,,,,,,,,,,,,,,,,,,,,,,
+,,,,,,,,,Duration & Billing,"Add in Discount table in admin & pricing and I will give you how we want to link it to the duration they choose.  For example - 
+1) 12+mths - they can chose 400A or 400B Discount code.
+2) 6-11 mths - choose 3rd mth free
+3) Choose 2-5 mths - 1st mth free
+4) Choose 2mths or more - blankets - free rental and lock free",,,,,,,,,,,,,,,,,,,,,,
+,Future,1,,Qouting,Quote Interaction,Packing Supplies & Insurance Protection,,7,,"Remove Insurance word.
+Have one section for CPO and COO
+- only option we offer is $5,000 coverage.
+I'll get you our T&C wording.
+Some options are automatic if they choose a certain type of move - like Interstate gets CPO - $5k automatically",,,,Need,Customer Inputs into AP,Agent Inputs into AP,N/A,N/A,,,,,,,,,,,,,,
+,Future,1,,Qouting,Quote Interaction,Packing Supplies & Insurance Protection,,7,,"Make a 2nd section for Packing Supplies:
+1) Disc Lock - $22 or auto trigger based on criteria ""FREE""
+2) Blankets rental - Qty 10 - $25/mth or auto trigger based on criteria ""FREE""
+3) Other items such as boxes, mattress covers, etc - we recommend your nearest store (not sure I want to say ""Bunnings"" as this will save you on these supplies
+4) Remove carton option
+5) On blankets - qty 10 onl.  Just have a button like the sizes where they can choose 1 10 pk or a different number.  95% choose 1-10pk, if blankets wanted and 5% choose 2-10pk.  I have never seen more than that.",,,,Need,Customer Inputs into AP,Agent Inputs into AP,N/A,N/A,,,,,,,,,,,,,,
+,Future,1,,Qouting,Quote Interaction,Where do we send your quote?,Customer Portal,5,"Email address, Mobile Phone, First Name","You need to consider people that don't have mobile phones (I know, a small minority).  I would ask for one of either email address or mobile phone to be required.",,TRUE,,Need,Customer Inputs into AP,Agent Inputs into AP,N/A,N/A,,,,,,,,,,,,,,
+,Future,1,,Qouting,Quote Interaction,Here's your instant Quote,Customer Portal,6,Your First payment,I would overhaul this and have the total quote broken down and then they can click on the various line items to see more detail. Dan to breakdown summary and detail for Andrew.,,,,Want,,,,,,,,,,,,,,,,,,
+,Future,2,,Qouting,Quote Interaction,Here's your instant Quote,Customer Portal,6,Eco-Optimized delivery window,ECO-Optimized delivery window as version 2,,TRUE,,Want,,,,,,,,,,,,,,,,,,
+,Future,1,,Qouting,Quote Interaction,Here's your instant Quote,Customer Portal,6,Fuel surcharge section,"I have the current info on surcharges:
+ - Zone A ($5)
+ - Zone B ($15)
+ - Zone C ($25)
+ - Zone D ($35)
+ - Zone E ($50)
+In version 2 we can amend to a km based exact charge, if we want. - HAVE THIS 
+Also, we do not collect the entire surcharge upfront, only the portion attributable to initial delivery",,TRUE,,Need,,,,,,,,,,,,,,,,,,
+,Future,1,,Capabilities,Freeze Pricing,,,,,"We need the system to have the ability to freeze pricing at these various stages:
+1) Quote offered - freeze for a month.  Ability to get an updated quote (version 2) if quote expires.
+2) Booking accepted - freeze accepted pricing for:
+   a) Monthly Rental - 1 year and after 1 year only if we notify and give 30 days notice.
+   b) Delivery Fees - 1 year and then automatically current information applies.  We can auto update this to them when they book in another leg or when current legs are booked in - a notice sent to them showing the updated pricing.
+*Invoicing rules go off of this ""frozen"" pricing.  We could have a file to review that shows current frozen pricing and how many days left before a new frozen price is in effect.
+T&C changes to pricing wants",,TRUE,,,,,,,,,,,,,,,,,,,,
+,Future,1,,Capabilities,Customer Portal,,,,,"Need a customer portal that will be established by:
+1) Phone # or Email or both information linked to a unique quote id that is auto assigned by the system but becomes their Customer ID.
+2) To access their quote ID, they need to enter in their quote ID, Email or phone to access the quote.
+3) Once they ""Book Now"", a customer ID is assigned and they enter personal information",,,,,,,,,,,,,,,,,,,,,,
+,Future,1,,Booking,Booking Interaction,,,1,,"Need a section, similar to quoting that encompasses their decision to book.  They can get to this by various ways, depending on when they are ready:
+1) They see the quote from above and click the ""Book Now"" button because they are ready, no time needed.
+2) They come back via the customer portal and see their quote and ""Book Now"" button can be pressed.
+3) They come back via the customer portal and see their quote and make some changes to it and ""Book Now"" button can be pressed.",,TRUE,,Need,Customer Inputs into AP,Agent Inputs into AP,"Customer notifies us, Agent Inputs into AP","Customer notifies us, Agent Inputs into AP",,,,,,,,,,,,,,
+,Future,1,,Booking,Booking Interaction,Placement Page,,2,Look at attachment for current process,"We need to add a placement page.
+ 1) In order to place your container at your location, we need a certain minimum length, width and height clearances in order to place it safely.
+2) Section can also have the container orientation, placement notes and any other special options around timing of delivery",,,,Want,"Customer notifies us, Agent Inputs into AP",Agent Inputs into AP,,,,,,,,,,,,,,,,
+,Future,1,,Booking,Booking Interaction,Delivery Dates,,3,,Bring in the section of the smartsheet availability slots as viewed through your google calendar work,,,,Want,"Customer notifies us, Agent Inputs into AP",Agent Inputs into AP,,,,,,,,,,,,,,,,
+,Future,1,,Booking,Booking Interaction,Security info & Alternate Contact,,4,,"1) Pin # or password for customer portal, this is established earlier when they ""Book Now"" converting their quote to a preliminary booking and formalizing the Customer ID.
+2) DOB
+3) ID Type
+4) Alternate Contact - First name, Last Name
+5) Relationship / Type
+6) Alternate contact - Email
+7) Alternate contact - Phone",,,,Need,"Customer notifies us, Agent Inputs into AP",Agent Inputs into AP,,,,,,,,,,,,,,,,
+,Future,1,,Booking,Booking Interaction,Payment Page,,5,,"Selecting type of payment options for all or certain options
+1) Credit Card
+  a) BrainTree
+  b) Stripe
+2) EFT - for current customers only
+3) Auto EFT
+ a) PayID
+ b) Bill Pay",,,,Want,"Customer notifies us, Agent Inputs into AP",Agent Inputs into AP,,,,,,,,,,,,,,,,
+,Future,1,,Operations,Assigning a Container #,,,,,,,,,,,,,,,,,,,,,,,,,,,
+,Future,1,,Operations,Routing Completed,,,,,,,,,,,,,,,,,,,,,,,,,,,
+,Future,1,,Operations,Customer Interaction,Notifications sent of timing,,,,,,,,,,,,,,,,,,,,,,,,,,
+,Future,1,,Operations,Driver Completes Job,,,,,Notification sent to customer via text and in App,,TRUE,,,,,,,,,,,,,,,,,,,,
+,Future,1 or 2,,Accounting,Invoice Creation,,,,,,,TRUE,,,,,,,,,,,,,,,,,,,,
+,Future,1 or 2,,Accounting,Customer Account Balance,,,,,"Updates based on the following:
+1) Monthly rentals
+2) Deliveries
+3) Changes to core activities (onsite vs our site, size of container)
+4) Confirmed payments (lists pending payments but has 2 balances, confirmed and with pendings)",,TRUE,,Want,,,,,,,,,,,,,,,,,,
+,Future,1 or 2,,Accounting,Reporting,,,,,"1) Monthly extraction of invoicing amounts (csv)
+2) Monthly extraction of certain payment streams (csv)",,TRUE,,,,,,,,,,,,,,,,,,,,
+,Future,1 or 2,,Accounting,,,,,,,,,,,,,,,,,,,,,,,,,,,,
+,,,,Admin & Pricing,Interactive Tariff Matrix Grid,Delivery Zones A through E Fees,,,,Zone E should have 2 components to its pricing 1) a base rate and 2) a $ / per km and rate (which is currently $5/km - one way),,TRUE,,Need,,,,,,,,,,,,,,,,,,
+,,,,Admin & Pricing,Interactive Tariff Matrix Grid,Locations,,,,"1) Remove Sunshine Coast
+2) Remove ""Gold Coast"" and leave just Brisbane",,TRUE,,,,,,,,,,,,,,,,,,,,
+,,,,Admin & Pricing,Interactive Tariff Matrix Grid,Monthly rental,,,,"1) Need an onsite price and a our location price
+2) Remove 35m3 combo option",,TRUE,,,,,,,,,,,,,,,,,,,,
+,,,,Admin & Pricing,% Duration Discounts (2-12 mo),,,,,All of this is too complicated and will overwhelm this customer base.  Let's just keep it simple.  6 months and 12 months only.,,,,,,,,,,,,,,,,,,,,,,
+,,,,Admin & Pricing,Quote Lifecycle & Annual Cap,,,,,"This seems pretty good.  Some points:
+1) What determines the catalog rate?
+2) This catalog rate will need at a minimum of monthly updates.
+3) Need to have a auto notification sent 30 days and then price change can happen.  So, if sent on cycle day of 12 month, then 13 month invoice can be updated
+4) Delivery fees are not permanently locked (see wording in notification letter), but will be adjusted to new delivery prices in effect after 1 year freeze.",1,,,,,,,,,,,,,,,,,,,,,
+,,,,Admin & Pricing,Frozen Pricing & Revenue Impact,,,,,To be reviewed,,,,,,,,,,,,,,,,,,,,,,
+,,,,Admin & Pricing,Delivery Zones A-E,,,,,Updated pricing - see note above from Interactive Tariff Matrix Grid section,,,,,,,,,,,,,,,,,,,,,,
+,,,,Admin & Pricing,Interstate Freight Legs,,,,,"1) Updated pricing
+2) Remove combo option
+3) Remove Sunshine Coast",,TRUE,,,,,,,,,,,,,,,,,,,,
+,,,,Admin & Pricing,Promotion & Discounts,,,,,"1) See attachment for active discounts.
+2) Want to have ability to add discounts with features such as date live, expiry, locations, sizes
+3) Need frozen feature for discounts.  I applied, stays with booking and ignores any discounts that were removed later.",,,,,,,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
+,,,,,,,,,,Get Andrew a CSV of booking frozen.  Give him a demo.,,,,,,,,,,,,,,,,,,,,,,

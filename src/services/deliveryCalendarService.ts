@@ -184,7 +184,7 @@ export function generateGoogleCalendarUrl(params: GoogleCalendarUrlParams): stri
     params.customerPhone ? `Mobile: ${params.customerPhone}` : '',
     params.accessNotes ? `Placement Notes: ${params.accessNotes}` : '',
     ``,
-    `Level-lift horizontal delivery with zero tilt. Please maintain 3.5m overhead clearance.`,
+    `Level-lift horizontal delivery with zero tilt. Please maintain 4.5m overhead height clearance.`,
     `Support Hotline: 1800 467 637 · Website: https://portabox.au`,
   ].filter(Boolean).join('\n');
 

@@ -72,7 +72,7 @@ export const CustomerLifecycleRoadmap: React.FC<CustomerLifecycleRoadmapProps> =
       status: currentStage === 3 ? 'active' : currentStage > 3 ? 'completed' : 'upcoming',
       description: 'Our operations team pre-screens your driveway and access gates so delivery day is 100% stress-free.',
       portaboxPromise: 'We supply complimentary high-density poly ground pads under every container corner to safeguard concrete and pavers.',
-      customerAction: 'Confirm gate width (>3.0m) and overhead clearance (3.5m). Optional: snap a photo of your driveway.',
+      customerAction: 'Confirm gate width (>3.5m) and overhead height clearance (4.5m). Optional: snap a photo of your driveway.',
       guarantee: '100% Fit & Surface Protection Guarantee',
       icon: ShieldCheck,
       badgeColor: 'bg-emerald-50 text-emerald-900 border-emerald-200',

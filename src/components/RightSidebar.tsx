@@ -387,16 +387,16 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({
                     'Delivered to your driveway & collected when done'
                   ) : (
                     <>
-                      {originLogisticsMethod === 'depot_loading' ? 'Self-load at Depot' : 'Home Delivery'}
+                      {originLogisticsMethod === 'depot_loading' ? 'Self-load at Our Location' : 'Home Delivery'}
                       {(serviceType === 'moving' || serviceType === 'moving_storage' || serviceType === 'storage_facility') && (
-                        <span> → {destinationLogisticsMethod === 'depot_loading' ? 'Self-unload at Depot' : 'Home Redelivery'}</span>
+                        <span> → {destinationLogisticsMethod === 'depot_loading' ? 'Self-unload at Our Location' : 'Home Delivery'}</span>
                       )}
                     </>
                   )}
                 </p>
-                {!isMyPlaceStorage && legsSavedCount > 0 && (
-                  <span className="inline-block text-[10px] font-bold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded">
-                    Saved {legsSavedCount} legs (~${legsSavedDollarTotal} off)
+                {!isMyPlaceStorage && (legsSavedDollarTotal > 0 || legsSavedCount > 0) && (
+                  <span className="inline-block text-[10px] font-extrabold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded border border-emerald-300">
+                    ${legsSavedDollarTotal || (legsSavedCount === 4 ? 300 : 150)} saved
                   </span>
                 )}
               </div>
@@ -785,7 +785,7 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({
               )}
             </div>
             <p className="text-[11px] text-slate-600 leading-relaxed">
-              Horizontal level-lift crane needs only <strong>3.5m clearance</strong> (safely under tree branches). We supply free protective paver pads, and swap container size if space is tight with zero fees.
+              Horizontal level-lift delivery needs only <strong>4.5m overhead clearance</strong> (safely under tree branches &amp; wires). We supply free protective paver pads, and swap container size if space is tight with zero fees.
             </p>
           </div>
         )}

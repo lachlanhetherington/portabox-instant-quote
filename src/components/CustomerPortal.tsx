@@ -2824,7 +2824,7 @@ export const CustomerPortal: React.FC<CustomerPortalProps> = ({
                           className="w-4 h-4 text-[#15385E] rounded accent-[#15385E]"
                         />
                         <span className="text-xs text-[#15385E] font-medium">
-                          I confirm <strong>3.5m vertical overhead clearance</strong> is free of low-hanging tree branches and power cables.
+                          I confirm <strong>4.5m overhead height clearance</strong> is free of low-hanging tree branches and power cables.
                         </span>
                       </label>
 

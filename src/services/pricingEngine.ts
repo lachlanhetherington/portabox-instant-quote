@@ -42,8 +42,8 @@ export const DEFAULT_CONTAINER_INSURANCE: ContainerInsuranceConfig = {
   enabled: true,
   monthlyPricePerContainer: 15,
   isFreePromo: false,
-  coverageAmountPerContainer: 10000,
-  description: 'Portabox Container Protection Option (CPO) – Up to $10,000 comprehensive contents cover for theft, fire, water, storm & transit.',
+  coverageAmountPerContainer: 5000,
+  description: 'Portabox Container Protection Option (CPO) / Customer Owner Option (COO) – Up to $5,000 comprehensive contents cover for theft, fire, water, storm & transit.',
 };
 
 export const DEFAULT_PACKING_SUPPLIES: PackingSuppliesConfig = {
@@ -51,15 +51,15 @@ export const DEFAULT_PACKING_SUPPLIES: PackingSuppliesConfig = {
   box10Price: 20,
   box50Price: 40,
   box100Price: 70,
-  blanketSinglePrice: 2.0,
-  blanket10Price: 20,
-  blanket50Price: 40,
-  blanket100Price: 70,
+  blanketSinglePrice: 2.5,
+  blanket10Price: 25,
+  blanket50Price: 100,
+  blanket100Price: 180,
   freeBlanketsPerContainer: 10, // First 10 blankets FREE per container rented!
   blanketBlockSize: 10,
   blanketBlockPriceMonthly: 25, // $25 per month for each block of 10 blankets rented after free allowance
   isAllBlanketsFreePromo: false,
-  lockPrice: 20, // $20 heavy-duty disc padlock
+  lockPrice: 22, // $22 heavy-duty disc padlock
   isLockFreePromo: false, // Admin toggle: offer free padlock to incentivise sales
 };
 
@@ -76,17 +76,17 @@ export const DEFAULT_DELIVERY_ZONES: DeliveryZoneSettings = {
   zoneDMaxKm: 100,
   zoneDBaseFee: 249,
   zoneDRatePerKm: 0,
-  zoneEBaseFee: 349,
-  zoneERatePerKm: 3.5,
+  zoneEBaseFee: 249, // Base rate matches Zone D, with +$5.00/km one-way surcharge
+  zoneERatePerKm: 5.0, // $5.00/km one-way surcharge
   zoneECallPricing: false,
 };
 
 export const DEFAULT_FUEL_SURCHARGE_ZONE_RATES: FuelSurchargeZoneRates = {
-  A: 15,
-  B: 25,
-  C: 35,
-  D: 45,
-  E: 60,
+  A: 5,
+  B: 15,
+  C: 25,
+  D: 35,
+  E: 50,
 };
 
 export function calculateLegFuelSurcharge(params: {
@@ -102,7 +102,7 @@ export function calculateLegFuelSurcharge(params: {
 } {
   const { zone, distanceKm, containerCount, config } = params;
   const isEnabled = config.fuelSurchargeEnabled !== false;
-  const model: FuelSurchargeModel = config.fuelSurchargeModel || 'per_km';
+  const model: FuelSurchargeModel = config.fuelSurchargeModel || 'per_zone';
 
   if (!isEnabled) {
     return { ratePerContainer: 0, totalAmount: 0, note: 'Fuel surcharge disabled', model };
@@ -111,7 +111,7 @@ export function calculateLegFuelSurcharge(params: {
   if (model === 'per_zone') {
     const rates = config.fuelSurchargeZoneRates || DEFAULT_FUEL_SURCHARGE_ZONE_RATES;
     const zoneKey = (zone?.toUpperCase() as keyof FuelSurchargeZoneRates) || 'A';
-    const ratePerContainer = rates[zoneKey] !== undefined ? rates[zoneKey] : (DEFAULT_FUEL_SURCHARGE_ZONE_RATES[zoneKey] ?? 15);
+    const ratePerContainer = rates[zoneKey] !== undefined ? rates[zoneKey] : (DEFAULT_FUEL_SURCHARGE_ZONE_RATES[zoneKey] ?? 5);
     const totalAmount = ratePerContainer * containerCount;
     const note = `Zone ${zoneKey} fixed fuel levy: $${ratePerContainer}/container${containerCount > 1 ? ` × ${containerCount} = $${totalAmount}` : ''}`;
     return { ratePerContainer, totalAmount, note, model };
@@ -126,11 +126,8 @@ export function calculateLegFuelSurcharge(params: {
 }
 
 export const DEFAULT_DURATION_DISCOUNTS: DurationDiscountTier[] = [
-  { months: 2, discountPercent: 10, label: '2 Months (10% OFF)' },
-  { months: 3, discountPercent: 20, label: '3 Months (20% OFF)' },
-  { months: 6, discountPercent: 25, label: '6 Months (25% OFF)' },
-  { months: 9, discountPercent: 30, label: '9 Months (30% OFF)' },
-  { months: 12, discountPercent: 35, label: '12+ Months (35% OFF)' },
+  { months: 6, discountPercent: 20, label: '6 Months (20% OFF)' },
+  { months: 12, discountPercent: 30, label: '12 Months (30% OFF)' },
 ];
 
 /**
@@ -273,6 +270,7 @@ export function getInterstateRatesForRoute(
 export const DEFAULT_CONFIG: AppConfig = {
   phone: '1800 467 637',
   enablePromoBanner: true,
+  lockTopBannerOnScroll: true,
   promoBannerSlogan: 'UP TO 50% MORE SPACE · GUARANTEED LOWER COST · PRICE MATCH GUARANTEE',
   quoteValidityDays: 30,
   rateLockDurationMonths: 12,
@@ -311,7 +309,7 @@ export const DEFAULT_CONFIG: AppConfig = {
   domesticLegFee: 149,
   fuelSurchargeRatePerKm: 0.50,
   fuelSurchargeEnabled: true,
-  fuelSurchargeModel: 'per_km',
+  fuelSurchargeModel: 'per_zone',
   fuelSurchargeZoneRates: { ...DEFAULT_FUEL_SURCHARGE_ZONE_RATES },
   deliveryZones: { ...DEFAULT_DELIVERY_ZONES },
   interstateRates: {
@@ -1259,9 +1257,9 @@ export function calculateQuote(params: {
     zoneDMaxKm = 100,
     zoneDBaseFee = 249,
     zoneDRatePerKm = 0,
-    zoneEBaseFee = 399,
-    zoneERatePerKm = 0,
-    zoneECallPricing = true,
+    zoneEBaseFee = 249,
+    zoneERatePerKm = 5.0,
+    zoneECallPricing = false,
   } = originLocConfig.deliveryZones;
 
   let deliveryZone: string = 'A';
@@ -1390,8 +1388,8 @@ export function calculateQuote(params: {
       destKmRate = dz.zoneDRatePerKm ?? 0;
     } else {
       destDeliveryZone = 'E';
-      destZoneBaseFeePerContainer = dz.zoneEBaseFee ?? 349;
-      destKmRate = dz.zoneERatePerKm ?? 3.5;
+      destZoneBaseFeePerContainer = dz.zoneEBaseFee ?? 249;
+      destKmRate = dz.zoneERatePerKm ?? 5.0;
     }
     if (destKmRate > 0) {
       const destBillableKm = (destDeliveryZone === 'E' && destDepotDistanceKm > (dz.zoneDMaxKm ?? 100))

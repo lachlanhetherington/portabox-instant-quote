@@ -446,7 +446,7 @@ export const ContainerCRMView: React.FC = () => {
               <div className="p-2.5 rounded-xl bg-white border border-sky-100 text-[11px] text-slate-600 space-y-1">
                 <div className="font-bold text-[#15385E]">Key Automation:</div>
                 <div>• Driver GPS tracker ETA dispatched</div>
-                <div>• 3.5m overhead clearance verification</div>
+                <div>• 4.5m overhead height clearance verification</div>
               </div>
             </div>
 
@@ -649,7 +649,7 @@ export const ContainerCRMView: React.FC = () => {
               </div>
               <h4 className="text-xs font-black text-[#15385E]">Pre-Delivery Site Preparation Checklist</h4>
               <p className="text-xs text-slate-600 leading-relaxed">
-                Sends the customer their assigned driver's name, truck window, and reminder to verify 3.5m vertical clearance for the horizontal level-lift vehicle.
+                Sends the customer their assigned driver's name, truck window, and reminder to verify 4.5m vertical overhead clearance for the horizontal level-lift vehicle.
               </p>
               <div className="flex items-center justify-between pt-2 border-t border-slate-100">
                 <span className="text-[11px] font-bold text-emerald-700">✓ Active Automation</span>

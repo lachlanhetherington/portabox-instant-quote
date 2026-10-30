@@ -133,18 +133,54 @@ export const Step1Where: React.FC<Step1WhereProps> = ({
             </h2>
 
             <p className="text-sm sm:text-base text-slate-200/90 leading-relaxed max-w-xl">
-              Horizontal level-lift delivery: your contents stay completely level with zero tilt.
+              Horizontal level-lift delivery: your contents stay level during loading and unloading.
             </p>
           </div>
 
           <div className="flex flex-wrap items-center gap-3 pt-2">
-            <div className="flex items-center gap-2 text-xs text-slate-300 font-semibold">
+            <div className="flex items-center gap-2 text-xs text-slate-300 font-semibold flex-wrap">
               <span className="w-2 h-2 rounded-full bg-[#5CC1EF]" />
-              <span>Zero-tilt horizontal delivery</span>
+              <span>Horizontal level-lift delivery</span>
               <span className="text-slate-400">·</span>
               <span className="w-2 h-2 rounded-full bg-[#F7D347]" />
-              <span>Lock price for 30 days</span>
+              <span>Lock quote price for 30 days</span>
+              <span className="text-slate-400">·</span>
+              <span className="w-2 h-2 rounded-full bg-emerald-400" />
+              <span>1-year rate freeze locked in</span>
             </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Portabox Core Trust Triad on Step 1 */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <div className="p-3.5 sm:p-4 rounded-2xl bg-white border-2 border-[#DAD7D1] shadow-2xs flex items-center gap-3">
+          <div className="w-9 h-9 rounded-xl bg-[#F7D347]/20 border border-[#F7D347] text-[#1A1A1A] flex items-center justify-center shrink-0">
+            <ShieldCheck className="w-5 h-5 text-[#15385E]" />
+          </div>
+          <div>
+            <div className="text-xs font-black text-[#15385E] uppercase tracking-wide">Price Match Guarantee</div>
+            <div className="text-[11px] text-slate-500 font-semibold">We beat comparable quotes per m³</div>
+          </div>
+        </div>
+
+        <div className="p-3.5 sm:p-4 rounded-2xl bg-white border-2 border-[#DAD7D1] shadow-2xs flex items-center gap-3">
+          <div className="w-9 h-9 rounded-xl bg-[#5CC1EF]/20 border border-[#5CC1EF] text-[#15385E] flex items-center justify-center shrink-0">
+            <Sparkles className="w-5 h-5 text-[#008fbb]" />
+          </div>
+          <div>
+            <div className="text-xs font-black text-[#15385E] uppercase tracking-wide">30-Day Quote Lock</div>
+            <div className="text-[11px] text-slate-500 font-semibold">Quoted price frozen for 30 days</div>
+          </div>
+        </div>
+
+        <div className="p-3.5 sm:p-4 rounded-2xl bg-white border-2 border-[#DAD7D1] shadow-2xs flex items-center gap-3">
+          <div className="w-9 h-9 rounded-xl bg-emerald-50 border border-emerald-300 text-emerald-800 flex items-center justify-center shrink-0">
+            <Check className="w-5 h-5 text-emerald-600" />
+          </div>
+          <div>
+            <div className="text-xs font-black text-[#15385E] uppercase tracking-wide">1-Year Rate Freeze</div>
+            <div className="text-[11px] text-slate-500 font-semibold">Container rate locked for 12 months</div>
           </div>
         </div>
       </div>
@@ -157,9 +193,12 @@ export const Step1Where: React.FC<Step1WhereProps> = ({
         </span>
 
         {/* Heading: #15385E Deep Navy Blue */}
-        <h1 className="text-2xl sm:text-4xl font-black text-[#15385E] tracking-tight mt-1 mb-2">
-          What is your current location?
+        <h1 className="text-2xl sm:text-4xl font-black text-[#15385E] tracking-tight mt-1 mb-1">
+          Enter your current postcode
         </h1>
+        <p className="text-xs sm:text-sm text-slate-500 font-medium mb-3">
+          Where do you want to start loading your container?
+        </p>
 
         {/* Blocked postcode warning */}
         {blockedNotice && (

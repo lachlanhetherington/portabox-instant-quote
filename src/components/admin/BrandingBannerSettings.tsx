@@ -10,6 +10,7 @@ import {
   Smartphone,
   Monitor,
   Info,
+  Pin,
 } from 'lucide-react';
 import { AppConfig } from '../../types/quote';
 
@@ -58,22 +59,33 @@ export const BrandingBannerSettings: React.FC<BrandingBannerSettingsProps> = ({
   const [isBannerEnabled, setIsBannerEnabled] = useState<boolean>(
     config.enablePromoBanner !== false
   );
+  const [isLockedOnScroll, setIsLockedOnScroll] = useState<boolean>(
+    config.lockTopBannerOnScroll !== false
+  );
   const [previewDevice, setPreviewDevice] = useState<'desktop' | 'mobile'>('desktop');
   const [saveToast, setSaveToast] = useState<string | null>(null);
 
-  const handleApply = (newSlogan?: string, newEnabled?: boolean) => {
+  const handleApply = (newSlogan?: string, newEnabled?: boolean, newLocked?: boolean) => {
     const textToSave = newSlogan !== undefined ? newSlogan : sloganInput;
     const enabledToSave = newEnabled !== undefined ? newEnabled : isBannerEnabled;
+    const lockedToSave = newLocked !== undefined ? newLocked : isLockedOnScroll;
 
     const updated: AppConfig = {
       ...config,
       promoBannerSlogan: textToSave,
       enablePromoBanner: enabledToSave,
+      lockTopBannerOnScroll: lockedToSave,
     };
 
     onSaveConfig(updated);
-    setSaveToast('✓ Top announcement banner updated & saved successfully!');
+    setSaveToast('✓ Top announcement banner & lock settings saved successfully!');
     setTimeout(() => setSaveToast(null), 3500);
+  };
+
+  const handleToggleLockOnScroll = () => {
+    const nextLocked = !isLockedOnScroll;
+    setIsLockedOnScroll(nextLocked);
+    handleApply(sloganInput, isBannerEnabled, nextLocked);
   };
 
   const handleSelectPreset = (presetText: string) => {
@@ -323,6 +335,51 @@ export const BrandingBannerSettings: React.FC<BrandingBannerSettingsProps> = ({
             className="px-4 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold border border-slate-200 cursor-pointer transition-all"
           >
             Reset to "UP TO 50% MORE SPACE..."
+          </button>
+        </div>
+      </div>
+
+      {/* Scroll Behavior: Lock Top Banner & Header on Scrolling */}
+      <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-xs space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="flex items-start gap-3">
+            <div className={`p-2.5 rounded-xl border shadow-xs ${
+              isLockedOnScroll
+                ? 'bg-sky-50 text-[#00c0f3] border-sky-200'
+                : 'bg-slate-100 text-slate-500 border-slate-200'
+            }`}>
+              <Pin className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h4 className="text-sm font-extrabold text-[#0b2942]">
+                  Lock Top Banner on Scrolling
+                </h4>
+                <span className={`text-[10px] font-black uppercase px-2 py-0.5 rounded-full ${
+                  isLockedOnScroll
+                    ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                    : 'bg-slate-100 text-slate-600 border border-slate-200'
+                }`}>
+                  {isLockedOnScroll ? 'Locked / Sticky' : 'Scrolls Away'}
+                </span>
+              </div>
+              <p className="text-xs text-slate-500 mt-1 max-w-xl leading-relaxed">
+                When enabled (default), the top promotional banner and navigation header remain locked at the top of the viewport when customers scroll down the quote steps and comparison tables.
+              </p>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={handleToggleLockOnScroll}
+            className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-black transition-all cursor-pointer border shrink-0 ${
+              isLockedOnScroll
+                ? 'bg-[#15385E] text-white border-[#15385E] shadow-xs hover:bg-[#112F4F]'
+                : 'bg-slate-100 text-slate-700 border-slate-300 hover:bg-slate-200'
+            }`}
+          >
+            <Pin className={`w-3.5 h-3.5 ${isLockedOnScroll ? 'text-[#F7D347]' : 'text-slate-500'}`} />
+            <span>{isLockedOnScroll ? 'Locked on Scroll (Active)' : 'Unlock Banner'}</span>
           </button>
         </div>
       </div>

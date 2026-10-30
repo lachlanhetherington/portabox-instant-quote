@@ -1939,7 +1939,7 @@ export const Customer360Drawer: React.FC<Customer360DrawerProps> = ({
                       </span>
                       <ul className="space-y-1 text-slate-600 list-disc pl-4 text-[11px]">
                         <li>Level-Lift horizontal placement with zero tilt guaranteed.</li>
-                        <li>Customer certifies minimum 3.5m driveway width and 4.2m overhead clearance.</li>
+                        <li>Customer certifies minimum 3.5m driveway width and 4.5m overhead clearance.</li>
                         <li>Protective ground pads supplied to prevent asphalt or paver damage.</li>
                         <li>Full refund guarantee on cancellations made with greater than 48 hours notice.</li>
                       </ul>

@@ -356,7 +356,7 @@ export const Step5DeliveryAndSupplies: React.FC<Step5DeliveryAndSuppliesProps> =
                 className="w-4 h-4 text-[#15385E] rounded accent-[#15385E]"
               />
               <span className="text-xs text-[#15385E] font-bold">
-                I confirm 3.5m overhead clearance
+                I confirm 4.5m overhead height clearance
               </span>
             </label>
           </div>
