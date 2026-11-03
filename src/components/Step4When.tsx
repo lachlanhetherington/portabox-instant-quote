@@ -11,6 +11,7 @@ import { AreYouStuckBanner } from './AreYouStuckBanner';
 
 interface Step4WhenProps {
   originPostcode: PostcodeRecord;
+  destinationPostcode?: PostcodeRecord | null;
   containerSize?: ContainerSizeId;
   containerCount?: number;
   containerSelections?: Record<ContainerSizeId, number>;
@@ -29,6 +30,7 @@ interface Step4WhenProps {
 
 export const Step4When: React.FC<Step4WhenProps> = ({
   originPostcode,
+  destinationPostcode,
   containerSize = 'large_25m3',
   containerCount = 1,
   containerSelections,
@@ -46,15 +48,10 @@ export const Step4When: React.FC<Step4WhenProps> = ({
 }) => {
   const metroHub = getMetroHubForPostcode(originPostcode);
 
-  // Duration unit: weeks or months (controlled by enableSelectWeeks feature flag)
-  const allowSelectWeeks = config.enableSelectWeeks !== false;
-  const initialUnit = allowSelectWeeks && storageDuration.includes('week') ? 'weeks' : 'months';
-  const [durationUnit, setDurationUnit] = useState<'months' | 'weeks'>(initialUnit);
-  const effectiveDurationUnit = allowSelectWeeks ? durationUnit : 'months';
 
   const [customDurationVal, setCustomDurationVal] = useState<number>(() => {
+    if (storageDuration === '2_weeks') return 0.5;
     if (storageDurationMonths && storageDurationMonths > 0) return storageDurationMonths;
-    if (storageDuration === '2_weeks') return 2;
     if (storageDuration === '1_to_3_months') return 1;
     if (storageDuration === '4_to_11_months') return 6;
     if (storageDuration === '12_plus_months') return 12;
@@ -110,15 +107,34 @@ export const Step4When: React.FC<Step4WhenProps> = ({
 
   const { weeklyRate, monthlyRate } = getContainerRates();
 
-  // Duration in months for discount engine:
-  const effectiveMonths = effectiveDurationUnit === 'weeks'
-    ? Math.max(0.5, Math.round(customDurationVal / 4.333))
-    : customDurationVal;
+  const isTwoWeeksSelected = storageDuration === '2_weeks';
+  const effectiveContainerCount = containerSize === 'two_large_50m3' ? 2 : (containerCount || 1);
+  const twoWeeksRatePerContainer = config.twoWeeksStorageRate !== undefined ? config.twoWeeksStorageRate : 199;
+  const twoWeeksTotalFee = twoWeeksRatePerContainer * effectiveContainerCount;
 
-  const durationDiscountInfo = getDurationDiscount(effectiveMonths, config.durationDiscounts);
+  // Duration in months for discount engine:
+  const effectiveMonths = isTwoWeeksSelected ? 0.5 : customDurationVal;
+
+  const isInterstateMove = Boolean(
+    destinationPostcode &&
+    originPostcode.state !== destinationPostcode.state
+  );
+
+  const durationDiscountInfo = getDurationDiscount(
+    {
+      months: effectiveMonths,
+      serviceType,
+      isInterstate: isInterstateMove,
+      storagePlacement,
+    },
+    config.durationDiscounts
+  );
   const durationDiscountPct = durationDiscountInfo.discountPercent;
+  const isCompletionDurationDiscount = durationDiscountInfo.applyMode === 'on_completion_remaining_charges';
   const durationDiscountDollars = Math.round(monthlyRate * (durationDiscountPct / 100));
-  const discountedMonthlyRate = Math.max(0, monthlyRate - durationDiscountDollars);
+  const discountedMonthlyRate = isCompletionDurationDiscount
+    ? monthlyRate
+    : Math.max(0, monthlyRate - durationDiscountDollars);
 
   // Weekly equivalent for monthly comparison:
   const monthlyCostOnWeeklyRate = Math.round(weeklyRate * (52 / 12));
@@ -160,41 +176,13 @@ export const Step4When: React.FC<Step4WhenProps> = ({
     }
   };
 
-  const handleSelectWeeks = (weeks: number) => {
-    setCustomDurationVal(weeks);
-    const monthsEquiv = Math.max(1, Math.round(weeks / 4.333));
-    if (onSelectDurationMonths) onSelectDurationMonths(monthsEquiv);
-
-    if (weeks <= 2) {
-      onSelectDuration('2_weeks');
-    } else if (weeks <= 12) {
-      onSelectDuration('1_to_3_months');
-    } else if (weeks < 52) {
-      onSelectDuration('4_to_11_months');
-    } else {
-      onSelectDuration('12_plus_months');
-    }
-  };
-
-  // Helper to get configured discount for a given tier
-  const getTierDiscountLabel = (months: number) => {
-    const tier = config.durationDiscounts?.find((t) => t.months === months);
-    if (!tier || tier.discountPercent <= 0) return null;
-    return `${tier.discountPercent}% OFF`;
-  };
-
   return (
     <div className="bg-white rounded-2xl sm:rounded-3xl p-4 sm:p-8 lg:p-10 shadow-xs border-2 border-[#DAD7D1]">
-      {/* Header kicker: #F7D347 Vibrant Gold with #1A1A1A text */}
-      <span className="inline-flex items-center gap-1.5 text-xs font-black uppercase tracking-widest text-[#1A1A1A] bg-[#F7D347] border border-[#e6c338] px-2.5 py-0.5 rounded-md font-['Cabinet_Grotesk',sans-serif]">
-        STEP 5 OF 8 · DURATION &amp; BILLING
-      </span>
-
-      <h1 className="text-2xl sm:text-4xl font-black text-[#15385E] tracking-tight mt-1 mb-2">
+      <h1 className="text-2xl sm:text-4xl font-black text-[#15385E] tracking-tight mb-2">
         Duration &amp; Billing
       </h1>
       <p className="text-xs sm:text-sm text-slate-500 mb-8 max-w-2xl">
-        Choose your storage duration to unlock duration discounts, and select your preferred billing schedule. The longer you store, the more you save.
+        Choose your storage duration and select your preferred billing schedule. The longer you store, the more you save.
       </p>
 
       {/* Section 1: Estimated storage duration (select weeks or months) */}
@@ -204,86 +192,44 @@ export const Step4When: React.FC<Step4WhenProps> = ({
             <label className="block text-base font-black text-[#15385E]">
               1. Estimated storage duration
             </label>
-            <p className="text-xs text-slate-500">
-              Save up to 35% with our duration discounts
-            </p>
-          </div>
-
-          {/* Unit Toggle: Months vs Weeks (Select Weeks controlled by feature flag) */}
-          <div className="flex items-center gap-1 bg-white p-1 rounded-xl self-start sm:self-auto border border-[#DAD7D1] shadow-2xs">
-            <button
-              type="button"
-              onClick={() => {
-                setDurationUnit('months');
-                handleSelectMonths(customDurationVal || 6);
-              }}
-              className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                effectiveDurationUnit === 'months'
-                  ? 'bg-[#15385E] text-white shadow-xs'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              Select Months
-            </button>
-            {allowSelectWeeks && (
-              <button
-                type="button"
-                onClick={() => {
-                  setDurationUnit('weeks');
-                  handleSelectWeeks(customDurationVal || 8);
-                }}
-                className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                  effectiveDurationUnit === 'weeks'
-                    ? 'bg-[#15385E] text-white shadow-xs'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                Select Weeks
-              </button>
-            )}
           </div>
         </div>
 
-        {/* Buttons for Months */}
-        {effectiveDurationUnit === 'months' && (
-          <div className="space-y-4">
-            <div className="grid grid-cols-2 sm:grid-cols-6 gap-2.5">
+        {/* Buttons for Months / Fixed Options (including 2 Weeks standard rate) */}
+        <div className="space-y-4">
+            <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2.5">
               {[
-                { months: 1, label: '1 Month', tag: null },
-                { months: 2, label: '2 Months', tag: getTierDiscountLabel(2) || '10% OFF' },
-                { months: 3, label: '3 Months', tag: getTierDiscountLabel(3) || '20% OFF' },
-                { months: 6, label: '6 Months', tag: getTierDiscountLabel(6) || '25% OFF' },
-                { months: 9, label: '9 Months', tag: getTierDiscountLabel(9) || '30% OFF' },
-                { months: 12, label: '12+ Months', tag: getTierDiscountLabel(12) || '35% OFF' },
+                { id: '2_weeks', label: '2 Weeks', months: 0.5 },
+                { id: '1_month', label: '1 Month', months: 1 },
+                { id: '2_months', label: '2 Months', months: 2 },
+                { id: '3_months', label: '3 Months', months: 3 },
+                { id: '6_months', label: '6 Months', months: 6 },
+                { id: '9_months', label: '9 Months', months: 9 },
+                { id: '12_plus_months', label: '12+ Months', months: 12 },
               ].map((opt) => {
-                const isSelected = customDurationVal === opt.months;
+                const isSelected = opt.id === '2_weeks'
+                  ? storageDuration === '2_weeks'
+                  : storageDuration !== '2_weeks' && customDurationVal === opt.months;
                 return (
                   <button
-                    key={opt.months}
+                    key={opt.id}
                     type="button"
-                    onClick={() => handleSelectMonths(opt.months)}
-                    className={`p-3.5 rounded-2xl border text-center transition-all cursor-pointer flex flex-col items-center justify-between min-h-[82px] ${
+                    onClick={() => {
+                      if (opt.id === '2_weeks') {
+                        onSelectDuration('2_weeks');
+                        if (onSelectDurationMonths) onSelectDurationMonths(0.5);
+                        setCustomDurationVal(0.5);
+                      } else {
+                        handleSelectMonths(opt.months);
+                      }
+                    }}
+                    className={`p-3.5 rounded-2xl border text-center transition-all cursor-pointer flex flex-col items-center justify-center min-h-[58px] ${
                       isSelected
                         ? 'border-[#5CC1EF] bg-sky-50 text-[#15385E] ring-2 ring-[#5CC1EF]/30 shadow-xs'
                         : 'border-slate-200 hover:border-slate-300 text-slate-700 bg-white'
                     }`}
                   >
                     <div className="font-extrabold text-xs sm:text-sm">{opt.label}</div>
-                    {opt.tag ? (
-                      <span
-                        className={`inline-block mt-1 text-[9px] font-black tracking-wider uppercase px-2 py-0.5 rounded-full ${
-                          opt.months >= 12
-                            ? 'bg-[#F7D347] text-[#1A1A1A] border border-[#e6c338]'
-                            : isSelected
-                            ? 'bg-[#5CC1EF] text-[#15385E]'
-                            : 'bg-emerald-100 text-emerald-800'
-                        }`}
-                      >
-                        {opt.tag}
-                      </span>
-                    ) : (
-                      <span className="text-[9px] text-slate-400 font-medium mt-1">Standard rate</span>
-                    )}
                   </button>
                 );
               })}
@@ -296,17 +242,31 @@ export const Step4When: React.FC<Step4WhenProps> = ({
                 <div className="flex items-center gap-1.5 bg-slate-50 p-1 rounded-xl border border-slate-300 shadow-2xs">
                   <button
                     type="button"
-                    onClick={() => handleSelectMonths(Math.max(1, customDurationVal - 1))}
+                    onClick={() => {
+                      if (customDurationVal <= 1) {
+                        onSelectDuration('2_weeks');
+                        if (onSelectDurationMonths) onSelectDurationMonths(0.5);
+                        setCustomDurationVal(0.5);
+                      } else {
+                        handleSelectMonths(Math.max(1, Math.round(customDurationVal) - 1));
+                      }
+                    }}
                     className="w-7 h-7 rounded-lg bg-white hover:bg-slate-200 text-slate-700 font-bold flex items-center justify-center text-sm cursor-pointer border border-slate-200"
                   >
                     -
                   </button>
-                  <span className="w-20 text-center font-bold text-[#15385E]">
-                    {customDurationVal} {customDurationVal === 1 ? 'Month' : 'Months'}
+                  <span className="w-24 text-center font-bold text-[#15385E]">
+                    {storageDuration === '2_weeks' ? '2 Weeks' : `${customDurationVal} ${customDurationVal === 1 ? 'Month' : 'Months'}`}
                   </span>
                   <button
                     type="button"
-                    onClick={() => handleSelectMonths(Math.min(36, customDurationVal + 1))}
+                    onClick={() => {
+                      if (storageDuration === '2_weeks') {
+                        handleSelectMonths(1);
+                      } else {
+                        handleSelectMonths(Math.min(36, Math.max(1, Math.round(customDurationVal)) + 1));
+                      }
+                    }}
                     className="w-7 h-7 rounded-lg bg-white hover:bg-slate-200 text-slate-700 font-bold flex items-center justify-center text-sm cursor-pointer border border-slate-200"
                   >
                     +
@@ -315,87 +275,18 @@ export const Step4When: React.FC<Step4WhenProps> = ({
               </div>
 
               {/* Dynamic discount badge */}
-              {durationDiscountPct > 0 ? (
+              {durationDiscountPct > 0 && (
                 <div className="flex items-center gap-1.5 text-emerald-700 bg-emerald-50 px-3 py-1.5 rounded-xl border border-emerald-200">
                   <Sparkles className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
                   <span className="font-extrabold text-[11px]">
-                    {durationDiscountPct}% duration discount applied! (Saving ${durationDiscountDollars}/month)
+                    {isCompletionDurationDiscount
+                      ? `${durationDiscountPct}% completion discount applied! (${durationDiscountPct}% credited towards remaining return charges upon completing ${customDurationVal} months)`
+                      : `${durationDiscountPct}% duration discount applied! (Saving $${durationDiscountDollars}/month)`}
                   </span>
                 </div>
-              ) : (
-                <span className="text-[11px] text-slate-400">
-                  Select 2+ months to unlock discounts up to 35%
-                </span>
               )}
             </div>
-
-            {/* Explainer for custom duration shorter period fallback */}
-            {durationDiscountInfo.matchedTier && durationDiscountInfo.matchedTier.months !== customDurationVal && (
-              <div className="text-[11px] text-slate-500 bg-sky-50/70 p-2.5 rounded-xl border border-sky-100 flex items-center gap-2">
-                <Info className="w-3.5 h-3.5 text-[#5CC1EF] shrink-0" />
-                <span>
-                  <strong>Shorter-period rule applied:</strong> Your {customDurationVal}-month duration automatically receives the {durationDiscountInfo.matchedTier.months}-month duration discount ({durationDiscountPct}% off).
-                </span>
-              </div>
-            )}
           </div>
-        )}
-
-        {/* Buttons for Weeks */}
-        {effectiveDurationUnit === 'weeks' && (
-          <div className="space-y-4">
-            <div className="grid grid-cols-2 sm:grid-cols-6 gap-2.5">
-              {[
-                { weeks: 1, label: '1 Week' },
-                { weeks: 2, label: '2 Weeks' },
-                { weeks: 3, label: '3 Weeks' },
-                { weeks: 4, label: '4 Weeks' },
-                { weeks: 8, label: '8 Weeks (~2 mo)' },
-                { weeks: 12, label: '12 Weeks (~3 mo)' },
-              ].map((opt) => {
-                const isSelected = customDurationVal === opt.weeks;
-                return (
-                  <button
-                    key={opt.weeks}
-                    type="button"
-                    onClick={() => handleSelectWeeks(opt.weeks)}
-                    className={`p-3 rounded-2xl border text-center transition-all cursor-pointer font-bold text-xs sm:text-sm ${
-                      isSelected
-                        ? 'border-[#5CC1EF] bg-sky-50 text-[#15385E] ring-2 ring-[#5CC1EF]/30 shadow-xs'
-                        : 'border-slate-200 hover:border-slate-300 text-slate-700 bg-white'
-                    }`}
-                  >
-                    <div>{opt.label}</div>
-                  </button>
-                );
-              })}
-            </div>
-
-            {/* Custom Weeks Stepper */}
-            <div className="flex items-center justify-between p-3.5 bg-white rounded-2xl border border-slate-200 text-xs">
-              <span className="font-bold text-slate-700">Custom duration:</span>
-              <div className="flex items-center gap-1.5 bg-slate-50 p-1 rounded-xl border border-slate-300 shadow-2xs">
-                <button
-                  type="button"
-                  onClick={() => handleSelectWeeks(Math.max(1, customDurationVal - 1))}
-                  className="w-7 h-7 rounded-lg bg-white hover:bg-slate-200 text-slate-700 font-bold flex items-center justify-center text-sm cursor-pointer border border-slate-200"
-                >
-                  -
-                </button>
-                <span className="w-20 text-center font-bold text-[#15385E]">
-                  {customDurationVal} {customDurationVal === 1 ? 'Week' : 'Weeks'}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => handleSelectWeeks(Math.min(104, customDurationVal + 1))}
-                  className="w-7 h-7 rounded-lg bg-white hover:bg-slate-200 text-slate-700 font-bold flex items-center justify-center text-sm cursor-pointer border border-slate-200"
-                >
-                  +
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
       </div>
 
       {/* Section 2: Billing Type Selection */}
@@ -405,16 +296,16 @@ export const Step4When: React.FC<Step4WhenProps> = ({
             2. Choose type of billing
           </label>
           <p className="text-xs text-slate-500">
-            Select your billing schedule. Your duration discount is automatically incorporated into each option.
+            Select your preferred billing schedule.
           </p>
         </div>
 
-        {/* 3 Streamlined Billing Buttons: Monthly, 6 Months Upfront, 12 Months Upfront */}
+        {/* Billing Buttons */}
         <div className="space-y-3">
-          {/* 1. Monthly */}
+          {/* 1. Monthly Ongoing or 2 Weeks Term */}
           <button
             type="button"
-            onClick={() => onSelectBillingCycle('monthly')}
+            onClick={() => onSelectBillingCycle(isTwoWeeksSelected ? 'weekly' : 'monthly')}
             className={`w-full p-4 rounded-2xl border text-left transition-all cursor-pointer flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
               billingCycle === 'monthly' || billingCycle === 'weekly' || billingCycle === '3_months_upfront'
                 ? 'border-[#5CC1EF] bg-white ring-2 ring-[#5CC1EF]/30 shadow-sm'
@@ -430,11 +321,11 @@ export const Step4When: React.FC<Step4WhenProps> = ({
                 {(billingCycle === 'monthly' || billingCycle === 'weekly' || billingCycle === '3_months_upfront') && <Check className="w-3.5 h-3.5 text-[#15385E] stroke-[3]" />}
               </div>
               <div className="text-sm font-extrabold text-[#15385E] flex items-center gap-2">
-                <span>Monthly Ongoing</span>
+                <span>{isTwoWeeksSelected ? '2 Weeks Storage' : 'Monthly Ongoing'}</span>
                 <span className="text-[10px] font-extrabold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-full border border-emerald-300">
-                  MOST POPULAR
+                  {isTwoWeeksSelected ? 'SPECIAL RATE' : 'MOST POPULAR'}
                 </span>
-                {durationDiscountPct > 0 && (
+                {!isTwoWeeksSelected && durationDiscountPct > 0 && (
                   <span className="text-[10px] font-black text-[#15385E] bg-[#F7D347] px-2 py-0.5 rounded-full border border-[#e6c338]">
                     {durationDiscountPct}% OFF
                   </span>
@@ -444,7 +335,11 @@ export const Step4When: React.FC<Step4WhenProps> = ({
 
             <div className="flex flex-row sm:flex-col items-baseline sm:items-end justify-between sm:justify-center gap-1 pl-8 sm:pl-0">
               <div className="text-base font-extrabold text-[#15385E] font-mono">
-                {durationDiscountPct > 0 ? (
+                {isTwoWeeksSelected ? (
+                  <>
+                    ${twoWeeksTotalFee}<span className="text-xs font-normal text-slate-500"> / 2 wks</span>
+                  </>
+                ) : durationDiscountPct > 0 ? (
                   <>
                     <span className="line-through text-slate-400 text-xs font-normal mr-1.5 font-mono">
                       ${monthlyRate}
@@ -461,7 +356,11 @@ export const Step4When: React.FC<Step4WhenProps> = ({
                 )}
               </div>
               <span className="text-[11px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
-                {durationDiscountPct > 0 ? `Save $${durationDiscountDollars}/mo (${durationDiscountPct}% duration discount)` : 'Cancel anytime with 14 days notice'}
+                {isTwoWeeksSelected
+                  ? `Standard rate ($${twoWeeksRatePerContainer}/container for 2 weeks) · Cancel anytime with 1 day notice`
+                  : durationDiscountPct > 0
+                  ? `Save $${durationDiscountDollars}/mo (${durationDiscountPct}% duration discount) · Cancel anytime with 1 day notice`
+                  : 'Cancel anytime with 1 day notice'}
               </span>
             </div>
           </button>
@@ -537,9 +436,9 @@ export const Step4When: React.FC<Step4WhenProps> = ({
         </div>
       </div>
 
-      {/* Are You Stuck Banner */}
+      {/* Are You Stuck Banner with originPostcode explicitly passed */}
       <div className="mt-8">
-        <AreYouStuckBanner />
+        <AreYouStuckBanner originPostcode={originPostcode} config={config} />
       </div>
 
       {/* Navigation Buttons */}

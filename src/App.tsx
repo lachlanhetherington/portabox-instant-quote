@@ -7,7 +7,6 @@ import { Step2What } from './components/Step2What';
 import { Step3LoadingLogistics } from './components/Step3LoadingLogistics';
 import { Step3Size } from './components/Step3Size';
 import { Step4When } from './components/Step4When';
-import { Step5DeliveryAndSupplies } from './components/Step5DeliveryAndSupplies';
 import { Step6PackingSuppliesAndInsurance } from './components/Step6PackingSuppliesAndInsurance';
 import { Step5SendQuote } from './components/Step5SendQuote';
 import { Step5Quote } from './components/Step5Quote';
@@ -131,6 +130,7 @@ export default function App() {
   const [sessionId] = useState<string>(() => 'sess-' + Math.random().toString(36).substring(2, 9));
   const [customerContact, setCustomerContact] = useState<{
     firstName: string;
+    companyName?: string;
     mobile: string;
     email: string;
     agreedToContact: boolean;
@@ -248,11 +248,10 @@ export default function App() {
       3: 'Page 3: Loading & Unloading Logistics',
       4: 'Page 4: Which size do you need?',
       5: 'Page 5: Duration & Billing',
-      6: 'Page 6: Schedule & Placement',
-      7: 'Page 7: Packing Supplies & Insurance',
-      8: 'Page 8: Where do we send your quote',
-      9: 'Page 9: Final Quote (Detailed quote & savings)',
-      10: 'Page 10: Next Steps After Payment (Booking Confirmation & Lifecycle Roadmap)',
+      6: 'Page 6: Packing Supplies & Accessories',
+      7: 'Page 7: Where do we send your quote',
+      8: 'Page 8: Final Quote (Detailed quote & savings)',
+      9: 'Page 9: Next Steps After Payment (Booking Confirmation & Lifecycle Roadmap)',
     };
 
     recordDropOffEvent({
@@ -270,7 +269,7 @@ export default function App() {
       billingCycle,
       customerEmail: customerContact?.email,
       customerPhone: customerContact?.mobile,
-      completed: currentStep >= 9,
+      completed: currentStep >= 8,
     });
   }, [
     sessionId,
@@ -416,6 +415,7 @@ export default function App() {
   // Customer submit quote in Step 8 ("Where do we send your quote")
   const handleSendQuote = (customerData: {
     firstName: string;
+    companyName?: string;
     mobile: string;
     email: string;
     agreedToContact: boolean;
@@ -436,6 +436,7 @@ export default function App() {
         id: `lead-${Date.now()}`,
         createdAt: new Date().toISOString(),
         firstName: customerData.firstName,
+        companyName: customerData.companyName,
         mobile: customerData.mobile,
         email: customerData.email,
         agreedToContact: customerData.agreedToContact,
@@ -465,6 +466,7 @@ export default function App() {
       try {
         upsertCustomerFromLead({
           firstName: customerData.firstName,
+          companyName: customerData.companyName,
           email: customerData.email,
           mobile: customerData.mobile,
           quote: activeQuote,
@@ -474,7 +476,7 @@ export default function App() {
         // Dispatch quote via Email, SMS, or In-Portal (15% call-in / quote dispatch)
         dispatchQuoteToCustomer({
           quote: activeQuote,
-          customerName: customerData.firstName,
+          customerName: customerData.companyName ? `${customerData.firstName} (${customerData.companyName})` : customerData.firstName,
           customerEmail: customerData.hasNoPhoneOrEmail ? undefined : customerData.email,
           customerMobile: customerData.hasNoPhoneOrEmail ? undefined : customerData.mobile,
           channels: customerData.channels || {
@@ -490,8 +492,8 @@ export default function App() {
       }
     }
 
-    // Step 9: Show final quote breakdown with detailed quote information
-    setCurrentStep(9);
+    // Step 8: Show final quote breakdown with detailed quote information
+    setCurrentStep(8);
   };
 
   const handleLeadPaymentSuccess = (paymentResult: any) => {
@@ -531,8 +533,8 @@ export default function App() {
       }
     }
 
-    // Advance directly to Step 10: Next Steps Page After Payment
-    setCurrentStep(10);
+    // Advance directly to Step 9: Next Steps Page After Payment
+    setCurrentStep(9);
   };
 
   // Navigation handlers
@@ -726,10 +728,10 @@ export default function App() {
               </div>
             )}
 
-            {/* Steps 1 to 8: 2-Column Responsive Layout | Steps 9 & 10: Full width without sidebar */}
-            <div className={currentStep >= 9 ? "max-w-5xl mx-auto w-full" : "grid grid-cols-1 lg:grid-cols-12 gap-6 lg:gap-8 xl:gap-10 2xl:gap-12 items-start"}>
-              {/* Left Area: Step Form (approx 7-8 cols or full width on Steps 9 & 10) */}
-              <div className={currentStep >= 9 ? "w-full" : "lg:col-span-8 xl:col-span-8 2xl:col-span-8"}>
+            {/* Steps 1 to 7: 2-Column Responsive Layout | Steps 8 & 9: Full width without sidebar */}
+            <div className={currentStep >= 8 ? "max-w-5xl mx-auto w-full" : "grid grid-cols-1 lg:grid-cols-12 gap-6 lg:gap-8 xl:gap-10 2xl:gap-12 items-start"}>
+              {/* Left Area: Step Form (approx 7-8 cols or full width on Steps 8 & 9) */}
+              <div className={currentStep >= 8 ? "w-full" : "lg:col-span-8 xl:col-span-8 2xl:col-span-8"}>
                 {currentStep === 1 && (
                   <Step1Where
                     initialPostcode={originPostcode}
@@ -816,6 +818,7 @@ export default function App() {
                 {currentStep === 5 && originPostcode && (
                   <Step4When
                     originPostcode={originPostcode}
+                    destinationPostcode={destinationPostcode}
                     containerSize={containerSize}
                     containerCount={containerCount}
                     containerSelections={containerSelections}
@@ -833,29 +836,10 @@ export default function App() {
                   />
                 )}
 
-                {/* Step 6: Schedule Container Delivery & Driveway Placement */}
-                {currentStep === 6 && originPostcode && (
-                  <Step5DeliveryAndSupplies
-                    originPostcode={originPostcode}
-                    containerSize={containerSize}
-                    containerCount={containerCount}
-                    preferredDate={preferredDate}
-                    onSelectDate={(dt) => setPreferredDate(dt)}
-                    selectedSlot={selectedSlot}
-                    onSelectSlot={(slot) => setSelectedSlot(slot)}
-                    boxesCount={boxesCount}
-                    onUpdateBoxesCount={(cnt) => setBoxesCount(cnt)}
-                    blanketsCount={blanketsCount}
-                    onUpdateBlanketsCount={(cnt) => setBlanketsCount(cnt)}
-                    config={config}
-                    onContinue={() => setCurrentStep(7)}
-                    onBack={handleBack}
-                  />
-                )}
-
-                {/* Step 7: Dedicated Packing Supplies & Insurance Page */}
-                {currentStep === 7 && (
+                {/* Step 6: Dedicated Packing Supplies & Accessories Page */}
+                {currentStep === 6 && (
                   <Step6PackingSuppliesAndInsurance
+                    originPostcode={originPostcode}
                     containerSize={containerSize}
                     containerCount={containerCount}
                     insuranceSelected={insuranceSelected}
@@ -866,14 +850,15 @@ export default function App() {
                     onUpdateBlanketsCount={(cnt) => setBlanketsCount(cnt)}
                     boxesCount={boxesCount}
                     onUpdateBoxesCount={(cnt) => setBoxesCount(cnt)}
+                    durationFreeBlanketsCount={activeQuote?.durationFreeBlanketsCount || 0}
                     config={config}
-                    onContinue={() => setCurrentStep(8)}
+                    onContinue={() => setCurrentStep(7)}
                     onBack={handleBack}
                   />
                 )}
 
-                {/* Step 8: "Where do we send your quote" */}
-                {currentStep === 8 && activeQuote && (
+                {/* Step 7: "Where do we send your quote" */}
+                {currentStep === 7 && activeQuote && (
                   <Step5SendQuote
                     quote={activeQuote}
                     onSendQuote={handleSendQuote}
@@ -882,8 +867,8 @@ export default function App() {
                   />
                 )}
 
-                {/* Step 9: Final Quote Page with Detailed Quote Information */}
-                {currentStep === 9 && activeQuote && (
+                {/* Step 8: Final Quote Page with Detailed Quote Information */}
+                {currentStep === 8 && activeQuote && (
                   <Step5Quote
                     quote={activeQuote}
                     customerData={customerContact || undefined}
@@ -894,30 +879,30 @@ export default function App() {
                     onSelectSlot={(slot) => setSelectedSlot(slot)}
                     depotCalendarConfig={config.depotCalendars?.[currentHub]}
                     onPaymentSuccess={handleLeadPaymentSuccess}
-                    onGoToNextSteps={() => setCurrentStep(10)}
+                    onGoToNextSteps={() => setCurrentStep(9)}
                     onOpenBookingModal={() => handleOpenBookingModal(activeQuote)}
                     phone={config.phone}
                     config={config}
                   />
                 )}
 
-                {/* Step 10: Next Steps Page After Payment (with Customer Lifecycle Roadmap) */}
-                {currentStep === 10 && activeQuote && (
+                {/* Step 9: Next Steps Page After Payment (with Customer Lifecycle Roadmap) */}
+                {currentStep === 9 && activeQuote && (
                   <Step9NextSteps
                     quote={activeQuote}
                     customerData={customerContact || undefined}
                     paymentResult={lastPaymentResult}
                     onOpenPlacementChecker={() => setIsPlacementCheckerOpen(true)}
                     onOpenCustomerPortal={() => setIsCustomerPortalOpen(true)}
-                    onBackToQuote={() => setCurrentStep(9)}
+                    onBackToQuote={() => setCurrentStep(8)}
                     onResetQuote={handleResetQuote}
                     phone={config.phone}
                   />
                 )}
               </div>
 
-              {/* Right Area: "YOUR QUOTE SO FAR" Tracker (hidden on Steps 9 & 10) */}
-              {currentStep < 9 && (
+              {/* Right Area: "YOUR QUOTE SO FAR" Tracker (hidden on Steps 8 & 9) */}
+              {currentStep < 8 && (
                 <div className="lg:col-span-4 xl:col-span-4 2xl:col-span-4 sticky top-24 sm:top-28">
                   <RightSidebar
                     currentStep={currentStep}

@@ -7,7 +7,6 @@ import {
   Plus,
   Minus,
   Sparkles,
-  Layers,
   Truck,
   ShieldCheck,
   Info,
@@ -24,7 +23,6 @@ import {
 } from '../services/pricingEngine';
 import {
   SpaceCalculatorModal,
-  calculateOptimalContainerMix,
   formatContainerMixLabel,
 } from './SpaceCalculatorModal';
 import { DrivewayPlacementCheckerModal } from './DrivewayPlacementCheckerModal';
@@ -95,7 +93,6 @@ export const Step3Size: React.FC<Step3SizeProps> = ({
 }) => {
   const [isCalculatorOpen, setIsCalculatorOpen] = useState(false);
   const [isPlacementCheckerOpen, setIsPlacementCheckerOpen] = useState(false);
-  const [quickPresetToast, setQuickPresetToast] = useState<string | null>(null);
 
   const enableSunshineCoast = false;
   const activeHub = originPostcode
@@ -148,13 +145,6 @@ export const Step3Size: React.FC<Step3SizeProps> = ({
     onUpdateContainerSelections(updated);
   };
 
-  const handleApplyPreset = (label: string, m3: number) => {
-    const mix = calculateOptimalContainerMix(m3);
-    onUpdateContainerSelections(mix);
-    setQuickPresetToast(`Applied preset for ${label}: ${formatContainerMixLabel(mix)}`);
-    setTimeout(() => setQuickPresetToast(null), 3000);
-  };
-
   const handleClearSelections = () => {
     onUpdateContainerSelections({
       small_10m3: 0,
@@ -166,42 +156,22 @@ export const Step3Size: React.FC<Step3SizeProps> = ({
 
   return (
     <div className="bg-white rounded-2xl sm:rounded-3xl p-4 sm:p-6 lg:p-7 xl:p-8 shadow-xs border-2 border-[#DAD7D1]">
-      {/* Top Header Badge */}
-      <div className="flex items-center justify-between gap-3 flex-wrap">
-        <span className="inline-flex items-center gap-1.5 text-xs font-black uppercase tracking-widest text-[#1A1A1A] bg-[#F7D347] border border-[#e6c338] px-2.5 py-0.5 rounded-md font-['Cabinet_Grotesk',sans-serif]">
-          STEP 4 OF 8 · CONTAINER CONFIGURATION
-        </span>
+      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-2 mb-1">
+        <h1 className="text-2xl sm:text-4xl font-black text-[#15385E] tracking-tight">
+          Which size do you need?
+        </h1>
 
         {totalContainerCount > 0 && (
-          <span className="inline-flex items-center gap-1.5 text-xs font-extrabold text-[#15385E] bg-sky-50 border border-[#5CC1EF]/40 px-3 py-1 rounded-full">
+          <span className="inline-flex items-center gap-1.5 text-xs font-extrabold text-[#15385E] bg-sky-50 border border-[#5CC1EF]/40 px-3 py-1 rounded-full self-start sm:self-auto">
             <Check className="w-3.5 h-3.5 text-emerald-600" />
             <span>{totalContainerCount} container{totalContainerCount > 1 ? 's' : ''} ({totalM3Selected} m³ total)</span>
           </span>
         )}
       </div>
 
-      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-2 mt-2 mb-1">
-        <h1 className="text-2xl sm:text-4xl font-black text-[#15385E] tracking-tight">
-          Which size do you need?
-        </h1>
-      </div>
-
       <p className="text-sm sm:text-base text-slate-500 max-w-2xl leading-relaxed">
         Select any combination of container sizes below. Order multiple containers of different sizes to perfectly match your space requirements.
       </p>
-
-      {/* Preset Toast Feedback */}
-      {quickPresetToast && (
-        <div className="mt-4 p-3 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-900 text-xs font-bold flex items-center justify-between shadow-2xs animate-in fade-in">
-          <div className="flex items-center gap-2">
-            <Check className="w-4 h-4 text-emerald-600 shrink-0" />
-            <span>{quickPresetToast}</span>
-          </div>
-          <span className="text-[10px] uppercase font-black tracking-wider text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full">
-            UPDATED
-          </span>
-        </div>
-      )}
 
       {/* 3 Main Container Cards with Number Selectors */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3.5 sm:gap-4 lg:gap-4 xl:gap-5 mt-6">
@@ -276,26 +246,12 @@ export const Step3Size: React.FC<Step3SizeProps> = ({
                     <span className="text-xs font-bold text-slate-400 block">
                       {isOnsite ? 'Onsite Storage' : 'Facility Storage'}
                     </span>
-                    <span className="text-base font-black text-[#15385E]">
+                    <span className="text-base sm:text-lg font-black text-[#15385E]">
                       ${priceConfig.monthlyRate}
                       <span className="text-xs font-normal text-slate-500">/mo</span>
                     </span>
                   </div>
-                  <div className="text-right">
-                    <span className="text-[11px] font-bold text-slate-400 block">Weekly Eq.</span>
-                    <span className="text-xs font-bold text-slate-600 font-mono">
-                      ${priceConfig.weeklyRate}/wk
-                    </span>
-                  </div>
                 </div>
-
-                {/* Direct competitor comparison highlight for large container */}
-                {sizeId === 'large_25m3' && (
-                  <div className="mt-2 text-[10px] font-bold text-emerald-800 bg-emerald-50 border border-emerald-200/90 px-2 py-1 rounded-md flex items-center gap-1.5">
-                    <Check className="w-3 h-3 text-emerald-600 shrink-0" />
-                    <span>Replaces 3 competitor mini-boxes · Saves $298+ delivery</span>
-                  </div>
-                )}
 
                 {isInterstateMove && interstateRoutePrices && (
                   <div className="mt-2 text-[11px] font-bold text-amber-900 bg-amber-50 px-2 py-1 rounded-md border border-amber-200">
@@ -353,79 +309,6 @@ export const Step3Size: React.FC<Step3SizeProps> = ({
             </div>
           );
         })}
-      </div>
-
-      {/* Quick Room Presets - Moved to immediately below container quantity selectors */}
-      <div className="mt-5 p-4 sm:p-5 rounded-2xl bg-white border-2 border-[#DAD7D1] shadow-2xs">
-        <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
-          <div className="flex items-center gap-2">
-            <span className="text-xs font-black uppercase text-[#15385E] tracking-wider flex items-center gap-1.5">
-              <Layers className="w-4 h-4 text-[#5CC1EF]" />
-              <span>Quick Room Presets</span>
-            </span>
-            <span className="text-[11px] text-slate-500 font-medium hidden sm:inline">
-              Click any home size preset to auto-populate container quantities above:
-            </span>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-          <button
-            type="button"
-            onClick={() => handleApplyPreset('1–2 Room / Studio', 10)}
-            className="p-3 rounded-xl bg-slate-50 hover:bg-sky-50 border border-slate-200 hover:border-[#5CC1EF] text-left transition-all cursor-pointer shadow-2xs group"
-          >
-            <div className="text-xs font-black text-[#15385E] group-hover:text-[#00a9d7]">
-              1–2 Room Flat
-            </div>
-            <div className="text-[10px] text-slate-500 mt-0.5">~10 m³ volume</div>
-            <div className="mt-1.5 text-[10px] font-bold text-emerald-800 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-md inline-block">
-              → 1× 10m³ Small
-            </div>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => handleApplyPreset('2–3 Bed Apartment', 19)}
-            className="p-3 rounded-xl bg-slate-50 hover:bg-sky-50 border border-slate-200 hover:border-[#5CC1EF] text-left transition-all cursor-pointer shadow-2xs group"
-          >
-            <div className="text-xs font-black text-[#15385E] group-hover:text-[#00a9d7]">
-              2–3 Bed Unit
-            </div>
-            <div className="text-[10px] text-slate-500 mt-0.5">~19 m³ volume</div>
-            <div className="mt-1.5 text-[10px] font-bold text-emerald-800 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-md inline-block">
-              → 1× 19m³ Medium
-            </div>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => handleApplyPreset('3–4 Bed House', 25)}
-            className="p-3 rounded-xl bg-slate-50 hover:bg-sky-50 border border-slate-200 hover:border-[#5CC1EF] text-left transition-all cursor-pointer shadow-2xs group"
-          >
-            <div className="text-xs font-black text-[#15385E] group-hover:text-[#00a9d7]">
-              3 Bed Home
-            </div>
-            <div className="text-[10px] text-slate-500 mt-0.5">~25 m³ volume</div>
-            <div className="mt-1.5 text-[10px] font-bold text-emerald-800 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-md inline-block">
-              → 1× 25m³ Large
-            </div>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => handleApplyPreset('4+ Bed Executive', 50)}
-            className="p-3 rounded-xl bg-slate-50 hover:bg-sky-50 border border-slate-200 hover:border-[#5CC1EF] text-left transition-all cursor-pointer shadow-2xs group"
-          >
-            <div className="text-xs font-black text-[#15385E] group-hover:text-[#00a9d7]">
-              4+ Bed Large
-            </div>
-            <div className="text-[10px] text-slate-500 mt-0.5">~50 m³ volume</div>
-            <div className="mt-1.5 text-[10px] font-bold text-emerald-800 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-md inline-block">
-              → 2× 25m³ Large
-            </div>
-          </button>
-        </div>
       </div>
 
       {/* Selected Mix Summary Bar */}
@@ -494,7 +377,7 @@ export const Step3Size: React.FC<Step3SizeProps> = ({
               </h2>
               <p className="text-xs sm:text-sm text-slate-600 max-w-2xl leading-relaxed">
                 Take the guesswork out of sizing.<br />
-                Add your furniture and boxes room by room, and watch your container recommendation adjust in real time. You get the exact space you need—with zero wasted spend.
+                Add your furniture and boxes room by room, and watch your container recommendation adjust in real time. You get the exact space you need.
               </p>
             </div>
           </div>

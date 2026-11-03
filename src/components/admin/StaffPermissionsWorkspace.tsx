@@ -67,7 +67,7 @@ export const StaffPermissionsWorkspace: React.FC<StaffPermissionsWorkspaceProps>
     {
       id: 'log-1',
       time: 'Today 08:30 AM',
-      text: 'CEO Andrew Campbell initialized role governance policy with 2FA enforcement.',
+      text: 'CEO Dan Harrington initialized role governance policy with 2FA enforcement.',
     },
     {
       id: 'log-2',
@@ -294,7 +294,7 @@ export const StaffPermissionsWorkspace: React.FC<StaffPermissionsWorkspaceProps>
             <div className="px-3.5 py-2 rounded-xl bg-black/25 border border-white/15 text-right">
               <div className="text-[10px] font-bold text-slate-300 uppercase">Authenticated As</div>
               <div className="text-xs font-black text-[#5CC1EF] flex items-center gap-1.5 justify-end">
-                <span>{currentSession?.user.name || 'Andrew Campbell'}</span>
+                <span>{currentSession?.user.name || 'Dan Harrington'}</span>
                 <span className="text-[10px] bg-white/20 px-1.5 py-0.2 rounded font-mono uppercase text-white">
                   {currentSession?.user.role || 'CEO'}
                 </span>

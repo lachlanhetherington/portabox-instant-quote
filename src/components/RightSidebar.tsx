@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Check, CheckCircle2, Pencil, ChevronDown, TrendingDown, ShieldCheck, Truck, Calendar, ExternalLink } from 'lucide-react';
+import { Check, CheckCircle2, Pencil, ChevronDown, TrendingDown, ShieldCheck, Sparkles, Truck, Calendar, ExternalLink } from 'lucide-react';
 import { PostcodeRecord } from '../data/australianPostcodes';
 import { BillingCycle, ContainerSizeId, DeliverySlotWindow, LogisticsMethod, MetroHub, ServiceType, StorageDuration } from '../types/quote';
 import { calculateCompetitorComparison } from '../services/competitorPricingService';
@@ -108,20 +108,22 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({
   const selSmall = containerSelections?.small_10m3 || 0;
   const selMed = containerSelections?.medium_19m3 || 0;
   const selLrg = (containerSelections?.large_25m3 || 0) + ((containerSelections?.two_large_50m3 || 0) * 2);
-  const hasSelections = (selSmall + selMed + selLrg) > 0;
+  const totalSelectedUnits = selSmall + selMed + selLrg;
+  const hasSelections = totalSelectedUnits > 0;
+  const effectiveContainerCount = hasSelections ? totalSelectedUnits : containerCount;
 
   const totalVolumeM3 = propTotalVolumeM3 || (
     hasSelections
       ? (selSmall * 10) + (selMed * 19) + (selLrg * 25)
-      : (containerSize === 'small_10m3' ? 10 : containerSize === 'medium_19m3' ? 19 : 25) * containerCount
+      : (containerSize === 'small_10m3' ? 10 : containerSize === 'medium_19m3' ? 19 : 25) * effectiveContainerCount
   );
 
   const estimatedMonthlyStorage = monthlyStorageFee || (
     hasSelections
       ? (selSmall * 209) + (selMed * 219) + (selLrg * 219)
-      : (containerSize === 'small_10m3' ? 209 * containerCount : 219 * containerCount)
+      : (containerSize === 'small_10m3' ? 209 * effectiveContainerCount : 219 * effectiveContainerCount)
   );
-  const portaboxDeliveryCost = containerCount * deliveryFeePerContainer;
+  const portaboxDeliveryCost = effectiveContainerCount * (deliveryFeePerContainer || 149);
 
   const getSizeLabel = () => {
     if (containerSelections) {
@@ -176,15 +178,32 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({
     return () => window.removeEventListener('portabox:competitor-rates-updated', handleRatesUpdate);
   }, []);
 
+  // On Page 2 & 3: Default to 1 Large Portabox (25 m³) vs small modular containers.
+  // On Page 4 onwards: Dynamically calculate based on customer container size selection.
+  const isDefaultComparisonStep = currentStep === 2 || currentStep === 3;
+
+  const comparisonVolumeM3 = isDefaultComparisonStep ? 25 : totalVolumeM3;
+  const comparisonContainerCount = isDefaultComparisonStep ? 1 : effectiveContainerCount;
+  const comparisonDeliveryCost = isDefaultComparisonStep
+    ? (deliveryFeePerContainer || 149)
+    : portaboxDeliveryCost;
+  const comparisonMonthlyStorageFee = isDefaultComparisonStep
+    ? 219
+    : estimatedMonthlyStorage;
+
   const comp = calculateCompetitorComparison({
-    totalVolumeM3,
-    portaboxContainerCount: containerCount,
-    portaboxDeliveryCost,
-    portaboxMonthlyStorageFee: estimatedMonthlyStorage,
+    totalVolumeM3: comparisonVolumeM3,
+    portaboxContainerCount: comparisonContainerCount,
+    portaboxDeliveryCost: comparisonDeliveryCost,
+    portaboxMonthlyStorageFee: comparisonMonthlyStorageFee,
   });
 
+  const comparisonPortaboxLabel = isDefaultComparisonStep
+    ? '1 x Large Portabox (25 m³)'
+    : getSizeLabel();
+
   const competitorSmallContainersCount = comp.competitorSmallContainersCount;
-  const competitorDeliveryCost = comp.competitorDeliveryCost; // $99 * count
+  const competitorDeliveryCost = comp.competitorDeliveryCost;
   const excessDeliveryCharges = comp.excessDeliveryCharges;
   const monthlyCubicSavings = comp.monthlyStorageSavings;
   const cubicSavingsPercent = comp.storageSavingsPercent;
@@ -245,9 +264,6 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({
                     <div className="text-xs text-slate-700 font-medium flex items-baseline gap-1.5 flex-wrap">
                       <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400">From:</span>
                       <span>{originPostcode.suburb}, {originPostcode.state} {originPostcode.postcode}</span>
-                      <span className="text-[10px] font-bold text-[#15385E] bg-sky-50 px-1.5 py-0.5 rounded border border-[#5CC1EF]/40">
-                        Zone {deliveryZone} ({deliveryZoneRangeLabel} one-way) · ${deliveryFeePerContainer} delivery
-                      </span>
                     </div>
 
                     <div className="text-xs font-medium pt-0.5">
@@ -288,13 +304,10 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({
                     </div>
                   </>
                 ) : (
-                  <div className="space-y-1">
+                  <div>
                     <p className="text-xs text-slate-600 font-medium">
                       {originPostcode.suburb}, {originPostcode.state} {originPostcode.postcode}
                     </p>
-                    <span className="inline-block text-[10px] font-bold text-[#15385E] bg-sky-50 px-2 py-0.5 rounded border border-[#5CC1EF]/40">
-                      Zone {deliveryZone} ({deliveryZoneRangeLabel} one-way) · ${deliveryFeePerContainer} delivery fee
-                    </span>
                   </div>
                 )}
               </div>
@@ -387,9 +400,9 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({
                     'Delivered to your driveway & collected when done'
                   ) : (
                     <>
-                      {originLogisticsMethod === 'depot_loading' ? 'Self-load at Our Location' : 'Home Delivery'}
+                      {originLogisticsMethod === 'depot_loading' ? 'Self-load at Portabox Location' : 'Delivery to My Location'}
                       {(serviceType === 'moving' || serviceType === 'moving_storage' || serviceType === 'storage_facility') && (
-                        <span> → {destinationLogisticsMethod === 'depot_loading' ? 'Self-unload at Our Location' : 'Home Delivery'}</span>
+                        <span> → {destinationLogisticsMethod === 'depot_loading' ? 'Self-unload at Portabox Location' : 'Delivery to My Location'}</span>
                       )}
                     </>
                   )}
@@ -489,7 +502,7 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({
             )}
           </div>
 
-          {/* Step 6: Schedule & Placement */}
+          {/* Step 6: Packing Supplies */}
           <div
             className={`p-3.5 rounded-xl transition-all border ${
               currentStep === 6
@@ -513,55 +526,37 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({
                   </div>
                 )}
                 <span className={`text-sm font-bold ${currentStep === 6 ? 'text-[#15385E]' : 'text-slate-700'}`}>
-                  Schedule &amp; Placement
+                  Packing supplies
                 </span>
               </div>
               {currentStep > 6 && (
                 <button
                   onClick={() => onJumpToStep(6)}
-                  aria-label="Edit schedule and placement"
+                  aria-label="Edit packing supplies"
                   className="text-slate-400 hover:text-[#15385E] transition-colors p-1"
                 >
                   <Pencil className="w-3.5 h-3.5 text-[#15385E]" />
                 </button>
               )}
             </div>
-            {currentStep >= 6 && preferredDate && (
-              <div className="mt-1 ml-7.5 space-y-1">
-                <p className="text-xs text-slate-600 font-medium">Delivery: {preferredDate}</p>
-                {selectedSlot && (
-                  <p className="text-[11px] text-[#15385E] font-semibold flex items-center gap-1">
-                    <span className="w-1.5 h-1.5 rounded-full bg-[#5CC1EF]" />
-                    <span>Slot: {selectedSlot.label} ({selectedSlot.timeRange})</span>
+            {currentStep > 6 && (
+              <div className="mt-1 ml-7.5 space-y-0.5 text-[11px] text-[#15385E]">
+                {(blanketsCount > 0 || boxesCount > 0 || locksCount > 0) ? (
+                  <p className="text-slate-600 font-medium">
+                    {[
+                      blanketsCount > 0 ? `${blanketsCount} blankets` : null,
+                      locksCount > 0 ? `${locksCount} lock${locksCount > 1 ? 's' : ''}` : null,
+                      boxesCount > 0 ? `${boxesCount} boxes` : null,
+                    ].filter(Boolean).join(' · ')}
                   </p>
-                )}
-                {enableGoogleCalendarLink && (
-                  <a
-                    href={generateGoogleCalendarUrl({
-                      deliveryDate: preferredDate,
-                      slot: selectedSlot,
-                      suburb: originPostcode?.suburb,
-                      state: originPostcode?.state,
-                      postcode: originPostcode?.postcode,
-                      metroHub: (metroHubName as MetroHub) || 'Adelaide',
-                      containerCount,
-                      serviceType,
-                    })}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1 text-[11px] font-bold text-[#15385E] hover:text-[#00c0f3] bg-sky-50 hover:bg-sky-100/80 px-2 py-1 rounded-lg border border-sky-200 transition-colors mt-0.5 cursor-pointer"
-                    title="Open this delivery slot directly in Google Calendar"
-                  >
-                    <Calendar className="w-3 h-3 text-[#00c0f3]" />
-                    <span>Google Calendar Slot</span>
-                    <ExternalLink className="w-2.5 h-2.5 text-slate-400" />
-                  </a>
+                ) : (
+                  <p className="text-slate-400">Standard delivery (no extra supplies)</p>
                 )}
               </div>
             )}
           </div>
 
-          {/* Step 7: Supplies & Insurance */}
+          {/* Step 7: Send Quote */}
           <div
             className={`p-3.5 rounded-xl transition-all border ${
               currentStep === 7
@@ -584,68 +579,13 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({
                     7
                   </div>
                 )}
-                <span className={`text-sm font-bold ${currentStep === 7 ? 'text-[#15385E]' : 'text-slate-700'}`}>
-                  Supplies &amp; Insurance
+                <span className={`text-sm font-bold ${currentStep === 7 ? 'text-[#15385E]' : 'text-slate-600'}`}>
+                  Send quote
                 </span>
               </div>
               {currentStep > 7 && (
                 <button
                   onClick={() => onJumpToStep(7)}
-                  aria-label="Edit packing supplies and insurance"
-                  className="text-slate-400 hover:text-[#15385E] transition-colors p-1"
-                >
-                  <Pencil className="w-3.5 h-3.5 text-[#15385E]" />
-                </button>
-              )}
-            </div>
-            {currentStep > 7 && (
-              <div className="mt-1 ml-7.5 space-y-0.5 text-[11px] text-[#15385E]">
-                <p className="font-semibold">
-                  Insurance: {insuranceSelected ? 'CPO Protected' : 'Not added'}
-                </p>
-                {(blanketsCount > 0 || boxesCount > 0 || locksCount > 0) && (
-                  <p className="text-slate-600 font-medium">
-                    Supplies: {[
-                      blanketsCount > 0 ? `${blanketsCount} blankets` : null,
-                      locksCount > 0 ? `${locksCount} lock${locksCount > 1 ? 's' : ''}` : null,
-                      boxesCount > 0 ? `${boxesCount} boxes` : null,
-                    ].filter(Boolean).join(' · ')}
-                  </p>
-                )}
-              </div>
-            )}
-          </div>
-
-          {/* Step 8: Send Quote */}
-          <div
-            className={`p-3.5 rounded-xl transition-all border ${
-              currentStep === 8
-                ? 'border-[#F7D347] bg-[#F7D347]/15 ring-2 ring-[#F7D347]/50'
-                : 'border-slate-100 bg-white'
-            }`}
-          >
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2.5">
-                {currentStep > 8 ? (
-                  <div className="w-5 h-5 rounded-full bg-[#5CC1EF] flex items-center justify-center text-[#15385E]">
-                    <Check className="w-3.5 h-3.5 stroke-[3]" />
-                  </div>
-                ) : (
-                  <div
-                    className={`w-5 h-5 rounded-full flex items-center justify-center text-xs font-black ${
-                      currentStep === 8 ? 'bg-[#F7D347] text-[#1A1A1A] border border-[#e6c338]' : 'bg-slate-100 text-slate-500'
-                    }`}
-                  >
-                    8
-                  </div>
-                )}
-                <span className={`text-sm font-bold ${currentStep === 8 ? 'text-[#15385E]' : 'text-slate-600'}`}>
-                  Send quote
-                </span>
-              </div>
-              {currentStep > 8 && (
-                <button
-                  onClick={() => onJumpToStep(8)}
                   aria-label="Edit contact details"
                   className="text-slate-400 hover:text-[#15385E] transition-colors p-1"
                 >
@@ -657,168 +597,174 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({
         </div>
       </div>
 
-      {/* Price Match Guarantee Card with Container Photography Tones:
-          - Roller Door Shadowed / Overlay: #112F4F
-          - Container Exterior Panel / Trim: #DAD7D1
-          - Headline Text: #FFFFFF
-          - Price Match Button: #FFFFFF with #1A1A1A text
-          - Displayed from Page 3 onwards (hidden on Page 1 and 2)
-      */}
-      {currentStep >= 4 && (
-        <div className="rounded-2xl border-2 border-[#DAD7D1] bg-[#112F4F] p-4 sm:p-5 space-y-3 shadow-sm">
-          <div>
-            {/* Price Match Button: Pure White #FFFFFF background with #1A1A1A text */}
-            <span className="inline-flex items-center gap-1.5 text-[10px] font-black uppercase tracking-wider bg-[#FFFFFF] text-[#1A1A1A] px-2.5 py-1 rounded-md shadow-2xs border border-white">
-              <span className="w-2 h-2 rounded-full bg-[#F7D347]" />
-              <span>PRICE MATCH GUARANTEE</span>
-            </span>
+      {/* 3 Value Guarantee Cards in Descending Order (Starting on Page 2, Hidden on Page 1) */}
+      {currentStep >= 2 && (
+        <>
+          {/* Card 1: Price Match Guarantee Open to Price Comparison */}
+          <div className="rounded-2xl border-2 border-[#DAD7D1] bg-[#112F4F] p-4 sm:p-5 space-y-3 shadow-xs">
+            <div>
+              {/* Badge: Pure White #FFFFFF background with #1A1A1A text */}
+              <span className="inline-flex items-center gap-1.5 text-[10px] font-black uppercase tracking-wider bg-white text-[#1A1A1A] px-2.5 py-1 rounded-md shadow-2xs border border-white">
+                <span className="w-2 h-2 rounded-full bg-[#F7D347]" />
+                <span>PRICE MATCH GUARANTEE</span>
+              </span>
 
-            {/* Headline Text: Pure White #FFFFFF */}
-            <h4 className="text-base font-black text-[#FFFFFF] mt-2">
-              Seen it cheaper? We'll beat it.
-            </h4>
-            <p className="text-xs text-slate-200 mt-0.5 leading-relaxed">
-              Provide any comparable written quote from another Australian container service and we guarantee a lower rate per cubic meter.
+              {/* Headline Text: Pure White #FFFFFF */}
+              <h4 className="text-base font-black text-white mt-2">
+                Seen it cheaper? We'll beat it.
+              </h4>
+              <p className="text-xs text-slate-200 mt-0.5 leading-relaxed">
+                Provide any comparable written quote from another Australian container service and we guarantee a lower rate per cubic meter.
+              </p>
+            </div>
+
+            {/* Check out our competitors prices container (open by default) */}
+            <details open className="group border border-[#DAD7D1] rounded-xl bg-white p-3.5 transition-all">
+              <summary className="flex items-center justify-between cursor-pointer list-none select-none text-xs font-bold text-[#15385E] hover:text-[#5CC1EF] transition-colors">
+                <span className="flex items-center gap-2 text-[#15385E]">
+                  <TrendingDown className="w-4 h-4 shrink-0 text-[#15385E]" />
+                  <span className="text-[#15385E] font-black">Check out our competitors prices</span>
+                </span>
+                <ChevronDown className="w-4 h-4 text-[#15385E] group-open:rotate-180 transition-transform shrink-0" />
+              </summary>
+
+              <div className="pt-3 mt-3 border-t border-slate-100 space-y-3 text-xs">
+                {isDefaultComparisonStep ? (
+                  <div className="text-[11px] font-semibold text-[#15385E] bg-sky-50 px-2.5 py-1.5 rounded-lg border border-[#5CC1EF]/30 flex items-center justify-between">
+                    <span>Default: 1 x Large Portabox (25 m³) vs small modular boxes</span>
+                    <span className="text-[10px] text-slate-500 font-normal">Updates in Step 4</span>
+                  </div>
+                ) : (
+                  <div className="text-[11px] font-semibold text-[#15385E] bg-emerald-50 px-2.5 py-1.5 rounded-lg border border-emerald-200 flex items-center justify-between">
+                    <span>Live comparison for: {comparisonPortaboxLabel}</span>
+                    <span className="text-[10px] text-emerald-700 font-bold">{comparisonVolumeM3} m³</span>
+                  </div>
+                )}
+
+                <p className="text-slate-600 leading-relaxed text-xs">
+                  {comp.benchmark.competitorName} use small {comp.benchmark.containerVolumeM3} m³ boxes with a ${comp.competitorDeliveryFeePerUnit} delivery fee per leg and high ${comp.benchmark.monthlyStorageRatePerM3}/m³ storage fees. Portabox provides full-size container capacity with zero-tilt horizontal level-lift delivery, fewer boxes, and massive savings.
+                </p>
+
+                <div className="grid grid-cols-1 gap-2.5 pt-1">
+                  {/* 1. Monthly Storage Rate Comparison */}
+                  <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 space-y-2">
+                    <span className="text-[10px] uppercase font-bold text-slate-500 block">
+                      1. Monthly Storage Rate ({comparisonVolumeM3} m³)
+                    </span>
+                    <div className="flex justify-between items-baseline text-xs">
+                      <span className="text-slate-600">{comp.benchmark.competitorName} ({competitorSmallContainersCount} x {comp.benchmark.containerVolumeM3} m³ @ ${comp.benchmark.monthlyStorageRatePerM3}/m³):</span>
+                      <span className="font-mono font-bold text-slate-700">${marketMonthlyCost}/mo</span>
+                    </div>
+                    <div className="flex justify-between items-baseline text-xs">
+                      <span className="text-slate-900 font-semibold">{comparisonPortaboxLabel} (${portaboxRatePerM3}/m³):</span>
+                      <span className="font-mono font-bold text-[#15385E]">${comparisonMonthlyStorageFee}/mo</span>
+                    </div>
+                    <div className="pt-1.5 border-t border-slate-200 text-[11px] text-emerald-700 font-bold">
+                      {monthlyCubicSavings > 0
+                        ? `✓ Save $${monthlyCubicSavings}/mo on storage (${cubicSavingsPercent}% lower rate)`
+                        : `✓ Guaranteed lowest cubic rate with Price Match Guarantee`}
+                    </div>
+                  </div>
+
+                  {/* 2. Excess Delivery Charges for Multiple Smaller Containers */}
+                  <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 space-y-2">
+                    <span className="text-[10px] uppercase font-bold text-slate-500 block">
+                      2. Excess Container Delivery Fees
+                    </span>
+                    <div className="flex justify-between items-baseline text-xs">
+                      <span className="text-slate-600">{competitorSmallContainersCount} x modular containers (${comp.competitorDeliveryFeePerUnit} fee each):</span>
+                      <span className="font-mono font-bold text-slate-700">${competitorDeliveryCost}</span>
+                    </div>
+                    <div className="flex justify-between items-baseline text-xs">
+                      <span className="text-slate-900 font-semibold">{comparisonContainerCount} x Portabox (${deliveryFeePerContainer} level-lift):</span>
+                      <span className="font-mono font-bold text-[#15385E]">${comparisonDeliveryCost}</span>
+                    </div>
+                    <div className="pt-1.5 border-t border-slate-200 text-[11px] text-emerald-700 font-bold">
+                      ✓ Save ${excessDeliveryCharges} in excess delivery fees avoided
+                    </div>
+                  </div>
+                </div>
+
+                {/* Combined Savings Total */}
+                <div className="p-3 rounded-xl bg-emerald-500 text-white flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs">
+                  <div>
+                    <span className="text-xs font-black uppercase tracking-wider block">
+                      First-Month Combined Savings
+                    </span>
+                    <span className="text-[11px] text-emerald-100">
+                      Storage rate saving (${monthlyCubicSavings}) + excess delivery fees avoided (${excessDeliveryCharges})
+                    </span>
+                  </div>
+                  <div className="text-left sm:text-right shrink-0">
+                    <span className="text-2xl font-black font-mono">
+                      ${firstMonthTotalSavings}
+                    </span>
+                    <div className="text-[10px] text-emerald-100 font-bold">
+                      Total Advantage
+                    </div>
+                  </div>
+                </div>
+
+                <div className="text-[10px] text-slate-400 flex items-center justify-between pt-1">
+                  <span>Benchmark: ${comp.competitorDeliveryFeePerUnit}/fee · ${comp.benchmark.monthlyStorageRatePerM3}/m³</span>
+                  <span className="font-mono font-semibold">Audit: {comp.benchmark.lastCheckedDate}</span>
+                </div>
+              </div>
+            </details>
+          </div>
+
+          {/* Card 2: 30-Day Price-Lock Guarantee */}
+          <div className="rounded-2xl border border-slate-200/90 bg-white p-4 sm:p-5 shadow-xs space-y-2">
+            <div className="flex items-center gap-2">
+              <Sparkles className="w-4 h-4 sm:w-5 sm:h-5 text-[#00a9d7] shrink-0" />
+              <h4 className="text-xs sm:text-sm font-extrabold tracking-wide uppercase text-[#15385E]">
+                30–DAY PRICE-LOCK GUARANTEE
+              </h4>
+            </div>
+            <p className="text-xs text-slate-600 leading-relaxed font-normal">
+              Quoted prices are locked for 30 days from quote date. Changes to quotes that affect pricing will result in updated pricing and a new 30–day lock period. This does not include date changes or other non-pricing items.
             </p>
           </div>
 
-          {/* Check out our competitors prices container */}
-          <details open className="group border border-[#DAD7D1] rounded-xl bg-white p-3.5 transition-all">
-            <summary className="flex items-center justify-between cursor-pointer list-none select-none text-xs font-bold text-[#15385E] hover:text-[#5CC1EF] transition-colors">
-              <span className="flex items-center gap-2 text-[#15385E]">
-                <TrendingDown className="w-4 h-4 shrink-0 text-[#15385E]" />
-                <span className="text-[#15385E] font-black">Check out our competitors prices</span>
-              </span>
-              <ChevronDown className="w-4 h-4 text-[#15385E] group-open:rotate-180 transition-transform shrink-0" />
-            </summary>
-
-            <div className="pt-3 mt-3 border-t border-slate-100 space-y-3 text-xs">
-              <p className="text-slate-600 leading-relaxed text-xs">
-                {comp.benchmark.competitorName} use small {comp.benchmark.containerVolumeM3} m³ boxes with a ${comp.competitorDeliveryFeePerUnit} delivery fee per leg and high ${comp.benchmark.monthlyStorageRatePerM3}/m³ storage fees. Portabox provides full-size container capacity with zero-tilt horizontal level-lift delivery, fewer boxes, and massive savings.
-              </p>
-
-              <div className="grid grid-cols-1 gap-2.5 pt-1">
-                {/* 1. Monthly Storage Rate Comparison */}
-                <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 space-y-2">
-                  <span className="text-[10px] uppercase font-bold text-slate-500 block">
-                    1. Monthly Storage Rate ({totalVolumeM3} m³)
-                  </span>
-                  <div className="flex justify-between items-baseline text-xs">
-                    <span className="text-slate-600">{comp.benchmark.competitorName} ({competitorSmallContainersCount} x {comp.benchmark.containerVolumeM3} m³ @ ${comp.benchmark.monthlyStorageRatePerM3}/m³):</span>
-                    <span className="font-mono font-bold text-slate-700">${marketMonthlyCost}/mo</span>
-                  </div>
-                  <div className="flex justify-between items-baseline text-xs">
-                    <span className="text-slate-900 font-semibold">Portabox ({totalVolumeM3} m³ · ${portaboxRatePerM3}/m³):</span>
-                    <span className="font-mono font-bold text-[#15385E]">${estimatedMonthlyStorage}/mo</span>
-                  </div>
-                  <div className="pt-1.5 border-t border-slate-200 text-[11px] text-emerald-700 font-bold">
-                    {monthlyCubicSavings > 0
-                      ? `✓ Save $${monthlyCubicSavings}/mo on storage (${cubicSavingsPercent}% lower rate)`
-                      : `✓ Guaranteed lowest cubic rate with Price Match Guarantee`}
-                  </div>
-                </div>
-
-                {/* 2. Excess Delivery Charges for Multiple Smaller Containers */}
-                <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 space-y-2">
-                  <span className="text-[10px] uppercase font-bold text-slate-500 block">
-                    2. Excess Container Delivery Fees
-                  </span>
-                  <div className="flex justify-between items-baseline text-xs">
-                    <span className="text-slate-600">{competitorSmallContainersCount} x modular containers (${comp.competitorDeliveryFeePerUnit} fee each):</span>
-                    <span className="font-mono font-bold text-slate-700">${competitorDeliveryCost}</span>
-                  </div>
-                  <div className="flex justify-between items-baseline text-xs">
-                    <span className="text-slate-900 font-semibold">{containerCount} x Portabox (${deliveryFeePerContainer} level-lift):</span>
-                    <span className="font-mono font-bold text-[#15385E]">${portaboxDeliveryCost}</span>
-                  </div>
-                  <div className="pt-1.5 border-t border-slate-200 text-[11px] text-emerald-700 font-bold">
-                    ✓ Save ${excessDeliveryCharges} in excess delivery fees avoided
-                  </div>
-                </div>
-              </div>
-
-              {/* Combined Savings Total */}
-              <div className="p-3 rounded-xl bg-emerald-500 text-white flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs">
-                <div>
-                  <span className="text-xs font-black uppercase tracking-wider block">
-                    First-Month Combined Savings
-                  </span>
-                  <span className="text-[11px] text-emerald-100">
-                    Storage rate saving (${monthlyCubicSavings}) + excess delivery fees avoided (${excessDeliveryCharges})
-                  </span>
-                </div>
-                <div className="text-left sm:text-right shrink-0">
-                  <span className="text-2xl font-black font-mono">
-                    ${firstMonthTotalSavings}
-                  </span>
-                  <div className="text-[10px] text-emerald-100 font-bold">
-                    Total Advantage
-                  </div>
-                </div>
-              </div>
-
-              <div className="text-[10px] text-slate-400 flex items-center justify-between pt-1">
-                <span>Benchmark: ${comp.competitorDeliveryFeePerUnit}/fee · ${comp.benchmark.monthlyStorageRatePerM3}/m³</span>
-                <span className="font-mono font-semibold">Audit: {comp.benchmark.lastCheckedDate}</span>
-              </div>
+          {/* Card 3: 1-Year Rate Freeze Guarantee */}
+          <div className="rounded-2xl border border-slate-200/90 bg-white p-4 sm:p-5 shadow-xs space-y-2">
+            <div className="flex items-center gap-2">
+              <ShieldCheck className="w-4 h-4 sm:w-5 sm:h-5 text-emerald-600 shrink-0" />
+              <h4 className="text-xs sm:text-sm font-extrabold tracking-wide uppercase text-[#15385E]">
+                1–YEAR RATE FREEZE GUARANTEE
+              </h4>
             </div>
-          </details>
+            <p className="text-xs text-slate-600 leading-relaxed font-normal">
+              When a booking is made, prices on all attributes (container rental, delivery fees, ancillaries, etc.) are locked for 1 year. Beyond 1 year, delivery fees will default to live pricing and container rental prices can go up or down with a 30–day notification.
+            </p>
+          </div>
+        </>
+      )}
+
+      {/* Driveway Placement & 100% Fit Guarantee Card (Feature-flagged) */}
+      {enableDrivewayFitGuarantee && (
+        <div className="p-3.5 rounded-xl border border-emerald-300 bg-emerald-50/70 text-xs space-y-2">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0" />
+              <span className="font-extrabold text-[#15385E]">100% Driveway Fit Guarantee</span>
+            </div>
+            {onOpenPlacementChecker && (
+              <button
+                type="button"
+                onClick={onOpenPlacementChecker}
+                className="text-[11px] font-black text-[#15385E] hover:text-[#5CC1EF] underline cursor-pointer"
+              >
+                Fit Guide
+              </button>
+            )}
+          </div>
+          <p className="text-[11px] text-slate-600 leading-relaxed">
+            Horizontal level-lift delivery needs only <strong>4.5m overhead clearance</strong> (safely under tree branches &amp; wires). We supply free protective paver pads, and swap container size if space is tight with zero fees.
+          </p>
         </div>
       )}
 
-        {/* Driveway Placement & 100% Fit Guarantee Card (Feature-flagged) */}
-        {enableDrivewayFitGuarantee && (
-          <div className="p-3.5 rounded-xl border border-emerald-300 bg-emerald-50/70 text-xs space-y-2">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0" />
-                <span className="font-extrabold text-[#15385E]">100% Driveway Fit Guarantee</span>
-              </div>
-              {onOpenPlacementChecker && (
-                <button
-                  type="button"
-                  onClick={onOpenPlacementChecker}
-                  className="text-[11px] font-black text-[#15385E] hover:text-[#5CC1EF] underline cursor-pointer"
-                >
-                  Fit Guide
-                </button>
-              )}
-            </div>
-            <p className="text-[11px] text-slate-600 leading-relaxed">
-              Horizontal level-lift delivery needs only <strong>4.5m overhead clearance</strong> (safely under tree branches &amp; wires). We supply free protective paver pads, and swap container size if space is tight with zero fees.
-            </p>
-          </div>
-        )}
-
-        {/* 30-Day Guaranteed Rate Lock & 12-Month Freeze Card (Hidden on Page 1) */}
-        {currentStep > 1 && (
-          <div className="p-3.5 rounded-xl border border-sky-300 bg-sky-50/70 text-xs space-y-1.5">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-1.5 text-xs font-black text-[#15385E]">
-                <ShieldCheck className="w-4 h-4 text-[#00a9d7] shrink-0" />
-                <span>30-Day Price-Lock Guarantee</span>
-              </div>
-              <span className="text-[10px] font-black uppercase text-sky-800 bg-sky-100 px-2 py-0.5 rounded-full">
-                30 Days
-              </span>
-            </div>
-            <p className="text-[11px] text-slate-600 leading-relaxed">
-              Quoted prices are locked for 30 days from quote date. Changes to quotes that effect pricing will result in updated pricing and a new 30 days lock period. This does not include date changes or other non pricing items.
-            </p>
-          </div>
-        )}
-
-        {/* Dedicated Fast 'Book Now' CTA if ready to lock in order */}
-        {currentStep >= 3 && onBookNow && (
-          <button
-            type="button"
-            onClick={onBookNow}
-            className="w-full py-3 px-4 rounded-2xl bg-[#F7D347] hover:bg-[#eec939] text-[#15385E] font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 shadow-md cursor-pointer transition-transform hover:scale-[1.02] active:scale-95"
-          >
-            <CheckCircle2 className="w-4 h-4 text-[#15385E]" />
-            <span>Ready to Book? Book Now</span>
-          </button>
-        )}
-      </div>
+    </div>
   );
 };

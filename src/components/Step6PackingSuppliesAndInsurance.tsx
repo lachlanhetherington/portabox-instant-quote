@@ -2,7 +2,6 @@ import React from 'react';
 import {
   ArrowLeft,
   ArrowRight,
-  ShieldCheck,
   Lock,
   Package,
   Check,
@@ -13,31 +12,34 @@ import {
   Gift,
 } from 'lucide-react';
 import { AppConfig, ContainerSizeId } from '../types/quote';
+import { PostcodeRecord } from '../data/australianPostcodes';
 import {
   calculateBlanketRentalPrice,
   calculateBoxPrice,
-  calculateInsuranceMonthlyFee,
   calculateLockSalesPrice,
 } from '../services/pricingEngine';
 import { AreYouStuckBanner } from './AreYouStuckBanner';
 
 interface Step6PackingSuppliesAndInsuranceProps {
+  originPostcode?: PostcodeRecord | null;
   containerSize?: ContainerSizeId;
   containerCount?: number;
-  insuranceSelected: boolean;
-  onToggleInsurance: (selected: boolean) => void;
+  insuranceSelected?: boolean;
+  onToggleInsurance?: (selected: boolean) => void;
   locksCount: number;
   onUpdateLocksCount: (count: number) => void;
   blanketsCount: number;
   onUpdateBlanketsCount: (count: number) => void;
   boxesCount: number;
   onUpdateBoxesCount: (count: number) => void;
+  durationFreeBlanketsCount?: number;
   config: AppConfig;
   onContinue: () => void;
   onBack: () => void;
 }
 
 export const Step6PackingSuppliesAndInsurance: React.FC<Step6PackingSuppliesAndInsuranceProps> = ({
+  originPostcode,
   containerCount = 1,
   insuranceSelected,
   onToggleInsurance,
@@ -47,131 +49,31 @@ export const Step6PackingSuppliesAndInsurance: React.FC<Step6PackingSuppliesAndI
   onUpdateBlanketsCount,
   boxesCount,
   onUpdateBoxesCount,
+  durationFreeBlanketsCount = 0,
   config,
   onContinue,
   onBack,
 }) => {
-  // Calculations
-  const insuranceCalc = calculateInsuranceMonthlyFee(insuranceSelected, containerCount, config.insurance);
   const lockCalc = calculateLockSalesPrice(locksCount, config.packingSupplies);
-  const blanketCalc = calculateBlanketRentalPrice(blanketsCount, containerCount, config.packingSupplies);
+  const blanketCalc = calculateBlanketRentalPrice(blanketsCount, containerCount, config.packingSupplies, durationFreeBlanketsCount);
   const currentBoxPrice = calculateBoxPrice(boxesCount, config.packingSupplies);
 
   const freeBlanketsAllowance = blanketCalc.freeAllowance;
-  const isFreeInsurance = Boolean(config.insurance?.isFreePromo);
   const isFreeLock = Boolean(config.packingSupplies?.isLockFreePromo);
   const isAllBlanketsFree = Boolean(config.packingSupplies?.isAllBlanketsFreePromo);
 
-  const totalSuppliesAndInsuranceNow =
-    currentBoxPrice +
-    lockCalc.totalPrice +
-    blanketCalc.totalFee +
-    (insuranceSelected ? insuranceCalc.monthlyFee : 0);
-
   return (
     <div className="bg-white rounded-2xl sm:rounded-3xl p-4 sm:p-8 lg:p-10 shadow-xs border-2 border-[#DAD7D1]">
-      {/* Header kicker: #F7D347 Vibrant Gold with #1A1A1A text */}
-      <span className="inline-flex items-center gap-1.5 text-xs font-black uppercase tracking-widest text-[#1A1A1A] bg-[#F7D347] border border-[#e6c338] px-2.5 py-0.5 rounded-md font-['Cabinet_Grotesk',sans-serif]">
-        STEP 7 OF 8 · PACKING SUPPLIES &amp; PROTECTION
-      </span>
-
-      <h1 className="text-2xl sm:text-4xl font-black text-[#15385E] tracking-tight mt-1 mb-2">
-        Packing Supplies &amp; Container Protection
+      <h1 className="text-2xl sm:text-4xl font-black text-[#15385E] tracking-tight mb-2">
+        Packing Supplies &amp; Accessories
       </h1>
       <p className="text-xs sm:text-sm text-slate-500 mb-8 max-w-2xl">
-        Protect your valuable contents with our Container Protection Option (CPO / COO), heavy-duty discus locks, and furniture protection blankets.
+        {config.enableMovingCartons
+          ? 'Equip your move with heavy-duty container padlocks, furniture protection blankets, and sturdy packing cartons delivered inside your container. (Transit insurance protection is selected in the booking flow).'
+          : 'Equip your move with heavy-duty container padlocks and furniture protection blankets delivered inside your container. (Transit insurance protection is selected in the booking flow).'}
       </p>
 
-      {/* SECTION 1: CONTAINER PROTECTION OPTION (CPO / COO) */}
-      <div className="mb-8 p-5 sm:p-6 rounded-3xl bg-slate-50/80 border-2 border-slate-200/90 transition-all hover:border-sky-300">
-        <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
-          <div className="space-y-1.5 flex-1">
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className="w-6 h-6 rounded-lg bg-[#5CC1EF]/20 text-[#15385E] flex items-center justify-center font-bold text-xs">
-                <ShieldCheck className="w-4 h-4 text-[#15385E]" />
-              </span>
-              <h3 className="text-lg sm:text-xl font-black text-[#15385E] tracking-tight">
-                1. Container Protection Option (CPO &amp; COO)
-              </h3>
-              {isFreeInsurance ? (
-                <span className="text-[10px] font-black uppercase tracking-wider bg-emerald-100 text-emerald-800 border border-emerald-300 px-2 py-0.5 rounded-full flex items-center gap-1">
-                  <Gift className="w-3 h-3 text-emerald-600" />
-                  FREE INCLUSION
-                </span>
-              ) : (
-                <span className="text-[10px] font-bold bg-sky-100 text-[#15385E] border border-sky-200 px-2 py-0.5 rounded-full">
-                  $5,000 Standard Contents Protection / Container
-                </span>
-              )}
-            </div>
-
-            <p className="text-xs text-slate-600 leading-relaxed max-w-2xl">
-              Standard $5,000 contents protection per container tailored for portable storage and road transit. Comprehensive protection covering goods during transport and storage with zero standard deductible.
-            </p>
-          </div>
-
-          {/* Pricing Display */}
-          <div className="text-left sm:text-right shrink-0">
-            {isFreeInsurance ? (
-              <div>
-                <span className="text-lg sm:text-xl font-black text-emerald-700 font-mono">
-                  $0 /month
-                </span>
-                <span className="block text-[11px] text-slate-400 line-through">
-                  ${(config.insurance?.monthlyPricePerContainer || 15) * containerCount}/mo
-                </span>
-                <span className="text-[10px] font-bold text-emerald-600">
-                  Save ${(config.insurance?.monthlyPricePerContainer || 15) * containerCount}/mo
-                </span>
-              </div>
-            ) : (
-              <div>
-                <span className="text-lg sm:text-xl font-black text-[#15385E] font-mono">
-                  ${(config.insurance?.monthlyPricePerContainer || 15) * containerCount} /month
-                </span>
-                {containerCount > 1 && (
-                  <span className="block text-[10px] text-slate-500 font-medium">
-                    ${config.insurance?.monthlyPricePerContainer || 15}/mo × {containerCount} containers
-                  </span>
-                )}
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Toggle Option Card */}
-        <div className="mt-4 pt-4 border-t border-slate-200/70">
-          <label className="flex items-start gap-3 p-3.5 rounded-2xl bg-white border-2 border-slate-200 cursor-pointer select-none transition-all hover:border-[#5CC1EF] shadow-2xs">
-            <input
-              type="checkbox"
-              checked={insuranceSelected}
-              onChange={(e) => onToggleInsurance(e.target.checked)}
-              className="mt-1 w-5 h-5 rounded text-[#15385E] accent-[#15385E] cursor-pointer"
-            />
-            <div className="flex-1">
-              <div className="flex items-center justify-between gap-2 flex-wrap">
-                <span className="text-sm font-black text-[#15385E]">
-                  {insuranceSelected
-                    ? '✓ Yes, include Container Protection Option (CPO)'
-                    : 'Add Container Protection Option (CPO)'}
-                </span>
-                {insuranceSelected && (
-                  <span className="text-[10px] font-black uppercase text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
-                    Active on {containerCount} {containerCount > 1 ? 'containers' : 'container'}
-                  </span>
-                )}
-              </div>
-              <p className="text-[11px] text-slate-500 mt-1">
-                {isFreeInsurance
-                  ? 'Admin promotional special: 100% free contents insurance included with your booking.'
-                  : `Provides peace of mind for goods valued up to $${((config.insurance?.coverageAmountPerContainer || 10000) * containerCount).toLocaleString()}. Billed monthly.`}
-              </p>
-            </div>
-          </label>
-        </div>
-      </div>
-
-      {/* SECTION 2: MOVING SUPPLIES - PADLOCKS */}
+      {/* SECTION 1: MOVING SUPPLIES - PADLOCKS */}
       <div className="mb-8 p-5 sm:p-6 rounded-3xl bg-slate-50/80 border-2 border-slate-200/90 transition-all hover:border-sky-300">
         <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
           <div className="space-y-1 flex-1">
@@ -180,7 +82,7 @@ export const Step6PackingSuppliesAndInsurance: React.FC<Step6PackingSuppliesAndI
                 <Lock className="w-4 h-4 text-[#15385E]" />
               </span>
               <h3 className="text-lg sm:text-xl font-black text-[#15385E] tracking-tight">
-                2. Heavy-Duty Container Padlocks
+                1. Heavy-Duty Container Padlocks
               </h3>
               {isFreeLock && (
                 <span className="text-[10px] font-black uppercase tracking-wider bg-emerald-100 text-emerald-800 border border-emerald-300 px-2 py-0.5 rounded-full flex items-center gap-1">
@@ -263,8 +165,17 @@ export const Step6PackingSuppliesAndInsurance: React.FC<Step6PackingSuppliesAndI
         </div>
       </div>
 
-      {/* SECTION 3: MOVING BLANKETS RENTAL (FREE ALLOWANCE + BLOCK PRICING) */}
+      {/* SECTION 2: MOVING BLANKETS RENTAL (FREE ALLOWANCE + BLOCK PRICING) */}
       <div className="mb-8 p-5 sm:p-6 rounded-3xl bg-slate-50/80 border-2 border-slate-200/90 transition-all hover:border-sky-300">
+        {blanketCalc.bonusFreeCount > 0 && (
+          <div className="mb-4 px-3.5 py-2.5 rounded-2xl bg-amber-50 border border-amber-300 text-amber-950 text-xs flex items-center gap-2">
+            <Sparkles className="w-4 h-4 text-amber-600 shrink-0" />
+            <span>
+              <strong>Longer Duration Incentive:</strong> {blanketCalc.bonusFreeCount} bonus free blankets (lots of 10) included with your storage plan!
+            </span>
+          </div>
+        )}
+
         <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
           <div className="space-y-1 flex-1">
             <div className="flex items-center gap-2 flex-wrap">
@@ -272,18 +183,18 @@ export const Step6PackingSuppliesAndInsurance: React.FC<Step6PackingSuppliesAndI
                 <Package className="w-4 h-4 text-[#15385E]" />
               </span>
               <h3 className="text-lg sm:text-xl font-black text-[#15385E] tracking-tight">
-                3. Quilted Furniture Blankets Rental
+                2. Quilted Furniture Blankets Rental (Lots of 10)
               </h3>
               <span className="text-[10px] font-black uppercase tracking-wider bg-[#F7D347] text-[#1A1A1A] border border-[#e6c338] px-2.5 py-0.5 rounded-full flex items-center gap-1">
                 <Gift className="w-3 h-3 text-[#15385E]" />
-                FIRST {freeBlanketsAllowance} BLANKETS FREE ({containerCount > 1 ? `${config.packingSupplies?.freeBlanketsPerContainer || 10} per container` : '10 Free Included'})
+                FIRST {freeBlanketsAllowance} BLANKETS FREE ({containerCount > 1 ? `${config.packingSupplies?.freeBlanketsPerContainer || 10} per container` : '10 Free Included'}{blanketCalc.bonusFreeCount > 0 ? ` + ${blanketCalc.bonusFreeCount} Duration Bonus` : ''})
               </span>
             </div>
             <p className="text-xs text-slate-600 leading-relaxed">
               Thick professional furniture pads to wrap timber furniture, televisions, mirrors, and appliances.
               {isAllBlanketsFree
                 ? ' Promotional offer: All blankets are completely FREE with your container!'
-                : ` Your first ${freeBlanketsAllowance} blankets are 100% free for the duration of your rental. Additional blocks of 10 blankets are just $${config.packingSupplies?.blanketBlockPriceMonthly || 25}/month.`}
+                : ` Your first ${freeBlanketsAllowance} blankets are 100% free for the duration of your rental. Additional blocks of 10 blankets are just $${config.packingSupplies?.blanketBlockPriceMonthly || 25}/month (rented strictly in lots of 10).`}
             </p>
           </div>
 
@@ -302,7 +213,7 @@ export const Step6PackingSuppliesAndInsurance: React.FC<Step6PackingSuppliesAndI
           </div>
         </div>
 
-        {/* Blanket Quick Select Buttons */}
+        {/* Blanket Quick Select Buttons (Lots of 10) */}
         <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 mt-4 pt-4 border-t border-slate-200/70">
           {[
             { qty: 0, label: 'None (0)', fee: 0 },
@@ -328,14 +239,15 @@ export const Step6PackingSuppliesAndInsurance: React.FC<Step6PackingSuppliesAndI
           ))}
         </div>
 
-        {/* Stepper for custom quantity */}
+        {/* Stepper for custom quantity (strictly in lots of 10) */}
         <div className="flex items-center justify-between mt-3 pt-2.5 border-t border-slate-200/60 text-xs">
-          <span className="font-semibold text-slate-600">Custom blanket quantity:</span>
+          <span className="font-semibold text-slate-600">Custom quantity (in lots of 10 only):</span>
           <div className="flex items-center gap-2">
             <button
               type="button"
-              onClick={() => onUpdateBlanketsCount(Math.max(0, blanketsCount - 5))}
-              className="w-7 h-7 rounded-lg bg-white border border-slate-200 flex items-center justify-center text-slate-700 hover:bg-slate-100 cursor-pointer"
+              onClick={() => onUpdateBlanketsCount(Math.max(0, blanketsCount - 10))}
+              className="w-7 h-7 rounded-lg bg-white border border-slate-200 flex items-center justify-center text-slate-700 hover:bg-slate-100 cursor-pointer font-bold text-xs"
+              title="-10 Blankets"
             >
               <Minus className="w-3 h-3" />
             </button>
@@ -343,14 +255,19 @@ export const Step6PackingSuppliesAndInsurance: React.FC<Step6PackingSuppliesAndI
               type="number"
               min="0"
               max="500"
+              step="10"
               value={blanketsCount}
-              onChange={(e) => onUpdateBlanketsCount(Math.max(0, parseInt(e.target.value) || 0))}
-              className="w-14 text-center py-1 rounded-lg border border-slate-200 font-mono font-bold text-xs bg-white"
+              onChange={(e) => {
+                const val = Math.max(0, parseInt(e.target.value) || 0);
+                onUpdateBlanketsCount(Math.round(val / 10) * 10);
+              }}
+              className="w-16 text-center py-1 rounded-lg border border-slate-200 font-mono font-bold text-xs bg-white"
             />
             <button
               type="button"
-              onClick={() => onUpdateBlanketsCount(blanketsCount + 5)}
-              className="w-7 h-7 rounded-lg bg-white border border-slate-200 flex items-center justify-center text-slate-700 hover:bg-slate-100 cursor-pointer"
+              onClick={() => onUpdateBlanketsCount(blanketsCount + 10)}
+              className="w-7 h-7 rounded-lg bg-white border border-slate-200 flex items-center justify-center text-slate-700 hover:bg-slate-100 cursor-pointer font-bold text-xs"
+              title="+10 Blankets"
             >
               <Plus className="w-3 h-3" />
             </button>
@@ -358,98 +275,100 @@ export const Step6PackingSuppliesAndInsurance: React.FC<Step6PackingSuppliesAndI
         </div>
       </div>
 
-      {/* SECTION 4: HEAVY-DUTY MOVING BOXES */}
-      <div className="mb-8 p-5 sm:p-6 rounded-3xl bg-slate-50/80 border-2 border-slate-200/90 transition-all hover:border-sky-300">
-        <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
-          <div className="space-y-1 flex-1">
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className="w-6 h-6 rounded-lg bg-[#5CC1EF]/20 text-[#15385E] flex items-center justify-center font-bold text-xs">
-                <Package className="w-4 h-4 text-[#15385E]" />
-              </span>
-              <h3 className="text-lg sm:text-xl font-black text-[#15385E] tracking-tight">
-                4. Heavy-Duty Moving Cartons
-              </h3>
-              <span className="text-[10px] font-bold bg-sky-100 text-[#15385E] border border-sky-200 px-2 py-0.5 rounded-full">
-                Delivered inside container (Free Delivery)
+      {/* SECTION 3: HEAVY-DUTY MOVING BOXES (Conditional on admin feature flag; default off) */}
+      {config.enableMovingCartons && (
+        <div className="mb-8 p-5 sm:p-6 rounded-3xl bg-slate-50/80 border-2 border-slate-200/90 transition-all hover:border-sky-300">
+          <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
+            <div className="space-y-1 flex-1">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="w-6 h-6 rounded-lg bg-[#5CC1EF]/20 text-[#15385E] flex items-center justify-center font-bold text-xs">
+                  <Package className="w-4 h-4 text-[#15385E]" />
+                </span>
+                <h3 className="text-lg sm:text-xl font-black text-[#15385E] tracking-tight">
+                  3. Heavy-Duty Moving Cartons
+                </h3>
+                <span className="text-[10px] font-bold bg-sky-100 text-[#15385E] border border-sky-200 px-2 py-0.5 rounded-full">
+                  Delivered inside container (Free Delivery)
+                </span>
+              </div>
+              <p className="text-xs text-slate-600 leading-relaxed">
+                Double-walled corrugated packing boxes engineered for stacking inside storage containers.
+              </p>
+            </div>
+
+            <div className="text-left sm:text-right shrink-0">
+              <div className="font-mono text-lg sm:text-xl font-black text-[#15385E]">
+                ${currentBoxPrice}
+              </div>
+              <span className="text-[10px] text-slate-500 font-medium block">
+                {boxesCount} cartons ordered
               </span>
             </div>
-            <p className="text-xs text-slate-600 leading-relaxed">
-              Double-walled corrugated packing boxes engineered for stacking inside storage containers.
-            </p>
           </div>
 
-          <div className="text-left sm:text-right shrink-0">
-            <div className="font-mono text-lg sm:text-xl font-black text-[#15385E]">
-              ${currentBoxPrice}
+          {/* Pricing Matrix Banner */}
+          <div className="mt-3 p-2.5 rounded-xl bg-white border border-slate-200/80 text-[11px] text-slate-600 flex items-center justify-between flex-wrap gap-2">
+            <span>${config.packingSupplies?.boxSinglePrice || 2.50} ea</span>
+            <span>·</span>
+            <span className="font-bold text-[#15385E]">10 for ${config.packingSupplies?.box10Price || 20}</span>
+            <span>·</span>
+            <span className="font-bold text-[#15385E]">50 for ${config.packingSupplies?.box50Price || 40}</span>
+            <span>·</span>
+            <span className="font-bold text-[#5CC1EF]">100 for ${config.packingSupplies?.box100Price || 70}</span>
+          </div>
+
+          {/* Quick Bundle Selector */}
+          <div className="grid grid-cols-4 gap-2 mt-3">
+            {[0, 10, 50, 100].map((qty) => (
+              <button
+                key={qty}
+                type="button"
+                onClick={() => onUpdateBoxesCount(qty)}
+                className={`py-2 px-1 rounded-xl text-xs font-bold border transition-all cursor-pointer text-center ${
+                  boxesCount === qty
+                    ? 'bg-[#15385E] text-white border-[#15385E] shadow-2xs'
+                    : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-100'
+                }`}
+              >
+                {qty === 0 ? 'None' : `${qty} pk`}
+              </button>
+            ))}
+          </div>
+
+          {/* Stepper for custom quantity */}
+          <div className="flex items-center justify-between mt-3 pt-2.5 border-t border-slate-200/60 text-xs">
+            <span className="font-semibold text-slate-600">Custom box quantity:</span>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => onUpdateBoxesCount(Math.max(0, boxesCount - 5))}
+                className="w-7 h-7 rounded-lg bg-white border border-slate-200 flex items-center justify-center text-slate-700 hover:bg-slate-100 cursor-pointer"
+              >
+                <Minus className="w-3 h-3" />
+              </button>
+              <input
+                type="number"
+                min="0"
+                max="500"
+                value={boxesCount}
+                onChange={(e) => onUpdateBoxesCount(Math.max(0, parseInt(e.target.value) || 0))}
+                className="w-14 text-center py-1 rounded-lg border border-slate-200 font-mono font-bold text-xs bg-white"
+              />
+              <button
+                type="button"
+                onClick={() => onUpdateBoxesCount(boxesCount + 5)}
+                className="w-7 h-7 rounded-lg bg-white border border-slate-200 flex items-center justify-center text-slate-700 hover:bg-slate-100 cursor-pointer"
+              >
+                <Plus className="w-3 h-3" />
+              </button>
             </div>
-            <span className="text-[10px] text-slate-500 font-medium block">
-              {boxesCount} cartons ordered
-            </span>
           </div>
         </div>
-
-        {/* Pricing Matrix Banner */}
-        <div className="mt-3 p-2.5 rounded-xl bg-white border border-slate-200/80 text-[11px] text-slate-600 flex items-center justify-between flex-wrap gap-2">
-          <span>${config.packingSupplies?.boxSinglePrice || 2.50} ea</span>
-          <span>·</span>
-          <span className="font-bold text-[#15385E]">10 for ${config.packingSupplies?.box10Price || 20}</span>
-          <span>·</span>
-          <span className="font-bold text-[#15385E]">50 for ${config.packingSupplies?.box50Price || 40}</span>
-          <span>·</span>
-          <span className="font-bold text-[#5CC1EF]">100 for ${config.packingSupplies?.box100Price || 70}</span>
-        </div>
-
-        {/* Quick Bundle Selector */}
-        <div className="grid grid-cols-4 gap-2 mt-3">
-          {[0, 10, 50, 100].map((qty) => (
-            <button
-              key={qty}
-              type="button"
-              onClick={() => onUpdateBoxesCount(qty)}
-              className={`py-2 px-1 rounded-xl text-xs font-bold border transition-all cursor-pointer text-center ${
-                boxesCount === qty
-                  ? 'bg-[#15385E] text-white border-[#15385E] shadow-2xs'
-                  : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-100'
-              }`}
-            >
-              {qty === 0 ? 'None' : `${qty} pk`}
-            </button>
-          ))}
-        </div>
-
-        {/* Stepper for custom quantity */}
-        <div className="flex items-center justify-between mt-3 pt-2.5 border-t border-slate-200/60 text-xs">
-          <span className="font-semibold text-slate-600">Custom box quantity:</span>
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => onUpdateBoxesCount(Math.max(0, boxesCount - 5))}
-              className="w-7 h-7 rounded-lg bg-white border border-slate-200 flex items-center justify-center text-slate-700 hover:bg-slate-100 cursor-pointer"
-            >
-              <Minus className="w-3 h-3" />
-            </button>
-            <input
-              type="number"
-              min="0"
-              max="500"
-              value={boxesCount}
-              onChange={(e) => onUpdateBoxesCount(Math.max(0, parseInt(e.target.value) || 0))}
-              className="w-14 text-center py-1 rounded-lg border border-slate-200 font-mono font-bold text-xs bg-white"
-            />
-            <button
-              type="button"
-              onClick={() => onUpdateBoxesCount(boxesCount + 5)}
-              className="w-7 h-7 rounded-lg bg-white border border-slate-200 flex items-center justify-center text-slate-700 hover:bg-slate-100 cursor-pointer"
-            >
-              <Plus className="w-3 h-3" />
-            </button>
-          </div>
-        </div>
-      </div>
+      )}
 
       {/* Are You Stuck Banner */}
       <div className="mt-8">
-        <AreYouStuckBanner />
+        <AreYouStuckBanner originPostcode={originPostcode} config={config} />
       </div>
 
       {/* Navigation Buttons */}

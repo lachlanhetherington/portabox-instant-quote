@@ -156,16 +156,28 @@ export const SmartsheetGridView: React.FC<SmartsheetGridViewProps> = ({
   const handleExportCsv = () => {
     const headers = [
       'Order Number',
+      'Quote Number',
       'Customer Name',
+      'Company Name',
       'Phone',
       'Email',
       'Delivery Address',
-      'Suburb',
-      'Postcode',
+      'Origin Suburb',
+      'Origin Postcode',
+      'Destination Suburb',
+      'Destination Postcode',
       'Zone',
+      'Container Count',
       'Container Size',
       'Container ID',
       'Service Type',
+      'Storage Duration',
+      'Initial Delivery Fee',
+      'Monthly Storage Fee',
+      'Total First Payment',
+      'Periodic Rate (AUD)',
+      'Fuel Surcharge',
+      'Free Blankets',
       'Scheduled Date',
       'Delivery Window',
       'Surface Type',
@@ -185,16 +197,28 @@ export const SmartsheetGridView: React.FC<SmartsheetGridViewProps> = ({
     rows.forEach((r) => {
       const line = [
         `"${r.orderNumber || ''}"`,
+        `"${r.quoteNumber || ''}"`,
         `"${r.customerName || ''}"`,
+        `"${r.companyName || ''}"`,
         `"${r.customerPhone || ''}"`,
         `"${r.customerEmail || ''}"`,
         `"${(r.deliveryAddress || '').replace(/"/g, '""')}"`,
-        `"${r.suburb || ''}"`,
-        `"${r.postcode || ''}"`,
+        `"${r.originSuburb || r.suburb || ''}"`,
+        `"${r.originPostcode || r.postcode || ''}"`,
+        `"${r.destinationSuburb || ''}"`,
+        `"${r.destinationPostcode || ''}"`,
         `"${r.deliveryZone || ''}"`,
+        `"${r.containerCount || 1}"`,
         `"${r.containerSize || ''}"`,
         `"${r.containerId || ''}"`,
         `"${r.serviceType || ''}"`,
+        `"${r.storageDuration || ''}"`,
+        `"${r.initialDeliveryFee ?? ''}"`,
+        `"${r.monthlyStorageFee ?? ''}"`,
+        `"${r.firstPaymentTotal ?? ''}"`,
+        `"${r.periodicRateAud || 0}"`,
+        `"${r.fuelSurcharge ?? ''}"`,
+        `"${r.freeBlanketsCount ?? ''}"`,
         `"${r.scheduledDeliveryDate || ''}"`,
         `"${r.deliveryWindow || ''}"`,
         `"${r.placementSurface || 'Concrete Driveway'}"`,
@@ -467,7 +491,14 @@ export const SmartsheetGridView: React.FC<SmartsheetGridViewProps> = ({
                         </button>
                       </div>
                     ) : (
-                      <span className="text-[#0b2942] group-hover:underline">{row.customerName}</span>
+                      <div>
+                        <span className="text-[#0b2942] group-hover:underline block">{row.customerName}</span>
+                        {row.companyName && (
+                          <span className="text-[10px] text-slate-500 font-medium block">
+                            🏢 {row.companyName}
+                          </span>
+                        )}
+                      </div>
                     )}
                   </td>
 

@@ -757,6 +757,7 @@ export function setCurrentUserSession(customer: CustomerAccount | null): void {
 export function upsertCustomerFromLead(lead: {
   firstName: string;
   lastName?: string;
+  companyName?: string;
   email: string;
   mobile: string;
   quote: QuoteBreakdown;
@@ -780,6 +781,7 @@ export function upsertCustomerFromLead(lead: {
     status: 'Scheduled',
     location: `En route to ${lead.quote.originPostcode.suburb} ${lead.quote.originPostcode.state}`,
     originAddress: `${lead.quote.originPostcode.suburb}, ${lead.quote.originPostcode.state} ${lead.quote.originPostcode.postcode}`,
+    destinationAddress: lead.quote.destinationPostcode ? `${lead.quote.destinationPostcode.suburb}, ${lead.quote.destinationPostcode.state} ${lead.quote.destinationPostcode.postcode}` : undefined,
     scheduledDeliveryDate: lead.quote.preferredDate,
     deliveryWindow: lead.quote.selectedSlot?.timeRange || 'Morning Window (8:00 AM – 11:30 AM)',
     driverName: 'Dispatch Scheduled (Portabox Metro Fleet)',
@@ -831,6 +833,9 @@ export function upsertCustomerFromLead(lead: {
 
   if (existingIdx >= 0) {
     const existing = accounts[existingIdx];
+    if (lead.companyName) {
+      existing.companyName = lead.companyName;
+    }
     existing.quotes = [newQuote, ...(existing.quotes || [])];
     existing.orders = [newOrder, ...(existing.orders || [])];
     existing.transactions = [newTransaction, ...(existing.transactions || [])];
@@ -847,6 +852,7 @@ export function upsertCustomerFromLead(lead: {
       email: lead.email,
       firstName: lead.firstName,
       lastName: lead.lastName || '',
+      companyName: lead.companyName,
       mobile: lead.mobile,
       address: `${lead.quote.originPostcode.suburb}, ${lead.quote.originPostcode.state}`,
       suburb: lead.quote.originPostcode.suburb,

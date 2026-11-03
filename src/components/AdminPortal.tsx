@@ -620,6 +620,29 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
     setTimeout(() => setSaveSuccess(false), 2500);
   };
 
+  const handleUpdateTwoWeeksStorageRate = (rate: number) => {
+    const clamped = Math.max(0, rate);
+    const updated: AppConfig = {
+      ...currentConfig,
+      twoWeeksStorageRate: clamped,
+    };
+    setCurrentConfig(updated);
+    onSaveConfig(updated);
+    setSaveSuccess(true);
+    setTimeout(() => setSaveSuccess(false), 2500);
+  };
+
+  const handleToggleSelectWeeks = (enabled: boolean) => {
+    const updated: AppConfig = {
+      ...currentConfig,
+      enableSelectWeeks: enabled,
+    };
+    setCurrentConfig(updated);
+    onSaveConfig(updated);
+    setSaveSuccess(true);
+    setTimeout(() => setSaveSuccess(false), 2500);
+  };
+
   const handleResetDefaults = () => {
     if (confirm('Reset all prices, delivery zones and promotions to default settings?')) {
       localStorage.removeItem('portabox_app_config_v2');
@@ -4029,6 +4052,66 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
               </div>
             </div>
 
+            {/* Standard 2-Week Storage Rate & Duration Controls */}
+            <div className="p-5 rounded-2xl border border-slate-200 bg-white space-y-4 shadow-2xs">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-3">
+                <div>
+                  <h4 className="font-extrabold text-sm text-[#0b2942]">
+                    2-Week Standard Storage Rate &amp; Duration Controls
+                  </h4>
+                  <p className="text-xs text-slate-500">
+                    Configure the flat standard 2-week storage rate across Small, Medium, and Large containers ($199 default) and customer duration view options.
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] font-mono font-bold bg-sky-50 text-[#00c0f3] px-2.5 py-1 rounded-lg border border-sky-200">
+                    Std Rate: ${currentConfig.twoWeeksStorageRate ?? 199}
+                  </span>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-2">
+                  <label className="block text-xs font-bold text-[#0b2942]">
+                    Standard 2-Week Storage Rate ($ AUD)
+                  </label>
+                  <p className="text-[11px] text-slate-500">
+                    Flat standard charge applied for 2-week storage across 10m³, 19m³, and 25m³ containers.
+                  </p>
+                  <div className="relative">
+                    <span className="absolute left-3 top-2.5 text-slate-400 font-bold text-xs">$</span>
+                    <input
+                      type="number"
+                      min="0"
+                      value={currentConfig.twoWeeksStorageRate ?? 199}
+                      onChange={(e) => handleUpdateTwoWeeksStorageRate(Number(e.target.value))}
+                      className="w-full pl-7 pr-3 py-2 rounded-xl border border-slate-300 bg-white text-sm font-bold font-mono text-[#0b2942] focus:ring-2 focus:ring-[#00c0f3]"
+                    />
+                  </div>
+                </div>
+
+                <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-2">
+                  <span className="block text-xs font-bold text-[#0b2942]">
+                    Select Weeks Option Feature Flag (Page 5)
+                  </span>
+                  <p className="text-[11px] text-slate-500">
+                    Controls whether the &quot;Select Weeks&quot; duration switcher is exposed to quote customers or kept off by default.
+                  </p>
+                  <label className="flex items-center gap-3 pt-1 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(currentConfig.enableSelectWeeks)}
+                      onChange={(e) => handleToggleSelectWeeks(e.target.checked)}
+                      className="w-4 h-4 rounded text-[#00c0f3] accent-[#00c0f3]"
+                    />
+                    <span className="text-xs font-extrabold text-slate-800">
+                      {currentConfig.enableSelectWeeks ? '✓ Enabled (Visible on Page 5)' : '✕ Disabled (Off - Default)'}
+                    </span>
+                  </label>
+                </div>
+              </div>
+            </div>
+
             {/* Quick Location Delivery Fee Summary & Direct Editor (Zones A through E) */}
             <div className="p-5 rounded-2xl border border-slate-200 bg-white space-y-4">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
@@ -6791,14 +6874,14 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
 
             {/* Feature 1C: "Select Weeks" Storage Duration Function */}
             <div className={`p-6 rounded-2xl border transition-all ${
-              currentConfig.enableSelectWeeks !== false
+              Boolean(currentConfig.enableSelectWeeks)
                 ? 'bg-white border-slate-200 shadow-xs'
                 : 'bg-amber-50/50 border-amber-200'
             }`}>
               <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
                 <div className="flex items-start gap-4">
                   <div className={`p-3 rounded-2xl text-white shrink-0 ${
-                    currentConfig.enableSelectWeeks !== false ? 'bg-[#0b2942]' : 'bg-slate-400'
+                    Boolean(currentConfig.enableSelectWeeks) ? 'bg-[#0b2942]' : 'bg-slate-400'
                   }`}>
                     <Clock className="w-6 h-6 text-[#FEBD69]" />
                   </div>
@@ -6808,29 +6891,29 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                         "Select Weeks" Storage Duration Function
                       </h4>
                       <span className={`text-[10px] font-black uppercase px-2.5 py-0.5 rounded-full ${
-                        currentConfig.enableSelectWeeks !== false
+                        Boolean(currentConfig.enableSelectWeeks)
                           ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
                           : 'bg-rose-100 text-rose-800 border border-rose-200'
                       }`}>
-                        {currentConfig.enableSelectWeeks !== false ? 'Feature Selected (Enabled)' : 'Feature Deselected (Disabled)'}
+                        {Boolean(currentConfig.enableSelectWeeks) ? 'Feature Selected (Enabled)' : 'Feature Deselected (Disabled)'}
                       </span>
                     </div>
                     <p className="text-xs text-slate-600 mt-1 max-w-2xl leading-relaxed">
-                      Allows customers in Step 4 ("When & Storage Duration") to toggle between "Select Months" and "Select Weeks" (1, 2, 3, or 4+ weeks). When deselected, only monthly durations are shown.
+                      Allows toggling between "Select Months" and "Select Weeks" in duration configurations. When deselected (default), customer view uses clean standard durations including the 2 Weeks option ($199 flat rate).
                     </p>
                   </div>
                 </div>
                 <div className="flex sm:flex-col items-end gap-2 shrink-0">
                   <button
                     type="button"
-                    onClick={() => handleToggleFeatureFlag('enableSelectWeeks', currentConfig.enableSelectWeeks === false)}
+                    onClick={() => handleToggleFeatureFlag('enableSelectWeeks', !Boolean(currentConfig.enableSelectWeeks))}
                     className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer shadow-xs ${
-                      currentConfig.enableSelectWeeks !== false
+                      Boolean(currentConfig.enableSelectWeeks)
                         ? 'bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200'
                         : 'bg-emerald-600 hover:bg-emerald-700 text-white'
                     }`}
                   >
-                    {currentConfig.enableSelectWeeks !== false ? 'Deselect Feature' : 'Select Feature (Enable)'}
+                    {Boolean(currentConfig.enableSelectWeeks) ? 'Deselect Feature' : 'Select Feature (Enable)'}
                   </button>
                 </div>
               </div>
@@ -6984,6 +7067,129 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                     }`}
                   >
                     {currentConfig.enableGoogleCalendarLink ? 'Turn Off Google Calendar Link' : 'Enable Google Calendar Link'}
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Feature: Portabox Moving Cartons & Packing Boxes (Default OFF) */}
+            <div className="p-6 rounded-2xl border border-slate-200 bg-white shadow-xs">
+              <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
+                <div className="flex items-start gap-4">
+                  <div className={`p-3 rounded-2xl text-white shrink-0 ${
+                    currentConfig.enableMovingCartons ? 'bg-amber-600' : 'bg-slate-400'
+                  }`}>
+                    <Package className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2.5 flex-wrap">
+                      <h4 className="text-base font-extrabold text-[#0b2942]">
+                        Moving Cartons &amp; Packing Boxes
+                      </h4>
+                      <span className={`text-[10px] font-black uppercase px-2.5 py-0.5 rounded-full ${
+                        currentConfig.enableMovingCartons
+                          ? 'bg-emerald-100 text-emerald-800 border border-emerald-200 font-bold'
+                          : 'bg-amber-100 text-amber-800 border border-amber-200 font-bold'
+                      }`}>
+                        {currentConfig.enableMovingCartons ? 'Active (Cartons Enabled)' : 'Turned Off (Admin Default)'}
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-600 mt-1 max-w-2xl leading-relaxed">
+                      Controls customer-facing availability of heavy-duty moving cartons and boxes in Step 6 (Packing Supplies &amp; Accessories). Portabox does not supply moving cartons at the moment. Admins can enable this feature flag when carton supply is ready.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex sm:flex-col items-end gap-2 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const updated: AppConfig = {
+                        ...currentConfig,
+                        enableMovingCartons: !currentConfig.enableMovingCartons,
+                      };
+                      setCurrentConfig(updated);
+                      onSaveConfig(updated);
+                      setSaveSuccess(true);
+                      setTimeout(() => setSaveSuccess(false), 2500);
+                    }}
+                    className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer shadow-xs ${
+                      currentConfig.enableMovingCartons
+                        ? 'bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300'
+                        : 'bg-[#15385E] hover:bg-[#1f4a7a] text-white font-extrabold'
+                    }`}
+                  >
+                    {currentConfig.enableMovingCartons ? 'Turn Off Moving Cartons' : 'Enable Moving Cartons'}
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Feature: Select Weeks Duration Option & 2-Week Rate (Default OFF) */}
+            <div className="p-6 rounded-2xl border border-slate-200 bg-white shadow-xs">
+              <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
+                <div className="flex items-start gap-4">
+                  <div className={`p-3 rounded-2xl text-white shrink-0 ${
+                    currentConfig.enableSelectWeeks ? 'bg-indigo-600' : 'bg-slate-400'
+                  }`}>
+                    <Clock className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2.5 flex-wrap">
+                      <h4 className="text-base font-extrabold text-[#0b2942]">
+                        Select Weeks Duration Option &amp; 2-Week Rate
+                      </h4>
+                      <span className={`text-[10px] font-black uppercase px-2.5 py-0.5 rounded-full ${
+                        currentConfig.enableSelectWeeks
+                          ? 'bg-emerald-100 text-emerald-800 border border-emerald-200 font-bold'
+                          : 'bg-amber-100 text-amber-800 border border-amber-200 font-bold'
+                      }`}>
+                        {currentConfig.enableSelectWeeks ? 'Active (Weeks Visible)' : 'Turned Off (Admin Default)'}
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-600 mt-1 max-w-2xl leading-relaxed">
+                      Controls customer visibility of the weekly selection option on Page 5. Standard rate for 2 weeks across Small, Medium, Large is currently set to ${currentConfig.twoWeeksStorageRate ?? 199}.
+                    </p>
+                    <div className="mt-3 flex items-center gap-2">
+                      <span className="text-xs font-bold text-slate-700">2-Week Standard Rate ($):</span>
+                      <input
+                        type="number"
+                        min="0"
+                        value={currentConfig.twoWeeksStorageRate ?? 199}
+                        onChange={(e) => {
+                          const updated: AppConfig = {
+                            ...currentConfig,
+                            twoWeeksStorageRate: Number(e.target.value) || 199,
+                          };
+                          setCurrentConfig(updated);
+                          onSaveConfig(updated);
+                        }}
+                        className="w-24 px-2 py-1 rounded-lg border border-slate-300 font-mono font-bold text-xs bg-white text-[#15385E]"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex sm:flex-col items-end gap-2 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const updated: AppConfig = {
+                        ...currentConfig,
+                        enableSelectWeeks: !currentConfig.enableSelectWeeks,
+                      };
+                      setCurrentConfig(updated);
+                      onSaveConfig(updated);
+                      setSaveSuccess(true);
+                      setTimeout(() => setSaveSuccess(false), 2500);
+                    }}
+                    className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer shadow-xs ${
+                      currentConfig.enableSelectWeeks
+                        ? 'bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300'
+                        : 'bg-[#15385E] hover:bg-[#1f4a7a] text-white font-extrabold'
+                    }`}
+                  >
+                    {currentConfig.enableSelectWeeks ? 'Turn Off Select Weeks' : 'Enable Select Weeks'}
                   </button>
                 </div>
               </div>
@@ -7606,7 +7812,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
         isOpen={isTestPopOutOpen}
         onClose={() => setIsTestPopOutOpen(false)}
         config={currentConfig.businessHours}
-        defaultCustomerName="Andrew (Admin Preview)"
+        defaultCustomerName="Dan Harrington (CEO Preview)"
         defaultCustomerMobile="0412 000 111"
         defaultSuburbOrPostcode="5061 Hyde Park"
         source="Direct"

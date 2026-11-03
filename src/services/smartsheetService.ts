@@ -96,13 +96,34 @@ export interface SmartsheetRow {
   orderNumber: string;
   customerId: string;
   customerName: string;
+  companyName?: string;
   customerPhone: string;
   customerEmail: string;
   containerId: string;
   containerSize: string;
+  containerCount?: number;
   serviceType: string;
   orderStatus: ContainerOrder['status'];
   deliveryAddress: string;
+  originSuburb?: string;
+  originPostcode?: string;
+  destinationAddress?: string;
+  destinationSuburb?: string;
+  destinationPostcode?: string;
+  storageDuration?: string;
+  billingCycle?: string;
+  initialDeliveryFee?: number;
+  monthlyStorageFee?: number;
+  firstPaymentTotal?: number;
+  fuelSurcharge?: number;
+  movingDistanceKm?: number;
+  durationDiscountPercent?: number;
+  durationDiscountAud?: number;
+  freeBlanketsCount?: number;
+  packingSuppliesTotal?: number;
+  insurancePlan?: string;
+  quoteNumber?: string;
+  quoteStatus?: string;
   scheduledDeliveryDate: string;
   deliveryWindow: string;
   timeToDeliveryHours: number;
@@ -677,6 +698,9 @@ export function buildSmartsheetRowsFromAccounts(accounts: CustomerAccount[]): Sm
       .reduce((sum, t) => sum + t.amount, 0);
     const totalDiscount = (c.discountsGiven || []).reduce((sum, d) => sum + d.amount, 0);
 
+    const primaryQuote = c.quotes?.[0];
+    const qData = primaryQuote?.quoteData;
+
     c.orders.forEach((o) => {
       let yardStatus: YardReviewStatus = 'Pending Inspection';
       if (o.status === 'Placed at Customer') yardStatus = 'Delivered to Site';
@@ -694,14 +718,35 @@ export function buildSmartsheetRowsFromAccounts(accounts: CustomerAccount[]): Sm
         id: `${c.id}-${o.id}`,
         orderNumber: o.orderNumber,
         customerId: c.id,
-        customerName: `${c.firstName} ${c.lastName}`.trim(),
+        customerName: `${c.firstName} ${c.lastName || ''}`.trim(),
+        companyName: c.companyName || '',
         customerPhone: c.mobile,
         customerEmail: c.email,
         containerId: o.containerId,
         containerSize: o.containerSize,
+        containerCount: qData?.containerCount || primaryQuote?.containerCount || 1,
         serviceType: o.serviceType,
         orderStatus: o.status,
         deliveryAddress: o.originAddress,
+        originSuburb: qData?.originPostcode?.suburb || c.suburb,
+        originPostcode: qData?.originPostcode?.postcode || c.postcode,
+        destinationAddress: o.destinationAddress || (qData?.destinationPostcode ? `${qData.destinationPostcode.suburb}, ${qData.destinationPostcode.state} ${qData.destinationPostcode.postcode}` : undefined),
+        destinationSuburb: qData?.destinationPostcode?.suburb,
+        destinationPostcode: qData?.destinationPostcode?.postcode,
+        storageDuration: qData?.storageDuration || '1_to_3_months',
+        billingCycle: qData?.billingCycle || primaryQuote?.billingCycle,
+        initialDeliveryFee: qData?.initialDeliveryFee,
+        monthlyStorageFee: qData?.monthlyStorageFee || primaryQuote?.monthlyStorageFee,
+        firstPaymentTotal: qData?.firstPaymentTotal || primaryQuote?.firstPaymentTotal,
+        fuelSurcharge: qData?.fuelSurchargeAmount,
+        movingDistanceKm: qData?.movingDistanceKm,
+        durationDiscountPercent: qData?.durationDiscountPercent,
+        durationDiscountAud: qData?.durationDiscountAmount,
+        freeBlanketsCount: qData?.packingSupplies?.blanketsCount,
+        packingSuppliesTotal: qData?.packingSupplies?.totalSuppliesPrice,
+        insurancePlan: qData?.insurance?.selected ? (qData.insurance.isFreePromo ? 'Free Promo ($10k)' : `Standard ($${qData.insurance.coverageAmount || 10000} coverage)`) : undefined,
+        quoteNumber: primaryQuote?.quoteNumber,
+        quoteStatus: primaryQuote?.status,
         scheduledDeliveryDate: o.scheduledDeliveryDate,
         deliveryWindow: o.deliveryWindow,
         timeToDeliveryHours: o.timeToDeliveryHours ?? 24,
@@ -1179,6 +1224,10 @@ export function updateSmartsheetBookingRowTwoWay(
       if (updates.customerEmail !== undefined && updates.customerEmail !== c.email) {
         c.email = updates.customerEmail;
         changedFieldsSummary.push(`Email (${updates.customerEmail})`);
+      }
+      if (updates.companyName !== undefined && updates.companyName !== c.companyName) {
+        c.companyName = updates.companyName;
+        changedFieldsSummary.push(`Company (${updates.companyName})`);
       }
 
       // 2. Container & Delivery Booking Info Updates

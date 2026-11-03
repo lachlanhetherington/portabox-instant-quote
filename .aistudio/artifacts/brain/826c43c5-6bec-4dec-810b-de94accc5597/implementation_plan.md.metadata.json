@@ -1,6 +1,6 @@
 {
-  "summary":  "Strategic architectural review and revised implementation plan proposing the Optimum Customer Flow for Portabox quoting and booking:\n1. Architectural Critique of Current vs. Optimum Funnel: Highlights the friction of the current 8-step journey before price reveal and presents the high-converting 2-stage model (Fast 3-Step Instant Quote < 45s + Dedicated 3-Step Booking Confirmation).\n2. Stage 1 (Fast Instant Quote): Where & What (Postcode + Storage at home/location or Move) -> Container Size & Volume -> Instant Transparent Quote with 30-day lock & 1-field contact capture.\n3. Stage 2 (Seamless Booking Wizard): Delivery Date & Window (Calendar) -> Driveway Clearance & Site Notes -> Account PIN & Card Payment.\n4. Complete synthesis of the CEO Smartsheet improvements (terminology cleanup, Queensland hub consolidation to Brisbane, Zone E base + $5/km, and simplified duration discounts).",
-  "updatedAt":  "2026-10-29T06:32:29.028549698Z",
+  "summary":  "Architectural plan to relocate Schedule & Placement and Transit Insurance into the post-quote Booking flow, streamlining the initial quote questionnaire into 7 focused steps with packing supplies.",
+  "updatedAt":  "2026-10-31T21:10:57.297531594Z",
   "requestFeedback":  true,
   "userFacing":  true
 }

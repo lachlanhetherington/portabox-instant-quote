@@ -171,9 +171,18 @@ export interface InterstateRoutePricing {
 }
 
 export interface DurationDiscountTier {
-  months: number;
+  id?: string;
+  months: number; // e.g. 0.5 (2 weeks), 1, 2, 3, 6, 9, 12, etc.
   discountPercent: number; // e.g. 10 for 10%
-  label?: string; // e.g. '2 Months (10% OFF)'
+  label?: string; // e.g. '3 Months (20% OFF)'
+  // Multi-condition scopes (CEO PAGE 6 comments)
+  serviceType?: 'all' | 'moving_storage' | 'storage_at_place' | 'storage_facility' | 'moving';
+  moveScope?: 'all' | 'local' | 'interstate';
+  storageLocation?: 'all' | 'facility' | 'my_place'; // Portabox Location vs Customer Own Location
+  applyMode?: 'upfront_monthly' | 'on_completion_remaining_charges'; // If customer completes duration, discount applied to remaining charges
+  freeBlanketsCount?: number; // Free blanket rental in lots of 10 only (e.g. 10, 20, 30...) as duration incentive
+  description?: string;
+  active?: boolean;
 }
 
 export interface AppConfig {
@@ -208,6 +217,7 @@ export interface AppConfig {
   enableCallCenterDispatch?: boolean;
   enableContainerInventory?: boolean;
   enableSelectWeeks?: boolean;
+  twoWeeksStorageRate?: number; // Standard rate for 2 weeks storage option across Small, Medium, Large (default: 199)
   enableEcoEfficiencyIncentive?: boolean;
   efficiencyDiscountPercentage?: number;
   ecoIncentiveType?: 'dollar_discount' | 'emissions_only';
@@ -218,6 +228,7 @@ export interface AppConfig {
   lockTopBannerOnScroll?: boolean; // When enabled (default: true), keeps top announcement banner & header locked on scrolling
   enableDrivewayFitGuarantee?: boolean; // Feature flag: 100% Driveway Fit Guarantee & assessment process
   enableGoogleCalendarLink?: boolean; // Feature flag: Google Calendar availability & slot integrations in customer flow (default off)
+  enableMovingCartons?: boolean; // Feature flag: Portabox moving cartons & boxes (default: false, Portabox does not provide cartons currently)
   quoteValidityDays?: number; // Exactly 30 calendar days
   rateLockDurationMonths?: number; // Mandatory 12-month freeze
   annualPriceAdjustmentCapPercent?: number; // Default 10%
@@ -359,8 +370,10 @@ export interface QuoteBreakdown {
   
   packingSupplies: PackingSuppliesOrder;
   insurance?: ContainerInsuranceOrder;
+  insuranceSelected?: boolean;
   insuranceMonthlyFee?: number;
   insuranceSavingsMonthly?: number;
+  config?: any;
   
   legs: QuoteLegBreakdown[];
   waivedLegs?: QuoteLegBreakdown[];
@@ -378,6 +391,9 @@ export interface QuoteBreakdown {
   durationDiscountPercent?: number;
   durationDiscountAmount?: number;
   durationDiscountReason?: string;
+  durationDiscountApplyMode?: 'upfront_monthly' | 'on_completion_remaining_charges';
+  durationCompletionBonusDollars?: number;
+  durationFreeBlanketsCount?: number;
   baseMonthlyStorageFee?: number;
   
   appliedPromotions: {
@@ -423,6 +439,7 @@ export interface CustomerLead {
   createdAt: string;
   firstName: string;
   lastName?: string;
+  companyName?: string;
   mobile: string;
   email: string;
   agreedToContact: boolean;

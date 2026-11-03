@@ -438,6 +438,47 @@ export const PricingMatrixWorkspace: React.FC<PricingMatrixWorkspaceProps> = ({
               </tbody>
             </table>
           </div>
+
+          {/* 2-Week Storage Rate & Duration Options Configuration */}
+          <div className="pt-3 border-t border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <label className="text-xs font-bold text-[#0b2942] whitespace-nowrap">
+                Standard 2-Week Storage Rate:
+              </label>
+              <div className="flex items-center gap-1">
+                <span className="text-slate-400 font-bold text-xs">$</span>
+                <input
+                  type="number"
+                  min="0"
+                  value={config.twoWeeksStorageRate ?? 199}
+                  onChange={(e) => {
+                    const val = Math.max(0, Number(e.target.value));
+                    onUpdateConfig({ ...config, twoWeeksStorageRate: val });
+                    setMatrixFeedback(`Updated 2-week standard storage rate to $${val}`);
+                    setTimeout(() => setMatrixFeedback(null), 2500);
+                  }}
+                  className="w-20 px-2 py-1 rounded-lg bg-slate-50 border border-slate-200 text-xs font-black text-[#0b2942] focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#00c0f3]"
+                />
+                <span className="text-[10px] text-slate-500 font-medium ml-1">
+                  (Flat rate across Small, Medium & Large)
+                </span>
+              </div>
+            </div>
+
+            <label className="flex items-center gap-2 cursor-pointer text-xs font-bold text-slate-700 select-none">
+              <input
+                type="checkbox"
+                checked={Boolean(config.enableSelectWeeks)}
+                onChange={(e) => {
+                  onUpdateConfig({ ...config, enableSelectWeeks: e.target.checked });
+                  setMatrixFeedback(`Select Weeks duration option: ${e.target.checked ? 'Enabled' : 'Disabled (Off)'}`);
+                  setTimeout(() => setMatrixFeedback(null), 2500);
+                }}
+                className="w-4 h-4 rounded text-[#00c0f3] accent-[#00c0f3]"
+              />
+              <span>Enable Select Weeks View (Page 5)</span>
+            </label>
+          </div>
         </div>
 
         {/* 2. Delivery Zones A through E Matrix */}

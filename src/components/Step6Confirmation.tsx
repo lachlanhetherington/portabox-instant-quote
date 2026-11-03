@@ -190,7 +190,11 @@ export const Step6Confirmation: React.FC<Step6ConfirmationProps> = ({
         )}
 
         {/* Are You Stuck Banner */}
-        <AreYouStuckBanner />
+        <AreYouStuckBanner
+          originPostcode={lead.quote.originPostcode}
+          customerName={lead.firstName}
+          customerMobile={lead.mobile}
+        />
       </div>
     </div>
   );

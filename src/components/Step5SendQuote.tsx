@@ -8,6 +8,7 @@ import {
   Sparkles,
   CheckCircle2,
   Send,
+  Building2,
 } from 'lucide-react';
 import { QuoteBreakdown } from '../types/quote';
 import { AreYouStuckBanner } from './AreYouStuckBanner';
@@ -16,6 +17,7 @@ interface Step5SendQuoteProps {
   quote: QuoteBreakdown;
   onSendQuote: (customerData: {
     firstName: string;
+    companyName?: string;
     mobile: string;
     email: string;
     agreedToContact: boolean;
@@ -32,6 +34,7 @@ interface Step5SendQuoteProps {
   onBack: () => void;
   initialCustomerData?: {
     firstName: string;
+    companyName?: string;
     mobile: string;
     email: string;
     hasNoPhoneOrEmail?: boolean;
@@ -54,6 +57,7 @@ export const Step5SendQuote: React.FC<Step5SendQuoteProps> = ({
   const [agentNotes, setAgentNotes] = useState('');
 
   const [firstName, setFirstName] = useState(initialCustomerData?.firstName || '');
+  const [companyName, setCompanyName] = useState(initialCustomerData?.companyName || '');
   const [email, setEmail] = useState(initialCustomerData?.email || '');
   const [mobile, setMobile] = useState(initialCustomerData?.mobile || '');
   const [errors, setErrors] = useState<{ email?: string; mobile?: string }>({});
@@ -90,7 +94,8 @@ export const Step5SendQuote: React.FC<Step5SendQuoteProps> = ({
 
     onSendQuote({
       firstName: firstName.trim() || (hasNoPhoneOrEmail ? 'Phone Customer' : 'Valued Customer'),
-      email: hasNoPhoneOrEmail ? 'no-email-phone-order@portabox.com.au' : email.trim(),
+      companyName: companyName.trim() || undefined,
+      email: hasNoPhoneOrEmail ? 'no-email-phone-order@portabox.au' : email.trim(),
       mobile: hasNoPhoneOrEmail ? 'No Mobile (Phone Booking)' : mobile.trim(),
       agreedToContact: !hasNoPhoneOrEmail,
       hasNoPhoneOrEmail,
@@ -105,24 +110,10 @@ export const Step5SendQuote: React.FC<Step5SendQuoteProps> = ({
     });
   };
 
-  const handleSkipToQuote = () => {
-    onSendQuote({
-      firstName: firstName.trim() || 'Valued Customer',
-      email: email.trim() || 'quote-preview@portabox.com.au',
-      mobile: mobile.trim() || '0400 000 000',
-      agreedToContact: false,
-    });
-  };
-
   return (
     <div className="bg-white rounded-2xl sm:rounded-3xl p-4 sm:p-8 lg:p-10 shadow-xs border-2 border-[#DAD7D1]">
-      {/* Header kicker: #F7D347 Vibrant Gold with #1A1A1A text */}
-      <span className="inline-flex items-center gap-1.5 text-xs font-black uppercase tracking-widest text-[#1A1A1A] bg-[#F7D347] border border-[#e6c338] px-2.5 py-0.5 rounded-md font-['Cabinet_Grotesk',sans-serif]">
-        STEP 8 OF 8 · INSTANT DISPATCH
-      </span>
-
       {/* Big simple heading as requested */}
-      <h1 className="text-3xl sm:text-5xl font-black text-[#15385E] tracking-tight mt-1 mb-2">
+      <h1 className="text-3xl sm:text-5xl font-black text-[#15385E] tracking-tight mb-2">
         Where do we send your quote?
       </h1>
 
@@ -200,18 +191,38 @@ export const Step5SendQuote: React.FC<Step5SendQuoteProps> = ({
           </div>
         </div>
 
-        {/* First name (optional for personalization) */}
-        <div className="space-y-1.5">
-          <label className="block text-xs font-black text-[#15385E] uppercase tracking-wider">
-            First Name <span className="text-slate-400 font-normal normal-case">(optional)</span>
-          </label>
-          <input
-            type="text"
-            value={firstName}
-            onChange={(e) => setFirstName(e.target.value)}
-            placeholder="e.g. Sarah"
-            className="w-full sm:w-1/2 px-4 py-2.5 rounded-2xl border border-[#DAD7D1] bg-slate-50/50 hover:border-slate-300 text-sm font-medium focus:bg-white focus:ring-2 focus:ring-[#5CC1EF] focus:outline-none"
-          />
+        {/* First Name & Company Name (Optional) */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="space-y-1.5">
+            <label className="block text-xs font-black text-[#15385E] uppercase tracking-wider">
+              First Name <span className="text-slate-400 font-normal normal-case">(optional)</span>
+            </label>
+            <input
+              type="text"
+              value={firstName}
+              onChange={(e) => setFirstName(e.target.value)}
+              placeholder="e.g. Sarah"
+              className="w-full px-4 py-2.5 rounded-2xl border border-[#DAD7D1] bg-slate-50/50 hover:border-slate-300 text-sm font-medium focus:bg-white focus:ring-2 focus:ring-[#5CC1EF] focus:outline-none"
+            />
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="block text-xs font-black text-[#15385E] uppercase tracking-wider">
+              Company Name <span className="text-slate-400 font-normal normal-case">(optional)</span>
+            </label>
+            <div className="relative">
+              <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-[#15385E]">
+                <Building2 className="w-4 h-4 text-slate-400" />
+              </div>
+              <input
+                type="text"
+                value={companyName}
+                onChange={(e) => setCompanyName(e.target.value)}
+                placeholder="e.g. Acme Corp / Business Name"
+                className="w-full pl-10 pr-4 py-2.5 rounded-2xl border border-[#DAD7D1] bg-slate-50/50 hover:border-slate-300 text-sm font-medium focus:bg-white focus:ring-2 focus:ring-[#5CC1EF] focus:outline-none"
+              />
+            </div>
+          </div>
         </div>
 
         {/* What You Receive Card */}
@@ -277,15 +288,6 @@ export const Step5SendQuote: React.FC<Step5SendQuoteProps> = ({
           </button>
 
           <div className="flex items-center gap-4 w-full sm:w-auto justify-end">
-            {/* Quick Skip to Instant Quote Preview */}
-            <button
-              type="button"
-              onClick={handleSkipToQuote}
-              className="text-xs font-bold text-slate-500 hover:text-[#15385E] underline transition-colors cursor-pointer py-2"
-            >
-              Skip &amp; view quote directly
-            </button>
-
             {/* CTA Continue Button: #F7D347 Vibrant Gold / Yellow with #1A1A1A text */}
             <button
               type="submit"
@@ -307,7 +309,11 @@ export const Step5SendQuote: React.FC<Step5SendQuoteProps> = ({
 
       {/* Are You Stuck Banner on Every Page */}
       <div className="mt-8">
-        <AreYouStuckBanner />
+        <AreYouStuckBanner
+          originPostcode={quote.originPostcode}
+          customerName={initialCustomerData?.firstName}
+          customerMobile={initialCustomerData?.mobile}
+        />
       </div>
     </div>
   );

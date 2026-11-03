@@ -22,6 +22,7 @@ interface AreYouStuckBannerProps {
   customerName?: string;
   customerMobile?: string;
   suburbOrPostcode?: string;
+  originPostcode?: import('../data/australianPostcodes').PostcodeRecord | null;
 }
 
 export const AreYouStuckBanner: React.FC<AreYouStuckBannerProps> = ({
@@ -31,6 +32,7 @@ export const AreYouStuckBanner: React.FC<AreYouStuckBannerProps> = ({
   customerName,
   customerMobile,
   suburbOrPostcode,
+  originPostcode,
 }) => {
   const [isModalOpen, setIsModalOpen] = useState(false);
 
@@ -41,8 +43,9 @@ export const AreYouStuckBanner: React.FC<AreYouStuckBannerProps> = ({
     (config && 'startHour' in config ? (config as BusinessHoursConfig) : DEFAULT_BUSINESS_HOURS_CONFIG);
 
   // Location-specific status based on user's entered postcode
+  const targetLoc = originPostcode || suburbOrPostcode;
   const locationStatus: LocationHoursStatus = getLocationBusinessHoursStatus(
-    suburbOrPostcode,
+    targetLoc,
     appConfig?.locationBusinessHours,
     hoursConfig
   );
@@ -72,10 +75,6 @@ export const AreYouStuckBanner: React.FC<AreYouStuckBannerProps> = ({
             </div>
             <div>
               <div className="flex items-center gap-2 flex-wrap">
-                <h4 className="text-sm sm:text-base font-black text-[#15385E] tracking-tight">
-                  Are you stuck?
-                </h4>
-
                 {/* Location Badge */}
                 <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-md bg-[#15385E] text-[#F7D347] flex items-center gap-1">
                   <MapPin className="w-2.5 h-2.5" />

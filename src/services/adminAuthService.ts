@@ -76,8 +76,8 @@ export const DEFAULT_ROLE_PERMISSIONS: RolePermissionMatrix = {
 export const INITIAL_STAFF_MEMBERS: StaffMember[] = [
   {
     id: 'staff-ceo-01',
-    name: 'Andrew Campbell',
-    email: 'andrew.ceo@portabox.com.au',
+    name: 'Dan Harrington',
+    email: 'dan.ceo@portabox.com.au',
     role: 'ceo',
     title: 'CEO & Managing Director',
     mobile: '0488 123 456',

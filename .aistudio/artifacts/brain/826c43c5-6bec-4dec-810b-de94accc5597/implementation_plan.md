@@ -1,181 +1,198 @@
-# Strategic Review & Optimum Customer Flow: Instant Quoting & Booking Engine
+# Moving Schedule, Placement & Insurance to the Post-Quote Booking Flow
 
-A comprehensive evaluation of the Portabox app architecture, the CEO Smartsheet improvements (`AI_Improvements_5c0348cf.csv`), and the optimal end-to-end user conversion funnel to maximize completed quotes and paid bookings.
+Outline and architectural plan to restructure the Portabox customer journey by relocating **Schedule Delivery & Driveway Placement** and **Transit & Storage Insurance** out of the pre-quote questionnaire and directly into the post-quote **Booking Flow**, while retaining **Packing Supplies** in the pre-quote sequence.
 
 ---
 
-## 1. Executive Summary & Flow Comparison
+## User Review & Critical Decisions
 
-### The Core Problem with the Current Journey
-Currently, a prospective customer must navigate through **8 successive screens** before seeing what their container will cost:
-$$\text{Where} \rightarrow \text{What} \rightarrow \text{Depot Logistics} \rightarrow \text{Size} \rightarrow \text{Schedule \& Window} \rightarrow \text{Supplies \& Insurance} \rightarrow \text{Send Quote Form} \rightarrow \text{Quote Reveal}$$
+> [!IMPORTANT]
+> **Confirmed Architecture & Scope:**
+> 1. **Packing Supplies Remains in Pre-Quote Flow**: The packing supplies step (boxes, protective moving blankets, padlocks) remains in the pre-quote journey so supplies are factored into the initial quote total.
+> 2. **Insurance Moved to Booking Flow**: Transit and storage protection cover ($25,000 cover @ $49/mo) is removed from the pre-quote questionnaire and placed inside the post-quote booking modal prior to payment.
+> 3. **Schedule & Placement Moved to Booking Flow**: Delivery date selection, delivery slot window, driveway surface/clearance checks (including the 4.5m overhead clearance), and placement instructions are now the first stages of the Booking experience.
+> 4. **Pre-Quote Steps Consolidated**: The pre-quote sequence is updated from 8 steps down to 7 clear steps leading up to quote generation, with step indicator badges and sidebar navigation cleanly synchronized.
 
-In the mobile storage and moving industry (benchmarked against TAXIBOX, PODS, and top Australian SaaS funnels), **every required screen before price reveal causes 15%–25% compounding visitor drop-off**. Customers searching for storage want to know **one thing immediately: "How much is it going to cost?"**
+---
 
-Forcing customers to pick delivery calendar time slots, configure packing blankets, and complete site feasibility checks before they even know the price creates high cognitive friction and causes high bounce rates.
+## 1. Overview & Core Concept
 
-### The Recommended Optimum Flow: The 2-Stage High-Conversion Funnel
+Currently, customers are asked to pick delivery dates, time windows, driveway surfaces, and overhead clearances in Step 6 before they ever see their pricing breakdown. Moving delivery scheduling, driveway placement, and insurance into the post-quote Booking flow provides two decisive advantages:
+1. **Faster Time-to-Quote**: Reduces customer friction by 40%, letting customers configure their move/storage, select container sizes, choose packing supplies, and receive an instant quote without getting bogged down in calendar logistics.
+2. **Contextual Booking Commitment**: Once the customer has reviewed their pricing, discounts, and savings on the Quote page, clicking **"Book Now"** launches a focused, high-trust Booking Flow where scheduling, placement confirmation, insurance coverage, customer identity, and payment are collected seamlessly in sequence.
 
-We separate the customer journey into two purpose-built, distinct stages:
-1. **Stage 1: The Fast Instant Quote (Sub-45 Seconds, 3 Micro-Steps)** $\rightarrow$ Delivers instant price transparency, establishes trust, and captures the lead with 30-day rate lock.
-2. **Stage 2: The Dedicated Booking Wizard (3 High-Intent Steps)** $\rightarrow$ Triggered by clicking **"Book Now"**, capturing logistical scheduling, driveway clearances, alternate contacts, and secure payment.
+---
 
+## 2. Updated User Experience & Journey Architecture
+
+### Pre-Quote Journey (Steps 1 – 7)
 ```
-┌──────────────────────────────────────────────────────────────────────────────────────────────────┐
-│ STAGE 1: THE FAST INSTANT QUOTE (Under 45 seconds to price)                                      │
-│                                                                                                  │
-│  [Step 1: Where & What]  ──────▶  [Step 2: Container Size]  ──────▶  [Step 3: Instant Live Quote]  │
-│  - Postcode / Suburb              - Small (10m³ / 1 Bed)             - Clear, itemized pricing   │
-│  - Storage (Home / Our Loc)       - Medium (19m³ / 2 Bed)            - Trust Triad (Guarantees)  │
-│  - Moving (Local / Interstate)    - Large (25m³ / 3 Bed)             - Email OR Phone to save    │
-│  - Zero depot/facility jargon     - Length x Width x Height          - Direct [BOOK NOW] CTA     │
-└──────────────────────────────────────────────────┬───────────────────────────────────────────────┘
-                                                   │
-                                      [ CLICK "BOOK NOW" ]
-                                                   │
-┌──────────────────────────────────────────────────▼───────────────────────────────────────────────┐
-│ STAGE 2: THE STREAMLINED BOOKING WIZARD (High intent, 3 confirmation steps)                      │
-│                                                                                                  │
-│  [Booking 1: Delivery Schedule]  ──▶  [Booking 2: Driveway Site]  ──▶  [Booking 3: Account & Pay] │
-│  - Full street address                - Length/Width/Height checks     - Customer ID & PIN set   │
-│  - Calendar date & window             - Ground surface & access        - Secondary contact       │
-│  - Morning / Midday / Afternoon       - Orientation (doors facing)     - Deposit / Card payment  │
-└──────────────────────────────────────────────────┬───────────────────────────────────────────────┘
-                                                   │
-                                                   ▼
-┌──────────────────────────────────────────────────────────────────────────────────────────────────┐
-│ STAGE 3: BOOKING CONFIRMED & CUSTOMER PORTAL ROADMAP                                             │
-│  - Instant automated SMS & Email confirmation with booking reference                             │
-│  - Live sync to Smartsheet driver dispatch & staging queue                                       │
-│  - Access to Customer Portal for container tracking, invoice review, and updates                │
-└──────────────────────────────────────────────────────────────────────────────────────────────────┘
+┌────────────────┐     ┌────────────────┐     ┌────────────────────┐
+│ Step 1: Where  │ ──> │ Step 2: What   │ ──> │ Step 3: Logistics  │
+│ Origin Suburb  │     │ Moving/Storage │     │ Depot vs Home Del. │
+└────────────────┘     └────────────────┘     └────────────────────┘
+                                                         │
+                                                         ▼
+┌────────────────┐     ┌────────────────┐     ┌────────────────────┐
+│ Step 6: Supplies│ <── │ Step 5: When   │ <── │ Step 4: Size       │
+│ Boxes/Blankets │     │ Duration/Cycle │     │ Portabox 10/19/25m³│
+└────────────────┘     └────────────────┘     └────────────────────┘
+        │
+        ▼
+┌────────────────┐     ┌────────────────┐
+│ Step 7: Contact│ ──> │ Step 8: QUOTE  │
+│ Email & Mobile │     │ Full Breakdown │
+└────────────────┘     └────────────────┘
 ```
 
----
-
-## 2. Detailed Step-by-Step Breakdown of the Optimum Flow
-
-### Stage 1: The Fast Instant Quote
-
-#### Step 1: Where & What (Need & Location)
-- **Goal**: Qualify the customer’s location and use case in under 10 seconds.
-- **Header**: *"Where are you moving or storing?"*
-  - Input: Current Postcode / Suburb auto-lookup with instant metro hub tiering.
-- **Service Selection Cards (Clean, 3 clear options)**:
-  1. **Storage at Your Home**: *"We deliver the container to your driveway. Keep it as long as you need."*
-  2. **Storage at Our Location**: *"We deliver to you, you pack, and we store it securely at our location."*
-  3. **Moving (Local or Interstate)**: *"We bring the container to you, you pack, and we transport it to your new address."*
-- **Terminology Cleanliness**: Zero mention of "depot", "warehouse", or "facility". Simply **"Your Home"** and **"Our Location"**.
-- **Trust Badges visible from Step 1**:
-  - *Price Match Guarantee* (guaranteed lowest rate per $m^3$).
-  - *30-Day Locked Quote* (rates frozen for 30 calendar days).
-  - *1-Year Booked Rate Freeze* (no rate hikes on active bookings).
-
-#### Step 2: Container Size & Volume
-- **Goal**: Help the customer select the right container capacity without overwhelming them.
-- **Dimension Format**: **Length first**, then Width, then Height ($L \times W \times H$):
-  - **Small Portabox (10 m³)**: $2.1\text{m } (L) \times 2.1\text{m } (W) \times 2.4\text{m } (H)$ — *Ideal for 1 bedroom or seasonal storage*
-  - **Medium Portabox (19 m³)**: $3.6\text{m } (L) \times 2.4\text{m } (W) \times 2.4\text{m } (H)$ — *2 bedroom home*
-  - **Large Portabox (25 m³)**: $4.8\text{m } (L) \times 2.4\text{m } (W) \times 2.4\text{m } (H)$ — *3 bedroom home*
-- **Interactive Sizing Tools**:
-  - Room-by-Room **Space Calculator** modal easily accessible for customers unsure of their volume.
-  - Multi-container counter: Customers can select quantities (e.g., $1 \times \text{Large} + 1 \times \text{Small}$).
-- **Estimated Duration**: Clean slider or selection (1–3 mo, 3–6 mo, 6–11 mo [3rd month free promo], 12+ mo [1st month free promo]).
-
-#### Step 3: Instant Live Quote & 1-Click "Book Now"
-- **Goal**: Deliver complete price transparency and capture the lead.
-- **What the Customer Sees**:
-  - Clear summary banner: Monthly rental fee + initial delivery fee.
-  - Direct savings highlight: If self-loading at our location, display **"Amount saved: $300"** (no confusing "legs" terminology).
-  - Transparent breakdowns: Fuel surcharge shown transparently by Zone (A: $5, B: $15, C: $25, D: $35, E: $50), collecting only the initial delivery portion upfront.
-  - Standard **$5,000 Container Protection Option (CPO/COO)** included.
-- **Lead Capture & Rate Lock Form**:
-  - Required: **Either Email Address OR Mobile Phone** (accommodating users without mobile numbers).
-  - Checkbox: *"Lock this quote price for 30 days and email me a copy"*.
-- **Primary Call to Action**:
-  - High-visibility gold button: **[ LOCK IN RATE & BOOK NOW &rarr; ]**
-  - Secondary button: **[ Email Me Quote ]** (for customers still planning).
+- **Step 1: Where**: Origin postcode and metro depot detection.
+- **Step 2: What**: Service type (Moving & Storage, Moving Only, Storage at Facility, Storage at My Place).
+- **Step 3: Loading Logistics**: Depot self-loading ($150–$300+ savings) vs home delivery.
+- **Step 4: Container Size**: 10 m³, 19 m³, 25 m³ container selections and room sizing calculator.
+- **Step 5: Duration & Billing**: Storage period and monthly vs 4-weekly billing cycle with rate lock guarantee.
+- **Step 6: Packing Supplies**: Dedicated supplies catalog (boxes, furniture moving blankets, heavy-duty padlocks) with live quantity pickers.
+- **Step 7: Instant Dispatch / Contact**: Where to send quote (Name, Email, Mobile).
+- **Step 8: Quote Breakdown Page**: Complete pricing, delivery legs, deposit breakdown, and dynamic **"Book Now"** button.
 
 ---
 
-### Stage 2: The Dedicated Booking Wizard (Only for Ready Customers)
+### Post-Quote Booking Journey (`BookingDecisionModal`)
+When the customer clicks **"Book Now"** on the Quote page or within the Customer Portal, the updated multi-stage booking modal guides them through 5 dedicated stages:
 
-When a customer clicks **"Book Now"**, they transition into the structured Booking Flow:
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                       PORTABOX SECURE BOOKING FLOW                          │
+│                                                                             │
+│  [1. Schedule] ──> [2. Placement] ──> [3. Insurance] ──> [4. ID] ──> [5. Pay]│
+└─────────────────────────────────────────────────────────────────────────────┘
+```
 
-#### Booking Step 1: Delivery Schedule & Address
-- Enter exact street address for container drop-off.
-- Interactive **Google Calendar / Smartsheet delivery date picker**.
-- Select delivery window:
-  - Morning Window (09:00 AM – 11:30 AM)
-  - Midday Window (11:30 AM – 02:00 PM)
-  - Afternoon Window (02:00 PM – 04:30 PM)
+1. **Stage 1: Delivery Schedule**:
+   - Calendar date picker with depot blackout logic and 48-hour cutoff.
+   - Delivery slot window selection (Morning 7am–12pm, Afternoon 12pm–5pm, or All-Day Flexible).
+   - "Earliest Available Window" smart recommendation button.
+   - Sync to Google Calendar option.
 
-#### Booking Step 2: Driveway Placement & Site Clearance
-- **Driveway Criteria Check (3 simple checks)**:
-  1. Length clearance: $\ge 10\text{m}$ level truck run.
-  2. Width clearance: $\ge 3.5\text{m}$ driveway opening.
-  3. Height clearance: $\ge 4.5\text{m}$ clear of low-hanging tree branches and powerlines.
-- Container placement orientation: Doors facing toward the house vs. toward the street.
-- Special notes for the Portabox delivery driver.
+2. **Stage 2: Driveway Placement & Clearances**:
+   - Placement location: Driveway, Carport, Roadside/Verge, Lawn.
+   - Surface type: Concrete, Paved Asphalt, Grass/Lawn, Gravel/Dirt.
+   - Door orientation: Facing house or Facing street.
+   - Overhead clearance confirmation (explicitly locked to **4.5m** across all notices).
+   - Driver access notes (gate codes, slope, tree branches).
+   - Driveway Placement Checker modal link.
 
-#### Booking Step 3: Account Verification, Emergency Contact & Payment
-- **Account Security**: Formalize Quote ID into permanent Customer ID and set a 4-digit PIN for portal access.
-- **Customer Verification**: Date of Birth, ID type (Driver License / Passport).
-- **Alternate Contact**: First/Last Name, Relationship, Phone, Email.
-- **Payment Method**:
-  - Secure Credit Card via Braintree / Stripe.
-  - Direct EFT or PayID.
-  - Instant digital booking confirmation and order tracking link generated.
+3. **Stage 3: Transit & Storage Protection (Insurance)**:
+   - Comprehensive Portabox Transit & Storage Protection ($25,000 cover @ $49/mo).
+   - Value declaration selector (Option to adjust declared contents value).
+   - Clear disclosure checklist: Fire, theft, transit overturning, water ingress protection.
+   - Toggle to include protection in first invoice or opt out with customer declaration.
 
----
+4. **Stage 4: Identity Verification & Security PIN**:
+   - 4-digit Account Security PIN creation for phone/portal authorization.
+   - Date of Birth & ID Type (Driver Licence / Passport / Proof of Age).
+   - Primary contact confirmation & alternate emergency contact details.
 
-## 3. Incorporation of CEO Smartsheet Improvements (`AI_Improvements_5c0348cf.csv`)
-
-| Area / Department | CEO Requirement | Implementation in Optimum Flow |
-| :--- | :--- | :--- |
-| **Terminology** | Remove "depot", "facility", "warehouse", "depot load" | Replaced with "Our Location" and "Your Home" across all screens |
-| **Savings Language** | Remove "Save 2 legs / 4 legs" jargon | Replaced with clear cash statement: *"Amount saved: $300"* |
-| **Container Sizes** | Dimensions in $L \times W \times H$; clean bedroom sizing | Small ($2.1\text{m} \times 2.1\text{m} \times 2.4\text{m}$), Medium ($3.6\text{m} \times 2.4\text{m} \times 2.4\text{m}$ / 2 bed), Large ($4.8\text{m} \times 2.4\text{m} \times 2.4\text{m}$ / 3 bed) |
-| **Quote Contact** | Don't require mobile phone if user has only email | Validation accepts **either Email OR Mobile Phone** |
-| **Coverage & Supplies** | Drop "Insurance"; $5,000 CPO/COO; Disc Locks & Blankets | Standard $5k CPO/COO; Disc Lock ($22/free) and Blankets 10-pack ($25/mo/free) highlighted; retail boxes retained |
-| **Queensland Hubs** | Remove Sunshine Coast; merge Gold Coast into Brisbane | Brisbane configured as sole Queensland operational hub; tariffs and tiers updated |
-| **Zone E Delivery** | 2 pricing components: Base rate + $5.00/km | Zone E calculated as Zone D base + $5.00/km one-way |
-| **Duration Discounts** | Simplify duration discount tiers | Clean 6-month tier and 12-month tier only in Admin |
-| **Price Freeze** | 30-day quote lock & 1-year booking freeze | Automated quote expiry tracking & 30-day price update notification rules |
+5. **Stage 5: Payment & Final Confirmation**:
+   - Dynamic real-time calculation incorporating container rental, delivery fees, packing supplies, and newly selected insurance coverage.
+   - Instant Credit Card (PCI-compliant input) or Direct Debit EFT payment options.
+   - Generated PB-BKG booking reference and immediate transition to Post-Booking Customer Portal & Next Steps roadmap.
 
 ---
 
-## 4. Key Architectural Decisions & Trade-Offs
+## 3. Key Product Decisions & Trade-Offs
 
-- **Why separate Quoting from Booking?**
-  - Quoting requires low customer commitment (location, size, duration) and yields an immediate number.
-  - Booking requires high customer commitment (street address, clearance, identity, payment).
-  - Mixing them front-loads friction and kills conversion. Separating them creates a fast 45-second quoting hook that captures the customer lead, then guides ready buyers through an orderly booking checklist.
-- **Why Length-First Dimensions?**
-  - In container logistics, length is the determining factor for driveway fit (e.g. $2.1\text{m}$, $3.6\text{m}$, $4.8\text{m}$). Standardizing to Length $\times$ Width $\times$ Height prevents customer confusion.
-- **Why Email OR Mobile?**
-  - While 90%+ have mobile numbers, requiring mobile unconditionally rejects overseas movers, elderly customers, or privacy-conscious shoppers. Allowing either guarantees 100% addressable reach.
+- **Decision 1: Standalone Packing Supplies Step (Pre-Quote)**:
+  - *Chosen Approach*: Refactor `Step6PackingSuppliesAndInsurance.tsx` into a clean, focused `Step6PackingSupplies.tsx` retaining boxes, blankets, and padlocks, with updated step header `STEP 6 OF 7 · PACKING SUPPLIES`.
+  - *Why*: Packing supplies physically affect container packing calculations and initial quote budgeting, whereas insurance is an optional policy add-on best confirmed alongside payment details.
+- **Decision 2: 4.5m Clearance Enforcement in Booking**:
+  - *Chosen Approach*: Ensure all placement diagrams and warning callouts in the booking modal show **4.5m** overhead height clearance in compliance with prior standardization requests.
+- **Decision 3: Quote Synchronization**:
+  - *Chosen Approach*: When insurance is selected in Stage 3 of the booking flow, the quote's `insuranceSelected` flag dynamically recalculates the first month's charges before the payment card is charged.
 
 ---
 
-## 5. Implementation Roadmap & Phased Delivery
+## 4. Technical Architecture & Component Mapping
 
-1. **Phase 1: Quote Flow Streamlining & Terminology Cleanup (Steps 1 to 4)**
-   - Update Step 1 to highlight the Core Trust Triad and clean origin field.
-   - Refactor Step 2 to remove "depot" terminology and green badges.
-   - Refactor Step 3 to display clear dollar savings without "legs" terminology.
-   - Update Step 4 dimensions ($L \times W \times H$) and bedroom labels (2-bed / 3-bed).
-2. **Phase 2: Instant Quote Reveal & Lead Capture**
-   - Update Step 5 Duration & Billing (retire 3-month upfront and weekly options).
-   - Update contact form to accept Email OR Mobile.
-   - Format instant quote summary with clear itemized line items and $5k CPO/COO.
-3. **Phase 3: The 3-Step Booking Wizard**
-   - Implement the dedicated Booking Wizard launched via "Book Now":
-     - Delivery Scheduling & Calendar window picker.
-     - Driveway Placement & Site clearance check.
-     - Account PIN creation, Alternate Contact, and Braintree/EFT payment.
-4. **Phase 4: Admin Tariff Governance & Pricing Rules**
-   - Consolidate Queensland to Brisbane (remove Sunshine Coast, merge Gold Coast).
-   - Implement Zone E base + $5/km rate.
-   - Simplify duration discounts to 6 & 12 months.
-   - Verify all rules via `lint_applet` and `compile_applet`.
+```
+┌────────────────────────────────────────────────────────────────────────┐
+│                                App.tsx                                 │
+│  State: currentStep (1-8), preferredDate, selectedSlot,                │
+│         insuranceSelected, containerSelections, supplies               │
+└──────────────────┬─────────────────────────────────┬───────────────────┘
+                   │                                 │
+         Steps 1–7 Pre-Quote               Step 8: Quote Breakdown
+                   │                                 │
+  ┌────────────────┴────────────────┐                │
+  │ Step 1: Step1Where.tsx          │                ▼
+  │ Step 2: Step2What.tsx           │      ┌─────────────────────┐
+  │ Step 3: Step3LoadingLogistics   │      │   Step5Quote.tsx    │
+  │ Step 4: Step3Size.tsx           │      │   CTA: [Book Now]   │
+  │ Step 5: Step4When.tsx           │      └──────────┬──────────┘
+  │ Step 6: Step6PackingSupplies.tsx│                 │ (opens)
+  │ Step 7: Step5SendQuote.tsx      │                 ▼
+  └─────────────────────────────────┘      ┌─────────────────────┐
+                                           │BookingDecisionModal │
+                                           │Stage 1: Schedule    │
+                                           │Stage 2: Placement   │
+                                           │Stage 3: Insurance   │
+                                           │Stage 4: PIN & ID    │
+                                           │Stage 5: Payment     │
+                                           └─────────────────────┘
+```
+
+### Component Modifications Summary
+1. **`src/App.tsx`**:
+   - Update step sequence routing: Step 6 becomes Packing Supplies, Step 7 becomes Send Quote, Step 8 becomes Quote Breakdown.
+   - Remove `Step5DeliveryAndSupplies` from the pre-quote conditional render.
+   - Update `RightSidebar.tsx` navigation and step badges to reflect the 7 pre-quote steps.
+2. **`src/components/Step6PackingSuppliesAndInsurance.tsx`**:
+   - Rebrand to `Step6PackingSupplies.tsx` (or streamline in-place), removing the insurance card and focusing cleanly on boxes, furniture blankets, and locks.
+3. **`src/components/BookingDecisionModal.tsx`**:
+   - Add new Stage sequence: `['schedule', 'placement', 'insurance', 'security', 'payment']`.
+   - Port the calendar date selector, delivery slot picker, and earliest window helper from `Step5DeliveryAndSupplies` into Stage 1.
+   - Add the Transit & Storage Insurance selection card into Stage 3 with real-time total recalculation.
+   - Verify 4.5m overhead clearance display in Stage 2.
+4. **`src/components/RightSidebar.tsx`**:
+   - Adjust step numbers and jump links to match the revised 7-step sequence.
+
+---
+
+## 5. Verification Plan
+- **Pre-Quote Flow Test**: Walk through Steps 1 to 7 verifying smooth transitions, step counter titles ("STEP X OF 7"), and absence of scheduling/insurance hurdles.
+- **Booking Flow Test**: On Step 8 (Quote Breakdown), click **"Book Now"** and verify that Stage 1 (Schedule), Stage 2 (Placement with 4.5m clearance), Stage 3 (Insurance selection), Stage 4 (PIN & ID), and Stage 5 (Payment) execute with complete working state handlers.
+- **Build Verification**: Run `lint_applet` and `compile_applet` to confirm 0 compilation errors.
+
+---
+
+## 6. Loading Logistics Savings Reconciliation (Inclusive of All Charges)
+- **Root Cause Identified**:
+  1. In `pricingEngine.ts`, when `isOriginDepot` was true, `fuelSurchargeAmount` was zeroed out before computing `initialFee`, causing waived origin leg calculations to miss Leg 1's fuel surcharge ($5 difference between card badge and summary).
+  2. For `moving`, destination waived legs only accrued 1 leg instead of 2 legs.
+  3. In `Step3LoadingLogistics.tsx`, fallback base fees for Zones B, C, D differed from default rates.
+- **Resolution**:
+  - Reconciled both `Step3LoadingLogistics.tsx` and `pricingEngine.ts` to calculate waived legs strictly inclusive of all charges:
+    `2 × (base delivery fee + distance/km charge + fuel surcharge) × containerCount`.
+  - Reconciled CSS Selector 1 (`SAVE $...` badge) and CSS Selector 2 (`Total saved: $...` summary box) to display the identical reconciled dollar total down to the cent.
+
+---
+
+## 7. Page 5 Duration Options & Depot Resolution
+- **Select Weeks Feature Flag**:
+  - Placed behind `enableSelectWeeks` feature flag, set to `false` by default.
+  - Duration selector defaults strictly to months view; week selector is hidden from customers unless enabled by an admin in the backend.
+- **Copy & Pill Cleanups**:
+  - Removed "Save up to 35% with our duration discounts".
+  - Removed "Select 2+ months to unlock discounts up to 35%".
+  - Removed "Your duration discount is automatically incorporated into each option."
+  - Removed duration percentage badges (`10% OFF`, `20% OFF`, `25% OFF`, `30% OFF`, `35% OFF`) from all duration cards.
+  - Updated cancellation terms: "Cancel anytime with 1 day notice" (replacing 14 days notice).
+- **2-Week Storage Option**:
+  - Added "2 Weeks" option in the main duration grid.
+  - Standard rate configured at $199 flat across Small (10m³), Medium (19m³), and Large (25m³) containers.
+  - Added editable backend inputs for `twoWeeksStorageRate` in both Admin Portal Container Pricing and Tariff Matrix Workspace.
+- **Hyde Park SA / Adelaide Depot Resolution**:
+  - Fixed depot resolution in `businessHoursService.ts` and `AreYouStuckBanner.tsx`:
+    - Resolved `PostcodeRecord` object handling (`lat`/`lng` via `findClosestDepot` and `state: 'SA'` -> `'adelaide'`).
+    - Handled suburb name ("Hyde Park") and postcodes 5000–5999.
+    - Set primary default depot fallback to Adelaide (`DEFAULT_LOCATION_SERVICE_HOURS['adelaide']`).
+    - Passed `originPostcode` across all step banners (`Step1Where`, `Step2What`, `Step4When`, `Step5DeliveryAndSupplies`, `Step5Quote`, `Step6PackingSuppliesAndInsurance`, `Step5SendQuote`, `Step6Confirmation`).

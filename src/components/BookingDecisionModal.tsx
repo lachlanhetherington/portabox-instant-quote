@@ -33,6 +33,7 @@ import {
   saveCustomerAccounts,
 } from '../services/customerPortalService';
 import { syncCustomerPortalActionToSmartsheet } from '../services/smartsheetService';
+import { DrivewayPlacementCheckerModal } from './DrivewayPlacementCheckerModal';
 
 interface BookingDecisionModalProps {
   isOpen: boolean;
@@ -42,7 +43,7 @@ interface BookingDecisionModalProps {
   onBookingComplete?: (bookingReference: string) => void;
 }
 
-type BookingStage = 'placement' | 'dates' | 'security' | 'payment';
+type BookingStage = 'dates' | 'placement' | 'insurance' | 'security' | 'payment';
 
 export const BookingDecisionModal: React.FC<BookingDecisionModalProps> = ({
   isOpen,
@@ -51,10 +52,16 @@ export const BookingDecisionModal: React.FC<BookingDecisionModalProps> = ({
   customerData,
   onBookingComplete,
 }) => {
-  const [currentStage, setCurrentStage] = useState<BookingStage>('placement');
+  const [currentStage, setCurrentStage] = useState<BookingStage>('dates');
   const [isConfirmed, setIsConfirmed] = useState(false);
 
-  // STAGE 1: Clearance & Placement State
+  // Dynamic Insurance Selection in Booking Flow
+  const [insuranceCovered, setInsuranceCovered] = useState<boolean>(
+    quote.insuranceSelected ?? true
+  );
+  const [isPlacementCheckerOpen, setIsPlacementCheckerOpen] = useState(false);
+
+  // STAGE: Clearance & Placement State
   const [clearanceLength, setClearanceLength] = useState(true); // >= 10m truck run
   const [clearanceWidth, setClearanceWidth] = useState(true); // >= 3.5m width
   const [clearanceHeight, setClearanceHeight] = useState(true); // >= 4.5m overhead
@@ -67,7 +74,7 @@ export const BookingDecisionModal: React.FC<BookingDecisionModalProps> = ({
   );
   const [placementNotes, setPlacementNotes] = useState('');
 
-  // STAGE 2: Scheduling & Delivery Dates
+  // STAGE: Scheduling & Delivery Dates
   const [scheduledDate, setScheduledDate] = useState(
     quote.preferredDate || new Date(Date.now() + 48 * 60 * 60 * 1000).toISOString().split('T')[0]
   );
@@ -119,23 +126,38 @@ export const BookingDecisionModal: React.FC<BookingDecisionModalProps> = ({
     flexible: 'Flexible Full-Day (8:00 AM – 5:00 PM - Priority Route)',
   };
 
+  // Dynamic pricing updates based on post-quote insurance selection
+  const insurancePerContainer = quote.config?.insurance?.monthlyPricePerContainer ?? 15;
+  const isFreeInsurancePromo = Boolean(quote.config?.insurance?.isFreePromo);
+  const calculatedInsuranceMonthly = isFreeInsurancePromo
+    ? 0
+    : insuranceCovered
+    ? insurancePerContainer * quote.containerCount
+    : 0;
+  const baseFirstPaymentWithoutInsurance = quote.firstPaymentTotal - (quote.insuranceMonthlyFee || 0);
+  const dynamicFirstPaymentTotal = baseFirstPaymentWithoutInsurance + calculatedInsuranceMonthly;
+  const baseMonthlyStorageWithoutInsurance = quote.monthlyStorageFee - (quote.insuranceMonthlyFee || 0);
+  const dynamicMonthlyStorageFee = baseMonthlyStorageWithoutInsurance + calculatedInsuranceMonthly;
+
   const handleNextStage = () => {
     setError(null);
-    if (currentStage === 'placement') {
+    if (currentStage === 'dates') {
+      if (!scheduledDate) {
+        setError('Please select a preferred delivery date.');
+        return;
+      }
+      setCurrentStage('placement');
+    } else if (currentStage === 'placement') {
       if (!clearanceLength || !clearanceWidth || !clearanceHeight) {
-        setError('Please confirm that your site meets the minimum clearance requirements for the level-lift truck.');
+        setError('Please confirm that your site meets the minimum clearance requirements for the level-lift truck (10m length, 3.5m width, 4.5m overhead clearance).');
         return;
       }
       if (!deliveryAddress.trim()) {
         setError('Please enter a delivery street address.');
         return;
       }
-      setCurrentStage('dates');
-    } else if (currentStage === 'dates') {
-      if (!scheduledDate) {
-        setError('Please select a preferred delivery date.');
-        return;
-      }
+      setCurrentStage('insurance');
+    } else if (currentStage === 'insurance') {
       setCurrentStage('security');
     } else if (currentStage === 'security') {
       if (!firstName.trim() || !mobile.trim()) {
@@ -176,7 +198,7 @@ export const BookingDecisionModal: React.FC<BookingDecisionModalProps> = ({
         containerId: `PB-${quote.originDepot?.id ? quote.originDepot.id.toUpperCase().slice(0, 3) : 'BNE'}-${Math.floor(100 + Math.random() * 900)}`,
         containerSize: quote.containerSize,
         containerName: quote.containerName,
-        serviceType: isOnsite ? 'Storage at your home' : 'Storage at Portabox secure location',
+        serviceType: isOnsite ? 'Storage at My Location' : 'Storage at Portabox Location',
         status: 'Scheduled',
         location: quote.originPostcode.suburb,
         originAddress: deliveryAddress,
@@ -190,7 +212,9 @@ export const BookingDecisionModal: React.FC<BookingDecisionModalProps> = ({
         overheadClearanceClear: clearanceHeight,
         secondaryContactName: altFirstName ? `${altFirstName} ${altLastName} (${altRelationship})` : undefined,
         secondaryContactPhone: altMobile || undefined,
-        monthlyRate: quote.monthlyStorageFee,
+        monthlyRate: dynamicMonthlyStorageFee,
+        insuranceIncluded: insuranceCovered,
+        insuranceMonthlyFee: calculatedInsuranceMonthly,
         nextBillingDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toLocaleDateString('en-AU'),
         daysRemainingInLock: 365,
         accessHours: isOnsite ? '24/7 Driveway Access' : 'Business Hours Depot Access',
@@ -199,7 +223,7 @@ export const BookingDecisionModal: React.FC<BookingDecisionModalProps> = ({
           {
             timestamp: new Date().toLocaleString('en-AU'),
             stage: 'Booking Confirmed & Dispatched',
-            note: `Booking confirmed with $${quote.firstPaymentTotal} first payment. 1-Year price freeze active. Delivery set for ${scheduledDate} (${windowLabels[deliveryWindow]}).`,
+            note: `Booking confirmed with $${dynamicFirstPaymentTotal} first payment. 1-Year price freeze active. Delivery set for ${scheduledDate} (${windowLabels[deliveryWindow]}).`,
           },
         ],
       };
@@ -235,10 +259,16 @@ export const BookingDecisionModal: React.FC<BookingDecisionModalProps> = ({
               containerSize: quote.containerSize,
               containerCount: quote.containerCount,
               billingCycle: quote.billingCycle,
-              firstPaymentTotal: quote.firstPaymentTotal,
-              monthlyStorageFee: quote.monthlyStorageFee,
+              firstPaymentTotal: dynamicFirstPaymentTotal,
+              monthlyStorageFee: dynamicMonthlyStorageFee,
               status: 'Accepted',
-              quoteData: quote,
+              quoteData: {
+                ...quote,
+                insuranceSelected: insuranceCovered,
+                insuranceMonthlyFee: calculatedInsuranceMonthly,
+                firstPaymentTotal: dynamicFirstPaymentTotal,
+                monthlyStorageFee: dynamicMonthlyStorageFee,
+              },
             },
           ],
           orders: [newOrder],
@@ -248,7 +278,7 @@ export const BookingDecisionModal: React.FC<BookingDecisionModalProps> = ({
               invoiceNumber: `INV-${Date.now().toString().slice(-5)}`,
               date: new Date().toLocaleDateString('en-AU'),
               description: `Initial Container Delivery & First Period Rent (${ref}) - 1-Yr Frozen Rate`,
-              amount: quote.firstPaymentTotal,
+              amount: dynamicFirstPaymentTotal,
               status: 'Paid',
               pdfUrl: '#',
               paymentMethod:
@@ -271,7 +301,7 @@ export const BookingDecisionModal: React.FC<BookingDecisionModalProps> = ({
         customerId: ref,
         customerName: `${firstName} ${lastName}`.trim(),
         actionType: 'booking_updated',
-        details: `Customer booked ${quote.containerName} (${quote.containerCount}x) for ${scheduledDate}. Total: $${quote.firstPaymentTotal}. Clearances verified (10m x 3.5m x 4.5m), Doors: ${doorOrientation}. Storage: ${isOnsite ? 'Your Home' : 'Our Location'}.`,
+        details: `Customer booked ${quote.containerName} (${quote.containerCount}x) for ${scheduledDate}. Total: $${quote.firstPaymentTotal}. Clearances verified (10m x 3.5m x 4.5m), Doors: ${doorOrientation}. Storage: ${isOnsite ? 'My Location' : 'Portabox Location'}.`,
       });
 
       if (onBookingComplete) {
@@ -324,57 +354,70 @@ export const BookingDecisionModal: React.FC<BookingDecisionModalProps> = ({
 
         {/* Wizard Stepper Bar (Decision Mode only) */}
         {!isConfirmed && (
-          <div className="bg-slate-100 border-b border-slate-200 px-4 sm:px-8 py-2.5 shrink-0">
-            <div className="grid grid-cols-4 gap-2 text-center">
-              <button
-                type="button"
-                onClick={() => setCurrentStage('placement')}
-                className={`flex items-center justify-center gap-1.5 py-1 px-2 rounded-lg text-xs font-bold transition-all ${
-                  currentStage === 'placement'
-                    ? 'bg-[#15385E] text-white shadow-xs'
-                    : 'text-slate-600 hover:bg-slate-200'
-                }`}
-              >
-                <span className="w-4 h-4 rounded-full bg-white/20 text-[10px] flex items-center justify-center">1</span>
-                <span className="truncate">Placement</span>
-              </button>
-
+          <div className="bg-slate-100 border-b border-slate-200 px-3 sm:px-6 py-2 shrink-0">
+            <div className="grid grid-cols-5 gap-1.5 text-center">
               <button
                 type="button"
                 onClick={() => setCurrentStage('dates')}
-                className={`flex items-center justify-center gap-1.5 py-1 px-2 rounded-lg text-xs font-bold transition-all ${
+                className={`flex items-center justify-center gap-1 py-1.5 px-1 sm:px-2 rounded-lg text-[11px] sm:text-xs font-bold transition-all cursor-pointer ${
                   currentStage === 'dates'
                     ? 'bg-[#15385E] text-white shadow-xs'
                     : 'text-slate-600 hover:bg-slate-200'
                 }`}
               >
-                <span className="w-4 h-4 rounded-full bg-white/20 text-[10px] flex items-center justify-center">2</span>
-                <span className="truncate">Scheduling</span>
+                <span className="w-4 h-4 rounded-full bg-white/20 text-[10px] flex items-center justify-center shrink-0">1</span>
+                <span className="truncate">Schedule</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setCurrentStage('placement')}
+                className={`flex items-center justify-center gap-1 py-1.5 px-1 sm:px-2 rounded-lg text-[11px] sm:text-xs font-bold transition-all cursor-pointer ${
+                  currentStage === 'placement'
+                    ? 'bg-[#15385E] text-white shadow-xs'
+                    : 'text-slate-600 hover:bg-slate-200'
+                }`}
+              >
+                <span className="w-4 h-4 rounded-full bg-white/20 text-[10px] flex items-center justify-center shrink-0">2</span>
+                <span className="truncate">Placement</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setCurrentStage('insurance')}
+                className={`flex items-center justify-center gap-1 py-1.5 px-1 sm:px-2 rounded-lg text-[11px] sm:text-xs font-bold transition-all cursor-pointer ${
+                  currentStage === 'insurance'
+                    ? 'bg-[#15385E] text-white shadow-xs'
+                    : 'text-slate-600 hover:bg-slate-200'
+                }`}
+              >
+                <span className="w-4 h-4 rounded-full bg-white/20 text-[10px] flex items-center justify-center shrink-0">3</span>
+                <span className="truncate">Protection</span>
               </button>
 
               <button
                 type="button"
                 onClick={() => setCurrentStage('security')}
-                className={`flex items-center justify-center gap-1.5 py-1 px-2 rounded-lg text-xs font-bold transition-all ${
+                className={`flex items-center justify-center gap-1 py-1.5 px-1 sm:px-2 rounded-lg text-[11px] sm:text-xs font-bold transition-all cursor-pointer ${
                   currentStage === 'security'
                     ? 'bg-[#15385E] text-white shadow-xs'
                     : 'text-slate-600 hover:bg-slate-200'
                 }`}
               >
-                <span className="w-4 h-4 rounded-full bg-white/20 text-[10px] flex items-center justify-center">3</span>
+                <span className="w-4 h-4 rounded-full bg-white/20 text-[10px] flex items-center justify-center shrink-0">4</span>
                 <span className="truncate">Security PIN</span>
               </button>
 
               <button
                 type="button"
                 onClick={() => setCurrentStage('payment')}
-                className={`flex items-center justify-center gap-1.5 py-1 px-2 rounded-lg text-xs font-bold transition-all ${
+                className={`flex items-center justify-center gap-1 py-1.5 px-1 sm:px-2 rounded-lg text-[11px] sm:text-xs font-bold transition-all cursor-pointer ${
                   currentStage === 'payment'
                     ? 'bg-[#15385E] text-white shadow-xs'
                     : 'text-slate-600 hover:bg-slate-200'
                 }`}
               >
-                <span className="w-4 h-4 rounded-full bg-white/20 text-[10px] flex items-center justify-center">4</span>
+                <span className="w-4 h-4 rounded-full bg-white/20 text-[10px] flex items-center justify-center shrink-0">5</span>
                 <span className="truncate">Payment</span>
               </button>
             </div>
@@ -385,7 +428,160 @@ export const BookingDecisionModal: React.FC<BookingDecisionModalProps> = ({
         <div className="flex-1 overflow-y-auto p-4 sm:p-7 bg-[#f8fafc] space-y-6">
           {!isConfirmed ? (
             <>
-              {/* STAGE 1: Placement & Site Clearances */}
+              {/* STAGE 1: Scheduling & Delivery Dates */}
+              {currentStage === 'dates' && (
+                <div className="space-y-5 animate-in fade-in duration-150">
+                  <div className="bg-gradient-to-r from-sky-50 to-blue-50 border border-sky-200 rounded-2xl p-4 text-xs space-y-2">
+                    <div className="flex items-center gap-2 font-black text-[#15385E]">
+                      <Calendar className="w-4 h-4 text-[#5CC1EF]" />
+                      <span>Portabox Express Delivery Dispatch</span>
+                    </div>
+                    <p className="text-slate-700 leading-relaxed">
+                      Select your preferred delivery date and arrival time window. Our level-lift driver will arrive on schedule with real-time SMS updates.
+                    </p>
+                  </div>
+
+                  <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-2xs space-y-4">
+                    <h4 className="text-xs font-black uppercase tracking-wider text-[#15385E] flex items-center gap-2">
+                      <Calendar className="w-4 h-4 text-[#5CC1EF]" />
+                      <span>Select Preferred Delivery Date</span>
+                    </h4>
+
+                    <div className="space-y-3">
+                      <div>
+                        <label className="block text-[11px] font-bold text-slate-600 mb-1">
+                          Delivery Date
+                        </label>
+                        <input
+                          type="date"
+                          value={scheduledDate}
+                          min={new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().split('T')[0]}
+                          onChange={(e) => setScheduledDate(e.target.value)}
+                          className="w-full sm:w-72 px-3 py-2 text-xs font-bold rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-[#5CC1EF]"
+                        />
+                      </div>
+
+                      <div className="flex flex-wrap gap-2 pt-1">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const d = new Date(Date.now() + 48 * 60 * 60 * 1000).toISOString().split('T')[0];
+                            setScheduledDate(d);
+                          }}
+                          className="px-3 py-1 text-[11px] font-bold rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 cursor-pointer"
+                        >
+                          In 2 Days
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const d = new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+                            setScheduledDate(d);
+                          }}
+                          className="px-3 py-1 text-[11px] font-bold rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 cursor-pointer"
+                        >
+                          In 5 Days
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const d = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+                            setScheduledDate(d);
+                          }}
+                          className="px-3 py-1 text-[11px] font-bold rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 cursor-pointer"
+                        >
+                          Next Week
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Delivery Window Selection */}
+                  <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-2xs space-y-4">
+                    <h4 className="text-xs font-black uppercase tracking-wider text-[#15385E] flex items-center gap-2">
+                      <Clock className="w-4 h-4 text-[#5CC1EF]" />
+                      <span>Select Delivery Time Window</span>
+                    </h4>
+
+                    <div className="space-y-2.5">
+                      <button
+                        type="button"
+                        onClick={() => setDeliveryWindow('morning')}
+                        className={`w-full p-3.5 rounded-xl border-2 text-left flex items-center justify-between transition-all cursor-pointer ${
+                          deliveryWindow === 'morning'
+                            ? 'border-[#15385E] bg-sky-50 shadow-xs'
+                            : 'border-slate-200 bg-white hover:border-slate-300'
+                        }`}
+                      >
+                        <div>
+                          <span className="font-black text-xs text-slate-900 block">
+                            Morning Window (8:00 AM – 12:00 PM)
+                          </span>
+                          <span className="text-[11px] text-slate-500">
+                            Driver dispatches early morning with live SMS tracking 30 mins prior
+                          </span>
+                        </div>
+                        <span className="text-[10px] font-bold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-md">
+                          Available
+                        </span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setDeliveryWindow('afternoon')}
+                        className={`w-full p-3.5 rounded-xl border-2 text-left flex items-center justify-between transition-all cursor-pointer ${
+                          deliveryWindow === 'afternoon'
+                            ? 'border-[#15385E] bg-sky-50 shadow-xs'
+                            : 'border-slate-200 bg-white hover:border-slate-300'
+                        }`}
+                      >
+                        <div>
+                          <span className="font-black text-xs text-slate-900 block">
+                            Afternoon Window (12:00 PM – 4:00 PM)
+                          </span>
+                          <span className="text-[11px] text-slate-500">
+                            Ideal for mid-day arrivals; live driver SMS update sent on dispatch
+                          </span>
+                        </div>
+                        <span className="text-[10px] font-bold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-md">
+                          Available
+                        </span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setDeliveryWindow('flexible')}
+                        className={`w-full p-3.5 rounded-xl border-2 text-left flex items-center justify-between transition-all cursor-pointer ${
+                          deliveryWindow === 'flexible'
+                            ? 'border-[#15385E] bg-sky-50 shadow-xs'
+                            : 'border-slate-200 bg-white hover:border-slate-300'
+                        }`}
+                      >
+                        <div>
+                          <span className="font-black text-xs text-slate-900 block">
+                            Flexible Full-Day (8:00 AM – 5:00 PM)
+                          </span>
+                          <span className="text-[11px] text-slate-500">
+                            Fastest logistics routing — driver delivers within optimal route schedule
+                          </span>
+                        </div>
+                        <span className="text-[10px] font-bold text-sky-800 bg-sky-100 px-2 py-0.5 rounded-md">
+                          Eco-Efficient
+                        </span>
+                      </button>
+                    </div>
+
+                    <div className="p-3 bg-slate-50 rounded-xl text-[11px] text-slate-600 flex items-center gap-2">
+                      <Sparkles className="w-4 h-4 text-[#F7D347] shrink-0" />
+                      <span>
+                        Real-time delivery slot dispatch linked to Portabox logistics calendar.
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* STAGE 2: Placement & Site Clearances */}
               {currentStage === 'placement' && (
                 <div className="space-y-5 animate-in fade-in duration-150">
                   <div className="bg-gradient-to-r from-sky-50 to-blue-50 border border-sky-200 rounded-2xl p-4 text-xs space-y-2">
@@ -550,148 +746,128 @@ export const BookingDecisionModal: React.FC<BookingDecisionModalProps> = ({
                         className="w-full px-3 py-2 text-xs font-medium rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-[#5CC1EF]"
                       />
                     </div>
+
+                    {quote.config?.enableDrivewayFitGuarantee && (
+                      <div className="pt-2">
+                        <button
+                          type="button"
+                          onClick={() => setIsPlacementCheckerOpen(true)}
+                          className="px-3.5 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-[#15385E] font-bold text-xs flex items-center gap-1.5 cursor-pointer transition-colors"
+                        >
+                          <Truck className="w-3.5 h-3.5 text-[#5CC1EF]" />
+                          <span>Launch Driveway Fit &amp; Clearance Checker</span>
+                        </button>
+                      </div>
+                    )}
                   </div>
                 </div>
               )}
 
-              {/* STAGE 2: Scheduling & Delivery Dates */}
-              {currentStage === 'dates' && (
+              {/* STAGE 3: Transit & Storage Protection (Insurance) */}
+              {currentStage === 'insurance' && (
                 <div className="space-y-5 animate-in fade-in duration-150">
-                  <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-2xs space-y-4">
-                    <h4 className="text-xs font-black uppercase tracking-wider text-[#15385E] flex items-center gap-2">
-                      <Calendar className="w-4 h-4 text-[#5CC1EF]" />
-                      <span>Select Preferred Delivery Date</span>
-                    </h4>
-
-                    <div className="space-y-3">
-                      <div>
-                        <label className="block text-[11px] font-bold text-slate-600 mb-1">
-                          Delivery Date
-                        </label>
-                        <input
-                          type="date"
-                          value={scheduledDate}
-                          min={new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().split('T')[0]}
-                          onChange={(e) => setScheduledDate(e.target.value)}
-                          className="w-full sm:w-72 px-3 py-2 text-xs font-bold rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-[#5CC1EF]"
-                        />
-                      </div>
-
-                      <div className="flex flex-wrap gap-2 pt-1">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const d = new Date(Date.now() + 48 * 60 * 60 * 1000).toISOString().split('T')[0];
-                            setScheduledDate(d);
-                          }}
-                          className="px-3 py-1 text-[11px] font-bold rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 cursor-pointer"
-                        >
-                          In 2 Days
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const d = new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
-                            setScheduledDate(d);
-                          }}
-                          className="px-3 py-1 text-[11px] font-bold rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 cursor-pointer"
-                        >
-                          In 5 Days
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const d = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
-                            setScheduledDate(d);
-                          }}
-                          className="px-3 py-1 text-[11px] font-bold rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 cursor-pointer"
-                        >
-                          Next Week
-                        </button>
-                      </div>
+                  <div className="bg-gradient-to-r from-sky-50 to-blue-50 border border-sky-200 rounded-2xl p-4 text-xs space-y-2">
+                    <div className="flex items-center gap-2 font-black text-[#15385E]">
+                      <ShieldCheck className="w-4 h-4 text-emerald-600" />
+                      <span>Portabox Container Protection Option (CPO &amp; COO)</span>
                     </div>
+                    <p className="text-slate-700 leading-relaxed">
+                      Specialized transit and storage protection designed specifically for portable containers. Unlike standard home and contents policies which typically exclude goods in transit or off-premises storage, our coverage protects your belongings from the moment the container is delivered to your driveway through to return collection.
+                    </p>
                   </div>
 
-                  {/* Delivery Window Selection */}
+                  {/* Coverage Details Card */}
                   <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-2xs space-y-4">
-                    <h4 className="text-xs font-black uppercase tracking-wider text-[#15385E] flex items-center gap-2">
-                      <Clock className="w-4 h-4 text-[#5CC1EF]" />
-                      <span>Select Delivery Time Window</span>
-                    </h4>
-
-                    <div className="space-y-2.5">
-                      <button
-                        type="button"
-                        onClick={() => setDeliveryWindow('morning')}
-                        className={`w-full p-3.5 rounded-xl border-2 text-left flex items-center justify-between transition-all cursor-pointer ${
-                          deliveryWindow === 'morning'
-                            ? 'border-[#15385E] bg-sky-50 shadow-xs'
-                            : 'border-slate-200 bg-white hover:border-slate-300'
-                        }`}
-                      >
-                        <div>
-                          <span className="font-black text-xs text-slate-900 block">
-                            Morning Window (8:00 AM – 12:00 PM)
-                          </span>
-                          <span className="text-[11px] text-slate-500">
-                            Driver dispatches early morning with live SMS tracking 30 mins prior
-                          </span>
+                    <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4 border-b border-slate-100 pb-4">
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <h4 className="text-sm font-black text-[#15385E]">
+                            Comprehensive Contents Protection
+                          </h4>
+                          {isFreeInsurancePromo ? (
+                            <span className="text-[10px] font-black uppercase tracking-wider bg-emerald-100 text-emerald-800 border border-emerald-300 px-2 py-0.5 rounded-full">
+                              FREE INCLUSION
+                            </span>
+                          ) : (
+                            <span className="text-[10px] font-bold bg-sky-100 text-[#15385E] border border-sky-200 px-2 py-0.5 rounded-full">
+                              $5,000 Standard Contents Protection / Container
+                            </span>
+                          )}
                         </div>
-                        <span className="text-[10px] font-bold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-md">
-                          Available
-                        </span>
-                      </button>
+                        <p className="text-xs text-slate-600">
+                          Total Protection Value: <strong>${((quote.config?.insurance?.coverageAmountPerContainer || 5000) * quote.containerCount).toLocaleString()}</strong> across {quote.containerCount} {quote.containerCount > 1 ? 'containers' : 'container'}.
+                        </p>
+                      </div>
 
-                      <button
-                        type="button"
-                        onClick={() => setDeliveryWindow('afternoon')}
-                        className={`w-full p-3.5 rounded-xl border-2 text-left flex items-center justify-between transition-all cursor-pointer ${
-                          deliveryWindow === 'afternoon'
-                            ? 'border-[#15385E] bg-sky-50 shadow-xs'
-                            : 'border-slate-200 bg-white hover:border-slate-300'
-                        }`}
-                      >
-                        <div>
-                          <span className="font-black text-xs text-slate-900 block">
-                            Afternoon Window (12:00 PM – 4:00 PM)
-                          </span>
-                          <span className="text-[11px] text-slate-500">
-                            Ideal for mid-day arrivals; live driver SMS update sent on dispatch
-                          </span>
-                        </div>
-                        <span className="text-[10px] font-bold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-md">
-                          Available
-                        </span>
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => setDeliveryWindow('flexible')}
-                        className={`w-full p-3.5 rounded-xl border-2 text-left flex items-center justify-between transition-all cursor-pointer ${
-                          deliveryWindow === 'flexible'
-                            ? 'border-[#15385E] bg-sky-50 shadow-xs'
-                            : 'border-slate-200 bg-white hover:border-slate-300'
-                        }`}
-                      >
-                        <div>
-                          <span className="font-black text-xs text-slate-900 block">
-                            Flexible Full-Day (8:00 AM – 5:00 PM)
-                          </span>
-                          <span className="text-[11px] text-slate-500">
-                            Fastest logistics routing — driver delivers within optimal route schedule
-                          </span>
-                        </div>
-                        <span className="text-[10px] font-bold text-sky-800 bg-sky-100 px-2 py-0.5 rounded-md">
-                          Eco-Efficient
-                        </span>
-                      </button>
+                      <div className="text-left sm:text-right shrink-0">
+                        {isFreeInsurancePromo ? (
+                          <div className="text-emerald-700 font-mono font-black text-lg">
+                            $0 Free
+                          </div>
+                        ) : (
+                          <div>
+                            <span className="text-lg font-black text-[#15385E] font-mono">
+                              ${insurancePerContainer * quote.containerCount} /month
+                            </span>
+                            {quote.containerCount > 1 && (
+                              <span className="block text-[10px] text-slate-400">
+                                ${insurancePerContainer}/mo × {quote.containerCount} containers
+                              </span>
+                            )}
+                          </div>
+                        )}
+                      </div>
                     </div>
 
-                    <div className="p-3 bg-slate-50 rounded-xl text-[11px] text-slate-600 flex items-center gap-2">
-                      <Sparkles className="w-4 h-4 text-[#F7D347] shrink-0" />
-                      <span>
-                        Real-time delivery slot dispatch linked to Portabox logistics calendar.
-                      </span>
+                    {/* Coverage Highlights Checklist */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs text-slate-700">
+                      <div className="flex items-center gap-2 p-2.5 rounded-xl bg-slate-50 border border-slate-100">
+                        <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                        <span>Road transit &amp; horizontal lift coverage</span>
+                      </div>
+                      <div className="flex items-center gap-2 p-2.5 rounded-xl bg-slate-50 border border-slate-100">
+                        <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                        <span>Fire, lightning, storm &amp; flood protection</span>
+                      </div>
+                      <div className="flex items-center gap-2 p-2.5 rounded-xl bg-slate-50 border border-slate-100">
+                        <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                        <span>Forcible entry / theft protection</span>
+                      </div>
+                      <div className="flex items-center gap-2 p-2.5 rounded-xl bg-slate-50 border border-slate-100">
+                        <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                        <span>Zero standard deductible on approved claims</span>
+                      </div>
+                    </div>
+
+                    {/* Selection Toggle */}
+                    <div className="pt-2">
+                      <label className="flex items-start gap-3 p-4 rounded-2xl bg-white border-2 border-slate-200 cursor-pointer select-none transition-all hover:border-[#5CC1EF] shadow-2xs">
+                        <input
+                          type="checkbox"
+                          checked={insuranceCovered}
+                          onChange={(e) => setInsuranceCovered(e.target.checked)}
+                          className="mt-1 w-5 h-5 rounded text-[#15385E] accent-[#15385E] cursor-pointer"
+                        />
+                        <div className="flex-1">
+                          <div className="flex items-center justify-between gap-2 flex-wrap">
+                            <span className="text-sm font-black text-[#15385E]">
+                              {insuranceCovered
+                                ? '✓ Yes, include Container Protection Option (CPO)'
+                                : 'Decline Container Protection Option (I assume transit & storage risk)'}
+                            </span>
+                            {insuranceCovered && (
+                              <span className="text-[10px] font-black uppercase text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
+                                Protection Active
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-[11px] text-slate-500 mt-1">
+                            {insuranceCovered
+                              ? `Adds peace of mind for goods up to $${((quote.config?.insurance?.coverageAmountPerContainer || 5000) * quote.containerCount).toLocaleString()} while stored or in transit. Billed with your monthly rental.`
+                              : 'By opting out, you confirm your contents are covered under your own policy or that you accept self-storage liability.'}
+                          </p>
+                        </div>
+                      </label>
                     </div>
                   </div>
                 </div>
@@ -918,7 +1094,7 @@ export const BookingDecisionModal: React.FC<BookingDecisionModalProps> = ({
                       <div className="p-3 bg-slate-50 rounded-xl space-y-1">
                         <span className="text-[10px] font-bold text-slate-400 uppercase">Storage Placement</span>
                         <p className="font-extrabold text-slate-900 text-sm">
-                          {isOnsite ? 'Stored at Your Home (Onsite)' : 'Stored at Our Location'}
+                          {isOnsite ? 'Stored at My Location (Onsite)' : 'Stored at Portabox Location'}
                         </p>
                         <p className="text-slate-500 text-[11px]">
                           Doors facing: {doorOrientation === 'house' ? 'House / Property' : 'Street'} · Surface: {surfaceType}
@@ -964,12 +1140,12 @@ export const BookingDecisionModal: React.FC<BookingDecisionModalProps> = ({
                           <span className="font-mono font-bold">${quote.packingSupplies.totalSuppliesPrice}</span>
                         </div>
                       )}
-                      {(quote.insuranceMonthlyFee || 0) > 0 && (
-                        <div className="flex justify-between items-center text-slate-700">
-                          <span>Contents Protection ($5,000 cover):</span>
-                          <span className="font-mono font-bold">${quote.insuranceMonthlyFee}</span>
-                        </div>
-                      )}
+                      <div className="flex justify-between items-center text-slate-700">
+                        <span>Contents Protection ($5,000 cover / container):</span>
+                        <span className="font-mono font-bold">
+                          {insuranceCovered && calculatedInsuranceMonthly > 0 ? `$${calculatedInsuranceMonthly}` : '$0 (Opted out)'}
+                        </span>
+                      </div>
                       {quote.totalDiscount > 0 && (
                         <div className="flex justify-between items-center text-emerald-700 font-bold">
                           <span>Promotional discount applied:</span>
@@ -982,7 +1158,7 @@ export const BookingDecisionModal: React.FC<BookingDecisionModalProps> = ({
                           <span className="text-[11px] text-slate-500 block">Includes GST · Monthly rent frozen for 1 year</span>
                         </div>
                         <span className="text-xl sm:text-2xl font-black text-[#15385E] font-mono">
-                          ${quote.firstPaymentTotal}
+                          ${dynamicFirstPaymentTotal}
                         </span>
                       </div>
                     </div>
@@ -1141,7 +1317,7 @@ export const BookingDecisionModal: React.FC<BookingDecisionModalProps> = ({
                         className="mt-0.5 rounded text-[#15385E] focus:ring-[#5CC1EF]"
                       />
                       <span className="text-xs text-slate-600 leading-relaxed">
-                        I agree to the Portabox Container Rental Agreement, confirm 10m length, 3.5m width, and 4.5m overhead clearances for horizontal level-lift delivery, and authorize the initial first payment of <strong>${quote.firstPaymentTotal}</strong> (with 1-year rate freeze).
+                        I agree to the Portabox Container Rental Agreement, confirm 10m length, 3.5m width, and 4.5m overhead clearances for horizontal level-lift delivery, and authorize the initial first payment of <strong>${dynamicFirstPaymentTotal}</strong> (with 1-year rate freeze).
                       </span>
                     </label>
 
@@ -1162,7 +1338,7 @@ export const BookingDecisionModal: React.FC<BookingDecisionModalProps> = ({
                         <span>Securing Your Booking &amp; Rate...</span>
                       ) : (
                         <>
-                          <span>Confirm Booking &amp; Pay ${quote.firstPaymentTotal}</span>
+                          <span>Confirm Booking &amp; Pay ${dynamicFirstPaymentTotal}</span>
                           <ArrowRight className="w-4 h-4 stroke-[3]" />
                         </>
                       )}
@@ -1173,12 +1349,13 @@ export const BookingDecisionModal: React.FC<BookingDecisionModalProps> = ({
 
               {/* Navigation Controls between stages */}
               <div className="flex items-center justify-between pt-2 border-t border-slate-200">
-                {currentStage !== 'placement' ? (
+                {currentStage !== 'dates' ? (
                   <button
                     type="button"
                     onClick={() => {
-                      if (currentStage === 'dates') setCurrentStage('placement');
-                      else if (currentStage === 'security') setCurrentStage('dates');
+                      if (currentStage === 'placement') setCurrentStage('dates');
+                      else if (currentStage === 'insurance') setCurrentStage('placement');
+                      else if (currentStage === 'security') setCurrentStage('insurance');
                       else if (currentStage === 'payment') setCurrentStage('security');
                     }}
                     className="px-4 py-2 text-xs font-bold text-slate-600 hover:text-slate-900 cursor-pointer"
@@ -1245,7 +1422,7 @@ export const BookingDecisionModal: React.FC<BookingDecisionModalProps> = ({
                 <div className="flex justify-between items-center">
                   <span className="text-slate-600">Storage Location:</span>
                   <span className="font-bold text-slate-900">
-                    {isOnsite ? 'Stored at Your Home' : 'Stored at Our Location'}
+                    {isOnsite ? 'Stored at My Location' : 'Stored at Portabox Location'}
                   </span>
                 </div>
                 <div className="flex justify-between items-center">

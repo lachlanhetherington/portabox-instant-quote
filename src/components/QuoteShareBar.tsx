@@ -87,7 +87,7 @@ export const QuoteShareBar: React.FC<QuoteShareBarProps> = ({
       `ONGOING MONTHLY BILL: $${quote.monthlyStorageFee + (quote.insurance?.selected && !quote.insurance.isFreePromo ? quote.insurance.totalMonthlyInsuranceFee : 0)}/month`,
       ``,
       `🔒 30-Day Guaranteed Price Lock: Held until ${validityDateStr}`,
-      `📞 Questions or to Book: Call ${phone} or reply here.`
+      `📞 Questions or to Book: Call ${phone} or email quotes@portabox.au (www.portabox.au).`
     );
 
     return lines.join('\n');
@@ -220,26 +220,12 @@ export const QuoteShareBar: React.FC<QuoteShareBarProps> = ({
             </h4>
           </div>
           <p className="text-xs text-slate-500 mt-0.5">
-            Share this formal quotation directly to WhatsApp, SMS text, Email, or print an official tax invoice copy.
+            Share this formal quotation directly to WhatsApp, SMS text, Email, or print a copy for your records.
           </p>
         </div>
 
         {/* Action Buttons */}
         <div className="flex items-center gap-2 flex-wrap">
-          {/* Text Me Magic Link Button */}
-          <button
-            type="button"
-            onClick={() => {
-              generateMagicLink();
-              setIsMagicModalOpen(true);
-            }}
-            className="px-3.5 py-2 rounded-xl bg-gradient-to-r from-[#F7D347] to-[#eed235] hover:from-[#eed235] hover:to-[#e6c338] text-[#1A1A1A] text-xs font-black shadow-xs flex items-center gap-1.5 transition-all cursor-pointer border border-[#e6c338] active:scale-95"
-            title="Text a 1-tap magic link to your phone to resume this quote later"
-          >
-            <Sparkles className="w-4 h-4 text-[#1A1A1A]" />
-            <span>Text Me Magic Link</span>
-          </button>
-
           {/* WhatsApp Button */}
           <button
             type="button"
@@ -294,15 +280,15 @@ export const QuoteShareBar: React.FC<QuoteShareBarProps> = ({
             {copied ? <Check className="w-4 h-4 text-emerald-600 stroke-[3]" /> : <Copy className="w-4 h-4" />}
           </button>
 
-          {/* Download Tax Invoice / Print Button */}
+          {/* Print / Save PDF Button */}
           <button
             type="button"
             onClick={handlePrintQuote}
             className="px-3.5 py-2 rounded-xl bg-white hover:bg-slate-50 text-[#15385E] text-xs font-black border-2 border-slate-300 shadow-2xs flex items-center gap-1.5 transition-all cursor-pointer active:scale-95"
-            title="Download or Print Official Tax Invoice (PDF)"
+            title="Print or Save Official Quote as PDF"
           >
-            <Download className="w-4 h-4 text-[#15385E]" />
-            <span>Download Tax Invoice</span>
+            <Printer className="w-4 h-4 text-[#15385E]" />
+            <span>Print / Save Quote</span>
           </button>
         </div>
       </div>

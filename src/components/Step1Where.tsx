@@ -136,19 +136,6 @@ export const Step1Where: React.FC<Step1WhereProps> = ({
               Horizontal level-lift delivery: your contents stay level during loading and unloading.
             </p>
           </div>
-
-          <div className="flex flex-wrap items-center gap-3 pt-2">
-            <div className="flex items-center gap-2 text-xs text-slate-300 font-semibold flex-wrap">
-              <span className="w-2 h-2 rounded-full bg-[#5CC1EF]" />
-              <span>Horizontal level-lift delivery</span>
-              <span className="text-slate-400">·</span>
-              <span className="w-2 h-2 rounded-full bg-[#F7D347]" />
-              <span>Lock quote price for 30 days</span>
-              <span className="text-slate-400">·</span>
-              <span className="w-2 h-2 rounded-full bg-emerald-400" />
-              <span>1-year rate freeze locked in</span>
-            </div>
-          </div>
         </div>
       </div>
 
@@ -180,20 +167,15 @@ export const Step1Where: React.FC<Step1WhereProps> = ({
           </div>
           <div>
             <div className="text-xs font-black text-[#15385E] uppercase tracking-wide">1-Year Rate Freeze</div>
-            <div className="text-[11px] text-slate-500 font-semibold">Container rate locked for 12 months</div>
+            <div className="text-[11px] text-slate-500 font-semibold">Container rate and delivery fees locked for 12 months</div>
           </div>
         </div>
       </div>
 
       {/* Main Step 1 Input Card */}
       <div className="bg-white rounded-2xl sm:rounded-3xl p-5 sm:p-8 lg:p-10 shadow-xs border-2 border-[#DAD7D1]">
-        {/* Header kicker: #F7D347 Vibrant Gold background with #1A1A1A text */}
-        <span className="inline-flex items-center gap-1.5 text-xs font-black uppercase tracking-widest text-[#1A1A1A] bg-[#F7D347] border border-[#e6c338] px-2.5 py-0.5 rounded-md font-['Cabinet_Grotesk',sans-serif]">
-          INSTANT QUOTE
-        </span>
-
         {/* Heading: #15385E Deep Navy Blue */}
-        <h1 className="text-2xl sm:text-4xl font-black text-[#15385E] tracking-tight mt-1 mb-1">
+        <h1 className="text-2xl sm:text-4xl font-black text-[#15385E] tracking-tight mb-1">
           Enter your current postcode
         </h1>
         <p className="text-xs sm:text-sm text-slate-500 font-medium mb-3">
@@ -404,6 +386,7 @@ export const Step1Where: React.FC<Step1WhereProps> = ({
         <div className="mt-8">
           <AreYouStuckBanner
             config={config}
+            originPostcode={selected}
             suburbOrPostcode={selected ? `${selected.postcode} ${selected.suburb}` : undefined}
           />
         </div>

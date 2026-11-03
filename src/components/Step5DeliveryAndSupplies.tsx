@@ -148,12 +148,7 @@ export const Step5DeliveryAndSupplies: React.FC<Step5DeliveryAndSuppliesProps> =
 
   return (
     <div className="bg-white rounded-2xl sm:rounded-3xl p-4 sm:p-8 lg:p-10 shadow-xs border-2 border-[#DAD7D1]">
-      {/* Header kicker: #F7D347 Vibrant Gold with #1A1A1A text */}
-      <span className="inline-flex items-center gap-1.5 text-xs font-black uppercase tracking-widest text-[#1A1A1A] bg-[#F7D347] border border-[#e6c338] px-2.5 py-0.5 rounded-md font-['Cabinet_Grotesk',sans-serif]">
-        STEP 6 OF 8 · SCHEDULE &amp; PLACEMENT
-      </span>
-
-      <h1 className="text-2xl sm:text-4xl font-black text-[#15385E] tracking-tight mt-1 mb-2">
+      <h1 className="text-2xl sm:text-4xl font-black text-[#15385E] tracking-tight mb-2">
         Schedule &amp; Placement
       </h1>
       <p className="text-xs sm:text-sm text-slate-500 mb-8 max-w-2xl">
@@ -403,7 +398,7 @@ export const Step5DeliveryAndSupplies: React.FC<Step5DeliveryAndSuppliesProps> =
 
       {/* Are You Stuck Banner */}
       <div className="mt-8">
-        <AreYouStuckBanner />
+        <AreYouStuckBanner originPostcode={originPostcode} config={config} />
       </div>
 
       {/* Navigation Buttons */}

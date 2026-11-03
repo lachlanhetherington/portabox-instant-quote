@@ -20,6 +20,7 @@ interface TraditionalQuoteDocumentProps {
   quote: QuoteBreakdown;
   customerData?: {
     firstName: string;
+    companyName?: string;
     mobile: string;
     email: string;
   };
@@ -100,16 +101,12 @@ export const TraditionalQuoteDocument: React.FC<TraditionalQuoteDocumentProps> =
               OFFICIAL QUOTATION
             </span>
           </div>
-          <p className="text-xs text-slate-500 font-medium max-w-sm">
-            Portabox Australia Pty Ltd · ABN 84 629 184 902<br />
-            National Containerised Storage &amp; Door-to-Door Moving Network
-          </p>
-          <div className="text-[11px] text-slate-600 flex items-center gap-3 pt-1">
+          <div className="text-xs text-slate-600 flex items-center gap-3 pt-1 font-semibold flex-wrap">
             <span>📞 {phone}</span>
             <span>·</span>
-            <span>✉️ quotes@portabox.com.au</span>
+            <span>✉️ quotes@portabox.au</span>
             <span>·</span>
-            <span>🌐 www.portabox.com.au</span>
+            <span>🌐 www.portabox.au</span>
           </div>
         </div>
 
@@ -127,20 +124,6 @@ export const TraditionalQuoteDocument: React.FC<TraditionalQuoteDocumentProps> =
             <span className="text-slate-500 font-medium">Valid Until:</span>
             <span className="font-bold text-emerald-700">{expiryDateStr}</span>
           </div>
-          <div className="pt-1 border-t border-slate-200/60 flex items-center justify-between text-[11px]">
-            <span className="text-slate-500">Price Guarantee:</span>
-            <span className="font-extrabold text-[#15385E]">30 Days Locked</span>
-          </div>
-
-          <button
-            type="button"
-            onClick={() => window.print()}
-            className="w-full mt-2 py-2 px-3 rounded-xl bg-[#15385E] hover:bg-[#0f2844] text-white text-xs font-black flex items-center justify-center gap-2 shadow-xs transition-colors cursor-pointer print:hidden active:scale-98"
-            title="Download or print this official quotation / tax invoice as PDF"
-          >
-            <Download className="w-3.5 h-3.5 text-[#F7D347]" />
-            <span>Download Tax Invoice</span>
-          </button>
         </div>
       </div>
 
@@ -150,7 +133,14 @@ export const TraditionalQuoteDocument: React.FC<TraditionalQuoteDocumentProps> =
           <span className="text-[10px] font-black uppercase text-slate-400 tracking-wider block">
             PREPARED FOR (CUSTOMER)
           </span>
-          <p className="text-sm font-black text-[#15385E]">{customerName}</p>
+          <p className="text-sm font-black text-[#15385E]">
+            {customerName}
+          </p>
+          {customerData?.companyName && (
+            <p className="text-xs font-bold text-slate-700">
+              Company: <span className="font-medium text-slate-900">{customerData.companyName}</span>
+            </p>
+          )}
           <p className="text-slate-600">Mobile: <span className="font-mono font-semibold text-slate-900">{customerMobile}</span></p>
           <p className="text-slate-600">Email: <span className="font-medium text-slate-900">{customerEmail}</span></p>
         </div>
@@ -165,11 +155,6 @@ export const TraditionalQuoteDocument: React.FC<TraditionalQuoteDocumentProps> =
           <p className="text-slate-600">
             Delivery Date: <span className="font-bold text-slate-900">{quote.preferredDate}</span>
           </p>
-          {quote.selectedSlot && (
-            <p className="text-slate-600">
-              Time Window: <span className="font-semibold text-slate-900">{quote.selectedSlot.label} ({quote.selectedSlot.timeRange})</span>
-            </p>
-          )}
           <p className="text-slate-600">
             Servicing Facility: <span className="font-medium text-slate-900">{quote.originDepot.name}</span>
           </p>
@@ -202,16 +187,11 @@ export const TraditionalQuoteDocument: React.FC<TraditionalQuoteDocumentProps> =
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {quote.legs.map((leg, idx) => (
-                <tr key={idx} className={leg.isPayableNow ? 'bg-white' : 'bg-slate-50/40 text-slate-500'}>
+              {quote.legs.filter((leg) => leg.isPayableNow).map((leg, idx) => (
+                <tr key={idx} className="bg-white">
                   <td className="py-3 px-4">
                     <p className="font-bold text-slate-900">{leg.label}</p>
                     <p className="text-[11px] text-slate-500 mt-0.5">{leg.description}</p>
-                    {!leg.isPayableNow && (
-                      <span className="inline-block mt-1 text-[10px] font-bold text-slate-600 bg-slate-200/70 px-2 py-0.5 rounded">
-                        Payable later upon container collection
-                      </span>
-                    )}
                   </td>
                   <td className="py-3 px-4 text-center font-mono">
                     {leg.containerCount || quote.containerCount} container{quote.containerCount > 1 ? 's' : ''}
@@ -487,17 +467,34 @@ export const TraditionalQuoteDocument: React.FC<TraditionalQuoteDocumentProps> =
                 ${recurringMonthlyTotal} /mo
               </span>
             </div>
+          </div>
+        </div>
+      </div>
 
-            {onBookNow && (
-              <button
-                type="button"
-                onClick={onBookNow}
-                className="w-full mt-3 py-3 px-4 rounded-xl bg-[#F7D347] hover:bg-[#eec939] text-[#15385E] font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 shadow-md cursor-pointer transition-transform hover:scale-[1.02] active:scale-95 print:hidden"
-              >
-                <CheckCircle2 className="w-4 h-4 text-[#15385E]" />
-                <span>Ready to Book? Book Now</span>
-              </button>
-            )}
+      {/* 5. WHEN YOU'RE READY TO BOOK SECTION */}
+      <div className="p-6 rounded-2xl bg-slate-50 border-2 border-[#15385E]/20 space-y-3 print:bg-white print:border-slate-300">
+        <h4 className="text-sm font-black text-[#15385E] uppercase tracking-wider flex items-center gap-2">
+          <Phone className="w-4 h-4 text-[#00a9d7]" />
+          <span>When you're ready to book:</span>
+        </h4>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+          <div className="flex items-start gap-3 p-4 rounded-xl bg-white border border-slate-200 shadow-2xs">
+            <span className="w-6 h-6 rounded-full bg-[#15385E] text-[#F7D347] font-black text-xs flex items-center justify-center shrink-0">1</span>
+            <div>
+              <p className="font-extrabold text-[#15385E] text-sm">Call Our Team</p>
+              <p className="text-slate-600 mt-1">
+                Call <a href={`tel:${phone.replace(/\s+/g, '')}`} className="font-black text-[#15385E] underline hover:text-[#00a9d7]">{phone}</a> to speak directly with our dispatch team.
+              </p>
+            </div>
+          </div>
+          <div className="flex items-start gap-3 p-4 rounded-xl bg-white border border-slate-200 shadow-2xs">
+            <span className="w-6 h-6 rounded-full bg-[#15385E] text-[#F7D347] font-black text-xs flex items-center justify-center shrink-0">2</span>
+            <div>
+              <p className="font-extrabold text-[#15385E] text-sm">Request Booking Form</p>
+              <p className="text-slate-600 mt-1">
+                Send an email to <a href="mailto:quotes@portabox.au" className="font-black text-[#15385E] underline hover:text-[#00a9d7]">quotes@portabox.au</a> and request a booking form to start the process.
+              </p>
+            </div>
           </div>
         </div>
       </div>

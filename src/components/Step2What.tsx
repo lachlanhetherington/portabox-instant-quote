@@ -8,9 +8,7 @@ import {
   Warehouse,
   Home,
   ShieldAlert,
-  ShieldCheck,
   Navigation,
-  Sparkles,
   Info,
   X,
   MessageSquare,
@@ -225,12 +223,7 @@ export const Step2What: React.FC<Step2WhatProps> = ({
 
   return (
     <div className="bg-white rounded-2xl sm:rounded-3xl p-4 sm:p-8 lg:p-10 shadow-xs border-2 border-[#DAD7D1]">
-      {/* Header kicker: #F7D347 Vibrant Gold with #1A1A1A text */}
-      <span className="inline-flex items-center gap-1.5 text-xs font-black uppercase tracking-widest text-[#1A1A1A] bg-[#F7D347] border border-[#e6c338] px-2.5 py-0.5 rounded-md font-['Cabinet_Grotesk',sans-serif]">
-        INSTANT QUOTE
-      </span>
-
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mt-1 mb-3">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3">
         <h1 className="text-2xl sm:text-4xl font-black text-[#15385E] tracking-tight">
           What do you need?
         </h1>
@@ -271,7 +264,7 @@ export const Step2What: React.FC<Step2WhatProps> = ({
             </div>
             <h3 className="text-lg font-black text-[#15385E]">Moving</h3>
             <p className="text-xs text-slate-500 mt-2 leading-relaxed">
-              Door-to-door moving, or load at our location and save delivery charges. Local or Interstate.
+              Door-to-door moving, or load at Portabox Location and save delivery charges. Local or Interstate.
             </p>
 
             {/* Feature Badges: Moving Capabilities */}
@@ -327,25 +320,19 @@ export const Step2What: React.FC<Step2WhatProps> = ({
             <p className="text-xs text-slate-500 mt-2 leading-relaxed">
               {storagePlacement === 'my_place'
                 ? 'Store securely at your property for convenient on-site driveway access.'
-                : 'Store at your location or ours. Load at our location and save delivery charges.'}
+                : 'Store at your location or ours. Load at Portabox Location and save delivery charges.'}
             </p>
 
             {/* Feature Badges: Loading & Storage Options */}
             <div className="flex flex-wrap items-center gap-1.5 mt-3 pt-2.5 border-t border-slate-100">
               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-slate-100/90 text-slate-700 text-[10px] font-bold border border-slate-200/80">
                 <Home className="w-3 h-3 text-[#15385E]" />
-                <span>Your Home</span>
+                <span>My Location</span>
               </span>
               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-slate-100/90 text-slate-700 text-[10px] font-bold border border-slate-200/80">
                 <Warehouse className="w-3 h-3 text-[#15385E]" />
-                <span>Our Location</span>
+                <span>Portabox Location</span>
               </span>
-              {storagePlacement === 'my_place' && (
-                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-sky-50 text-sky-800 text-[10px] font-bold border border-sky-200 animate-in fade-in">
-                  <span className="text-sky-600 font-extrabold">✓</span>
-                  <span>Driveway Level-Lift Delivery</span>
-                </span>
-              )}
             </div>
           </div>
 
@@ -371,7 +358,7 @@ export const Step2What: React.FC<Step2WhatProps> = ({
               <p className="text-xs text-slate-500 mt-0.5">
                 {storagePlacement === 'my_place'
                   ? 'Keep the container at your property for convenient on-site driveway access.'
-                  : 'We store your container in our secure location.'}
+                  : 'We store your container in our secure Portabox Location.'}
               </p>
             </div>
 
@@ -388,7 +375,7 @@ export const Step2What: React.FC<Step2WhatProps> = ({
                     : 'text-slate-600 hover:text-slate-900'
                 }`}
               >
-                Your Home
+                My Location
               </button>
               <button
                 type="button"
@@ -402,7 +389,7 @@ export const Step2What: React.FC<Step2WhatProps> = ({
                     : 'text-slate-600 hover:text-slate-900'
                 }`}
               >
-                Our Location
+                Portabox Location
               </button>
             </div>
           </div>
@@ -557,7 +544,7 @@ export const Step2What: React.FC<Step2WhatProps> = ({
                   </span>
                   {serviceType === 'moving_storage' ? (
                     <span className="text-[10px] font-black uppercase tracking-wider bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full border border-emerald-300">
-                      ✓ Interim Storage Added
+                      ✓ Interim Storage (4-Leg Move)
                     </span>
                   ) : (
                     <span className="text-[10px] font-bold bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full">
@@ -566,7 +553,7 @@ export const Step2What: React.FC<Step2WhatProps> = ({
                   )}
                 </div>
                 <p className="text-xs text-slate-600 leading-relaxed">
-                  We collect your container from {originPostcode.suburb}, store it securely at our location and deliver it to your new address when you&apos;re ready.
+                  Interim storage represents a 4-leg move: Portabox Location → Customer Location → Portabox Location (Interim Storage) → New Customer Location → Portabox Location. We collect your container from {originPostcode.suburb}, store it securely at Portabox Location, and deliver it to your new address when you&apos;re ready.
                 </p>
               </div>
             </label>
@@ -574,33 +561,12 @@ export const Step2What: React.FC<Step2WhatProps> = ({
         </div>
       )}
 
-      {/* 30-Day & 1-Year Price-Lock Guarantee Transparency */}
-      <div className="mt-8 grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div className="p-4 sm:p-5 rounded-2xl bg-white border-2 border-[#DAD7D1] shadow-2xs space-y-2">
-          <div className="flex items-center gap-2 text-[#15385E]">
-            <Sparkles className="w-4 h-4 text-[#008fbb]" />
-            <h4 className="text-xs font-black uppercase tracking-wider">30-Day Price-Lock Guarantee</h4>
-          </div>
-          <p className="text-xs text-slate-600 leading-relaxed">
-            Quoted prices are locked for 30 days from quote date. Changes to quotes that affect pricing will result in updated pricing and a new 30-day lock period. This does not include date changes or other non-pricing items.
-          </p>
-        </div>
-
-        <div className="p-4 sm:p-5 rounded-2xl bg-white border-2 border-[#DAD7D1] shadow-2xs space-y-2">
-          <div className="flex items-center gap-2 text-[#15385E]">
-            <ShieldCheck className="w-4 h-4 text-emerald-600" />
-            <h4 className="text-xs font-black uppercase tracking-wider">1-Year Rate Freeze Guarantee</h4>
-          </div>
-          <p className="text-xs text-slate-600 leading-relaxed">
-            When a booking is made, prices on all attributes (container rental, delivery fees, ancillaries, etc.) are locked for 1 year. Beyond 1 year, delivery fees will default to live pricing and container rental prices can go up or down with a 30-day notification.
-          </p>
-        </div>
-      </div>
 
       {/* Are You Stuck Banner */}
       <div className="mt-8">
         <AreYouStuckBanner
           config={config}
+          originPostcode={originPostcode}
           suburbOrPostcode={`${originPostcode.postcode} ${originPostcode.suburb}`}
         />
       </div>

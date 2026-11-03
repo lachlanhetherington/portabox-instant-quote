@@ -5,8 +5,6 @@ import {
   Warehouse,
   Truck,
   CheckCircle2,
-  MapPin,
-  Clock,
   CircleDollarSign,
   Info,
 } from 'lucide-react';
@@ -69,6 +67,7 @@ export const Step3LoadingLogistics: React.FC<Step3LoadingLogisticsProps> = ({
 
   const activeConfig = config || DEFAULT_CONFIG;
   const cCount = containerCount > 0 ? containerCount : 1;
+  const isFuelEnabled = activeConfig.fuelSurchargeEnabled !== false;
 
   // Origin exact savings: 1 delivery leg to customer + 1 delivery leg back to warehouse + fuel surcharge on each leg
   const originHub = getMetroHubForPostcode(originPostcode);
@@ -85,20 +84,23 @@ export const Step3LoadingLogistics: React.FC<Step3LoadingLogisticsProps> = ({
     oKm = Math.round(oDist * (originDeliveryZones.zoneARatePerKm ?? 0));
   } else if (oDist < (originDeliveryZones.zoneBMaxKm ?? 50)) {
     oZone = 'B';
-    oBase = originDeliveryZones.zoneBBaseFee ?? 199;
+    oBase = originDeliveryZones.zoneBBaseFee ?? 179;
     oKm = Math.round(oDist * (originDeliveryZones.zoneBRatePerKm ?? 0));
   } else if (oDist < (originDeliveryZones.zoneCMaxKm ?? 75)) {
     oZone = 'C';
-    oBase = originDeliveryZones.zoneCBaseFee ?? 249;
+    oBase = originDeliveryZones.zoneCBaseFee ?? 219;
     oKm = Math.round(oDist * (originDeliveryZones.zoneCRatePerKm ?? 0));
   } else if (oDist <= (originDeliveryZones.zoneDMaxKm ?? 100)) {
     oZone = 'D';
-    oBase = originDeliveryZones.zoneDBaseFee ?? 299;
+    oBase = originDeliveryZones.zoneDBaseFee ?? 249;
     oKm = Math.round(oDist * (originDeliveryZones.zoneDRatePerKm ?? 0));
   } else {
     oZone = 'E';
     oBase = originDeliveryZones.zoneEBaseFee ?? 249;
-    oKm = Math.round(oDist * (originDeliveryZones.zoneERatePerKm ?? 5.0));
+    const billableKm = oDist > (originDeliveryZones.zoneDMaxKm ?? 100)
+      ? (oDist - (originDeliveryZones.zoneDMaxKm ?? 100))
+      : oDist;
+    oKm = Math.round(billableKm * (originDeliveryZones.zoneERatePerKm ?? 5.0));
   }
 
   const oFuel = calculateLegFuelSurcharge({
@@ -109,7 +111,8 @@ export const Step3LoadingLogistics: React.FC<Step3LoadingLogisticsProps> = ({
   });
 
   const oneOriginLegDeliveryFee = oBase + oKm;
-  const oneOriginLegFuel = oFuel.ratePerContainer;
+  const oneOriginLegFuel = isFuelEnabled ? oFuel.ratePerContainer : 0;
+  // Inclusive of all charges: base leg fee, extra km charge, and fuel surcharge for 2 legs (delivery + pickup)
   const totalOriginSavings = (oneOriginLegDeliveryFee + oneOriginLegFuel) * 2 * cCount;
 
   // Destination exact savings (for destination unloading):
@@ -131,20 +134,23 @@ export const Step3LoadingLogistics: React.FC<Step3LoadingLogisticsProps> = ({
     dKm = Math.round(dDist * (destDeliveryZones.zoneARatePerKm ?? 0));
   } else if (dDist < (destDeliveryZones.zoneBMaxKm ?? 50)) {
     dZone = 'B';
-    dBase = destDeliveryZones.zoneBBaseFee ?? 199;
+    dBase = destDeliveryZones.zoneBBaseFee ?? 179;
     dKm = Math.round(dDist * (destDeliveryZones.zoneBRatePerKm ?? 0));
   } else if (dDist < (destDeliveryZones.zoneCMaxKm ?? 75)) {
     dZone = 'C';
-    dBase = destDeliveryZones.zoneCBaseFee ?? 249;
+    dBase = destDeliveryZones.zoneCBaseFee ?? 219;
     dKm = Math.round(dDist * (destDeliveryZones.zoneCRatePerKm ?? 0));
   } else if (dDist <= (destDeliveryZones.zoneDMaxKm ?? 100)) {
     dZone = 'D';
-    dBase = destDeliveryZones.zoneDBaseFee ?? 299;
+    dBase = destDeliveryZones.zoneDBaseFee ?? 249;
     dKm = Math.round(dDist * (destDeliveryZones.zoneDRatePerKm ?? 0));
   } else {
     dZone = 'E';
     dBase = destDeliveryZones.zoneEBaseFee ?? 249;
-    dKm = Math.round(dDist * (destDeliveryZones.zoneERatePerKm ?? 5.0));
+    const billableKm = dDist > (destDeliveryZones.zoneDMaxKm ?? 100)
+      ? (dDist - (destDeliveryZones.zoneDMaxKm ?? 100))
+      : dDist;
+    dKm = Math.round(billableKm * (destDeliveryZones.zoneERatePerKm ?? 5.0));
   }
 
   const dFuel = calculateLegFuelSurcharge({
@@ -155,33 +161,28 @@ export const Step3LoadingLogistics: React.FC<Step3LoadingLogisticsProps> = ({
   });
 
   const oneDestLegDeliveryFee = dBase + dKm;
-  const oneDestLegFuel = dFuel.ratePerContainer;
+  const oneDestLegFuel = isFuelEnabled ? dFuel.ratePerContainer : 0;
+  // Inclusive of all charges: base leg fee, extra km charge, and fuel surcharge for 2 legs (redelivery + final pickup)
   const totalDestSavings = (oneDestLegDeliveryFee + oneDestLegFuel) * 2 * cCount;
 
-  // Dynamic calculated savings for the configured options
+  // Dynamic calculated savings for the configured options:
+  // Reconciled exactly with the individual card badges and comprehensive legs
   const isOriginDepot = originLogisticsMethod === 'depot_loading';
   const isDestDepot = hasDestination && destinationLogisticsMethod === 'depot_loading';
 
-  const dynamicCalculatedSavings =
+  const totalAmountSaved =
     (isOriginDepot ? totalOriginSavings : 0) +
     (isDestDepot ? totalDestSavings : 0);
-
-  const totalAmountSaved = (legsSavedDollarTotal && legsSavedDollarTotal > 0)
-    ? legsSavedDollarTotal
-    : dynamicCalculatedSavings;
 
   return (
     <div className="bg-white rounded-3xl p-6 sm:p-8 lg:p-10 border border-slate-200/80 shadow-xs">
       {/* Header */}
       <div className="mb-8">
-        <span className="inline-flex items-center gap-1.5 text-xs font-black uppercase tracking-widest text-[#1A1A1A] bg-[#F7D347] border border-[#e6c338] px-2.5 py-0.5 rounded-md font-['Cabinet_Grotesk',sans-serif] mb-3">
-          STEP 3 OF 8 · LOADING &amp; UNLOADING OPTIONS
-        </span>
         <h2 className="text-2xl sm:text-3xl font-extrabold text-[#15385E] tracking-tight">
           Where would you like to load your container?
         </h2>
         <p className="mt-2 text-sm sm:text-base text-slate-600 max-w-2xl leading-relaxed">
-          Load at home for maximum convenience or bring your items directly to our location to save delivery charges.
+          Load at My Location for maximum convenience or bring your items directly to Portabox Location to save delivery charges.
         </p>
       </div>
 
@@ -194,32 +195,32 @@ export const Step3LoadingLogistics: React.FC<Step3LoadingLogisticsProps> = ({
           </h3>
         </div>
 
-        <div className={`grid grid-cols-1 ${serviceType !== 'storage_at_place' ? 'md:grid-cols-2' : 'max-w-xl'} gap-4`}>
+        <div className={`grid grid-cols-1 ${serviceType !== 'storage_at_place' ? 'md:grid-cols-2' : 'max-w-xl'} gap-4 items-stretch`}>
           {/* Option A: Home Delivery */}
           <div
             onClick={() => onSelectOriginLogistics('home_delivery')}
-            className={`p-5 rounded-2xl border-2 transition-all cursor-pointer flex flex-col justify-between ${
+            className={`p-5 sm:p-6 rounded-2xl border-2 transition-all cursor-pointer flex flex-col justify-between h-full ${
               originLogisticsMethod === 'home_delivery'
                 ? 'border-emerald-600 bg-emerald-50/40 ring-2 ring-emerald-600 shadow-sm'
                 : 'border-slate-200 bg-white hover:border-emerald-300'
             }`}
           >
             <div>
-              <div className="flex items-start justify-between gap-3 mb-3">
+              <div className="flex items-start justify-between gap-3 mb-2.5">
                 <div className="flex items-center gap-2.5">
-                  <div className={`w-9 h-9 rounded-xl flex items-center justify-center ${
+                  <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${
                     originLogisticsMethod === 'home_delivery' ? 'bg-emerald-600 text-white' : 'bg-slate-100 text-slate-600'
                   }`}>
                     <Truck className="w-5 h-5" />
                   </div>
                   <div>
                     <h4 className="text-sm sm:text-base font-bold text-slate-900">
-                      Deliver Container to My Home
+                      Deliver Container to My Location
                     </h4>
                     <span className="text-xs text-slate-500">Full-service delivery to {originPostcode.suburb}</span>
                   </div>
                 </div>
-                <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${
+                <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 mt-0.5 ${
                   originLogisticsMethod === 'home_delivery' ? 'border-emerald-600 bg-emerald-600' : 'border-slate-300'
                 }`}>
                   {originLogisticsMethod === 'home_delivery' && <div className="w-2 h-2 rounded-full bg-white" />}
@@ -232,20 +233,20 @@ export const Step3LoadingLogistics: React.FC<Step3LoadingLogisticsProps> = ({
             </div>
           </div>
 
-          {/* Option B: Load at Our Location */}
+          {/* Option B: Load at Portabox Location */}
           {serviceType !== 'storage_at_place' && (
             <div
               onClick={() => onSelectOriginLogistics('depot_loading')}
-              className={`p-5 rounded-2xl border-2 transition-all cursor-pointer flex flex-col justify-between relative ${
+              className={`p-5 sm:p-6 rounded-2xl border-2 transition-all cursor-pointer flex flex-col justify-between h-full ${
                 originLogisticsMethod === 'depot_loading'
                   ? 'border-[#15385E] bg-sky-50/40 ring-2 ring-[#15385E] shadow-sm'
                   : 'border-slate-200 bg-white hover:border-sky-300'
               }`}
             >
               <div>
-                <div className="flex items-start justify-between gap-3 mb-3">
+                <div className="flex items-start justify-between gap-3 mb-2.5">
                   <div className="flex items-center gap-2.5">
-                    <div className={`w-9 h-9 rounded-xl flex items-center justify-center ${
+                    <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${
                       originLogisticsMethod === 'depot_loading' ? 'bg-[#15385E] text-white' : 'bg-slate-100 text-slate-600'
                     }`}>
                       <Warehouse className="w-5 h-5" />
@@ -253,42 +254,27 @@ export const Step3LoadingLogistics: React.FC<Step3LoadingLogisticsProps> = ({
                     <div>
                       <div className="flex items-center gap-1.5 flex-wrap">
                         <h4 className="text-sm sm:text-base font-bold text-slate-900">
-                          Load at Our Location
+                          Load at Portabox Location
                         </h4>
                         <span className="bg-sky-100 text-[#15385E] border border-sky-200 text-[10px] font-black px-1.5 py-0.5 rounded">
                           SAVE ${totalOriginSavings}
                         </span>
                       </div>
-                      <span className="text-xs text-sky-800 font-semibold">{originDepot.name.replace(/\s*Depot/i, ' Location')}</span>
+                      <span className="text-xs text-sky-800 font-semibold">
+                        {originDepot.name.replace(/\s*Depot/i, ' Location')} ({originDepot.suburb})
+                      </span>
                     </div>
                   </div>
-                  <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${
+                  <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 mt-0.5 ${
                     originLogisticsMethod === 'depot_loading' ? 'border-[#15385E] bg-[#15385E]' : 'border-slate-300'
                   }`}>
                     {originLogisticsMethod === 'depot_loading' && <div className="w-2 h-2 rounded-full bg-white" />}
                   </div>
                 </div>
 
-                <p className="text-xs text-slate-600 mb-3 leading-relaxed">
-                  Bring your vehicle, ute, or hire van directly to our location and load directly into your container.
+                <p className="text-xs text-slate-600 leading-relaxed">
+                  Bring your vehicle, ute, or hire van directly to Portabox Location and load directly into your container.
                 </p>
-
-                {/* Location Info Card */}
-                <div className="p-3 bg-white rounded-xl border border-sky-200/80 space-y-1.5 text-xs">
-                  <div className="flex items-start gap-1.5 text-slate-700">
-                    <MapPin className="w-3.5 h-3.5 text-[#15385E] shrink-0 mt-0.5" />
-                    <span className="font-semibold">{originDepot.address}, {originDepot.suburb} {originDepot.state} {originDepot.postcode}</span>
-                  </div>
-                  {originDistanceKm !== undefined && (
-                    <div className="text-[11px] text-slate-500 pl-5">
-                      Approximately {originDistanceKm} km road driving from {originPostcode.suburb}
-                    </div>
-                  )}
-                  <div className="flex items-center gap-1.5 text-[11px] text-slate-500 pl-5">
-                    <Clock className="w-3 h-3 text-slate-400 shrink-0" />
-                    <span>Mon–Fri: 7:00 AM – 5:00 PM · Sat: 8:00 AM – 2:00 PM</span>
-                  </div>
-                </div>
               </div>
             </div>
           )}
@@ -307,34 +293,34 @@ export const Step3LoadingLogistics: React.FC<Step3LoadingLogisticsProps> = ({
             </h3>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-stretch">
             {/* Option A: Deliver Container to My Address */}
             <div
               onClick={() => onSelectDestinationLogistics('home_delivery')}
-              className={`p-5 rounded-2xl border-2 transition-all cursor-pointer flex flex-col justify-between ${
+              className={`p-5 sm:p-6 rounded-2xl border-2 transition-all cursor-pointer flex flex-col justify-between h-full ${
                 destinationLogisticsMethod === 'home_delivery'
                   ? 'border-emerald-600 bg-emerald-50/40 ring-2 ring-emerald-600 shadow-sm'
                   : 'border-slate-200 bg-white hover:border-emerald-300'
               }`}
             >
               <div>
-                <div className="flex items-start justify-between gap-3 mb-3">
+                <div className="flex items-start justify-between gap-3 mb-2.5">
                   <div className="flex items-center gap-2.5">
-                    <div className={`w-9 h-9 rounded-xl flex items-center justify-center ${
+                    <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${
                       destinationLogisticsMethod === 'home_delivery' ? 'bg-emerald-600 text-white' : 'bg-slate-100 text-slate-600'
                     }`}>
                       <Truck className="w-5 h-5" />
                     </div>
                     <div>
                       <h4 className="text-sm sm:text-base font-bold text-slate-900">
-                        {isStorageFacility ? 'Deliver Container to My Home' : 'Deliver Container to My New Address'}
+                        {isStorageFacility ? 'Deliver Container to My Location' : 'Deliver Container to My New Location'}
                       </h4>
                       <span className="text-xs text-slate-500">
                         {isStorageFacility ? `Redelivery to ${originPostcode.suburb}` : `Delivery to ${destSuburbLabel}`}
                       </span>
                     </div>
                   </div>
-                  <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${
+                  <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 mt-0.5 ${
                     destinationLogisticsMethod === 'home_delivery' ? 'border-emerald-600 bg-emerald-600' : 'border-slate-300'
                   }`}>
                     {destinationLogisticsMethod === 'home_delivery' && <div className="w-2 h-2 rounded-full bg-white" />}
@@ -349,19 +335,19 @@ export const Step3LoadingLogistics: React.FC<Step3LoadingLogisticsProps> = ({
               </div>
             </div>
 
-            {/* Option B: Unload at Our Location */}
+            {/* Option B: Unload at Portabox Location */}
             <div
               onClick={() => onSelectDestinationLogistics('depot_loading')}
-              className={`p-5 rounded-2xl border-2 transition-all cursor-pointer flex flex-col justify-between relative ${
+              className={`p-5 sm:p-6 rounded-2xl border-2 transition-all cursor-pointer flex flex-col justify-between h-full ${
                 destinationLogisticsMethod === 'depot_loading'
                   ? 'border-[#15385E] bg-sky-50/40 ring-2 ring-[#15385E] shadow-sm'
                   : 'border-slate-200 bg-white hover:border-sky-300'
               }`}
             >
               <div>
-                <div className="flex items-start justify-between gap-3 mb-3">
+                <div className="flex items-start justify-between gap-3 mb-2.5">
                   <div className="flex items-center gap-2.5">
-                    <div className={`w-9 h-9 rounded-xl flex items-center justify-center ${
+                    <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${
                       destinationLogisticsMethod === 'depot_loading' ? 'bg-[#15385E] text-white' : 'bg-slate-100 text-slate-600'
                     }`}>
                       <Warehouse className="w-5 h-5" />
@@ -369,37 +355,27 @@ export const Step3LoadingLogistics: React.FC<Step3LoadingLogisticsProps> = ({
                     <div>
                       <div className="flex items-center gap-1.5 flex-wrap">
                         <h4 className="text-sm sm:text-base font-bold text-slate-900">
-                          Unload at Our Location
+                          Unload at Portabox Location
                         </h4>
                         <span className="bg-sky-100 text-[#15385E] border border-sky-200 text-[10px] font-black px-1.5 py-0.5 rounded">
                           SAVE ${totalDestSavings}
                         </span>
                       </div>
-                      <span className="text-xs text-sky-800 font-semibold">{destDepotToUse.name.replace(/\s*Depot/i, ' Location')}</span>
+                      <span className="text-xs text-sky-800 font-semibold">
+                        {destDepotToUse.name.replace(/\s*Depot/i, ' Location')} ({destDepotToUse.suburb})
+                      </span>
                     </div>
                   </div>
-                  <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${
+                  <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 mt-0.5 ${
                     destinationLogisticsMethod === 'depot_loading' ? 'border-[#15385E] bg-[#15385E]' : 'border-slate-300'
                   }`}>
                     {destinationLogisticsMethod === 'depot_loading' && <div className="w-2 h-2 rounded-full bg-white" />}
                   </div>
                 </div>
 
-                <p className="text-xs text-slate-600 mb-3 leading-relaxed">
+                <p className="text-xs text-slate-600 leading-relaxed">
                   When your storage term ends, unpack at your pace directly into your vehicle.
                 </p>
-
-                {/* Location Info Card */}
-                <div className="p-3 bg-white rounded-xl border border-sky-200/80 space-y-1.5 text-xs">
-                  <div className="flex items-start gap-1.5 text-slate-700">
-                    <MapPin className="w-3.5 h-3.5 text-[#15385E] shrink-0 mt-0.5" />
-                    <span className="font-semibold">{destDepotToUse.address}, {destDepotToUse.suburb} {destDepotToUse.state}</span>
-                  </div>
-                  <div className="flex items-center gap-1.5 text-[11px] text-slate-500 pl-5">
-                    <Clock className="w-3 h-3 text-slate-400 shrink-0" />
-                    <span>Mon–Fri: 7:00 AM – 5:00 PM · Sat: 8:00 AM – 2:00 PM</span>
-                  </div>
-                </div>
               </div>
             </div>
           </div>
@@ -409,13 +385,12 @@ export const Step3LoadingLogistics: React.FC<Step3LoadingLogisticsProps> = ({
       {/* Summary Recap Box */}
       <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 text-slate-800 text-xs sm:text-sm mb-8 flex flex-col md:flex-row items-start md:items-center justify-between gap-3 shadow-2xs">
         <div className="flex-1">
-          <span className="font-black text-[#15385E]">Configured Logistics: </span>
           <span className="font-semibold text-slate-700">
-            {originLogisticsMethod === 'depot_loading' ? 'Self-load at Our Location' : 'Home Delivery'}
+            {originLogisticsMethod === 'depot_loading' ? 'Self-load at Portabox Location' : 'Delivery to My Location'}
             {' → '}
             {hasDestination
-              ? (destinationLogisticsMethod === 'depot_loading' ? 'Self-unload at Our Location' : 'Home Delivery')
-              : 'Container Stays at Home'}
+              ? (destinationLogisticsMethod === 'depot_loading' ? 'Self-unload at Portabox Location' : 'Delivery to My Location')
+              : 'Container Stays at My Location'}
           </span>
         </div>
         <div className="shrink-0">

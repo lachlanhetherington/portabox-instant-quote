@@ -3,6 +3,7 @@ import {
   findClosestDepot,
   AUSTRALIAN_POSTCODES,
   DepotLocation,
+  PostcodeRecord,
 } from '../data/australianPostcodes';
 
 /**
@@ -289,35 +290,62 @@ export interface LocationHoursStatus {
 }
 
 export function getLocationBusinessHoursStatus(
-  locationIdOrPostcode?: string | DepotLocation | null,
+  locationIdOrPostcode?: string | DepotLocation | PostcodeRecord | null,
   locationMap?: Record<string, LocationServiceHoursConfig>,
   globalConfig?: BusinessHoursConfig
 ): LocationHoursStatus {
   const map = locationMap || DEFAULT_LOCATION_SERVICE_HOURS;
-  let targetDepotId = 'sydney'; // default fallback
+  let targetDepotId = 'adelaide'; // Default to Adelaide (Portabox primary depot)
 
   if (locationIdOrPostcode) {
-    if (typeof locationIdOrPostcode === 'object' && 'id' in locationIdOrPostcode) {
-      targetDepotId = locationIdOrPostcode.id;
+    if (typeof locationIdOrPostcode === 'object') {
+      if ('id' in locationIdOrPostcode && locationIdOrPostcode.id && map[String(locationIdOrPostcode.id).toLowerCase()]) {
+        targetDepotId = String(locationIdOrPostcode.id).toLowerCase();
+      } else if ('lat' in locationIdOrPostcode && 'lng' in locationIdOrPostcode && typeof locationIdOrPostcode.lat === 'number') {
+        const closest = findClosestDepot(
+          locationIdOrPostcode.lat,
+          locationIdOrPostcode.lng,
+          'postcode' in locationIdOrPostcode ? String(locationIdOrPostcode.postcode) : undefined
+        );
+        targetDepotId = closest.depot.id;
+      } else if ('state' in locationIdOrPostcode) {
+        const st = String((locationIdOrPostcode as any).state).toUpperCase();
+        if (st === 'SA') targetDepotId = 'adelaide';
+        else if (st === 'VIC') targetDepotId = 'melbourne';
+        else if (st === 'QLD') targetDepotId = 'brisbane';
+        else targetDepotId = 'sydney';
+      }
     } else {
       const query = String(locationIdOrPostcode).trim().toLowerCase();
-      // If it matches a known depot id
       if (map[query]) {
         targetDepotId = query;
+      } else if (query.includes('adelaide') || query.includes('edinburgh') || query.includes('hyde park') || query.includes('5061')) {
+        targetDepotId = 'adelaide';
+      } else if (query.includes('melbourne') || query.includes('laverton')) {
+        targetDepotId = 'melbourne';
+      } else if (query.includes('brisbane') || query.includes('gilberton') || query.includes('gold coast')) {
+        targetDepotId = 'brisbane';
+      } else if (query.includes('sydney') || query.includes('blacktown')) {
+        targetDepotId = 'sydney';
       } else {
-        // Try extracting 4-digit postcode
+        // Extract 4-digit postcode if present
         const pcMatch = query.match(/\b\d{4}\b/);
-        const pc = pcMatch ? pcMatch[0] : query;
-        const found = AUSTRALIAN_POSTCODES.find((p) => p.postcode === pc);
+        const pc = pcMatch ? pcMatch[0] : '';
+        const found = AUSTRALIAN_POSTCODES.find((p) =>
+          (pc && p.postcode === pc) ||
+          p.suburb.toLowerCase() === query ||
+          query.includes(p.suburb.toLowerCase()) ||
+          p.suburb.toLowerCase().includes(query)
+        );
         if (found) {
           const closest = findClosestDepot(found.lat, found.lng, found.postcode);
           targetDepotId = closest.depot.id;
-        } else {
+        } else if (pc) {
           const pcNum = parseInt(pc, 10);
           if (pcNum >= 5000 && pcNum <= 5999) targetDepotId = 'adelaide';
           else if (pcNum >= 3000 && pcNum <= 3999) targetDepotId = 'melbourne';
           else if (pcNum >= 4000 && pcNum <= 4999) targetDepotId = 'brisbane';
-          else targetDepotId = 'sydney';
+          else if (pcNum >= 2000 && pcNum <= 2999) targetDepotId = 'sydney';
         }
       }
     }
@@ -326,6 +354,7 @@ export function getLocationBusinessHoursStatus(
   const depotConfig =
     map[targetDepotId] ||
     DEFAULT_LOCATION_SERVICE_HOURS[targetDepotId] ||
+    DEFAULT_LOCATION_SERVICE_HOURS['adelaide'] ||
     DEFAULT_LOCATION_SERVICE_HOURS['sydney'];
 
   // Check status using depotConfig
