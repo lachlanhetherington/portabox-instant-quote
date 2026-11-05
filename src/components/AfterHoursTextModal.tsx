@@ -18,6 +18,11 @@ import {
   saveAfterHoursMessage,
 } from '../services/businessHoursService';
 import { PostcodeTierEvaluation } from '../services/postcodeServiceTierEngine';
+import {
+  isValidAustralianMobile,
+  getAustralianMobileValidationError,
+  formatAustralianMobile,
+} from '../utils/phoneValidation';
 
 interface AfterHoursTextModalProps {
   isOpen: boolean;
@@ -86,7 +91,11 @@ export const AfterHoursTextModal: React.FC<AfterHoursTextModalProps> = ({
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!mobile.trim()) {
-      setError('Please provide your mobile number so we can text or call you back.');
+      setError('Please provide your Australian mobile number so we can text or call you back.');
+      return;
+    }
+    if (!isValidAustralianMobile(mobile)) {
+      setError(getAustralianMobileValidationError(mobile) || 'Please enter a valid Australian mobile number (e.g. 0412 345 678).');
       return;
     }
     if (!message.trim()) {
@@ -94,13 +103,16 @@ export const AfterHoursTextModal: React.FC<AfterHoursTextModalProps> = ({
       return;
     }
 
+    const formattedMobile = formatAustralianMobile(mobile);
+    setMobile(formattedMobile);
+
     setIsSubmitting(true);
     setError(null);
 
     try {
       saveAfterHoursMessage({
         customerName: name.trim() || 'Portabox Customer',
-        customerMobile: mobile.trim(),
+        customerMobile: formattedMobile,
         message: message.trim(),
         suburbOrPostcode: suburb.trim() || undefined,
         source,

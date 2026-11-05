@@ -307,8 +307,8 @@ export const Step2What: React.FC<Step2WhatProps> = ({
           <div>
             <div className="aspect-[4/3] rounded-xl overflow-hidden bg-slate-100 mb-4 relative border border-[#DAD7D1]">
               <img
-                src={PORTABOX_IMAGES.storage}
-                alt="Portabox storage customers"
+                src={storagePlacement === 'my_place' ? PORTABOX_IMAGES.movingAndStorage : PORTABOX_IMAGES.storage}
+                alt={storagePlacement === 'my_place' ? 'Portabox on-site storage at your location' : 'Portabox storage facility'}
                 referrerPolicy="no-referrer"
                 className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
               />

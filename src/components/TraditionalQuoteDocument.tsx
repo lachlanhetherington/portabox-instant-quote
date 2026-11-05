@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   FileText,
   ShieldCheck,
@@ -13,8 +13,17 @@ import {
   Mail,
   Building,
   Download,
+  ArrowRight,
+  MessageSquare,
+  Smartphone,
+  Send,
+  Check,
+  Copy,
+  X,
+  Sparkles,
 } from 'lucide-react';
 import { QuoteBreakdown } from '../types/quote';
+import { formatMoney } from '../utils/currency';
 
 interface TraditionalQuoteDocumentProps {
   quote: QuoteBreakdown;
@@ -34,6 +43,10 @@ export const TraditionalQuoteDocument: React.FC<TraditionalQuoteDocumentProps> =
   phone = '1800 467 637',
   onBookNow,
 }) => {
+  const [isMessageModalOpen, setIsMessageModalOpen] = useState(false);
+  const [copiedMessage, setCopiedMessage] = useState(false);
+  const [inquirySent, setInquirySent] = useState(false);
+
   const quoteRef = `PBQ-${(quote.quoteCreatedAt ? new Date(quote.quoteCreatedAt).getTime() : Date.now()).toString().slice(-6)}`;
   const issueDateStr = quote.quoteCreatedAt
     ? new Date(quote.quoteCreatedAt).toLocaleDateString('en-AU', {
@@ -147,17 +160,18 @@ export const TraditionalQuoteDocument: React.FC<TraditionalQuoteDocumentProps> =
 
         <div className="space-y-1">
           <span className="text-[10px] font-black uppercase text-slate-400 tracking-wider block">
-            LOCATION &amp; SCHEDULE
+            LOCATION &amp; SERVICING DEPOT
           </span>
           <p className="text-sm font-black text-[#15385E]">
             {quote.originPostcode.suburb}, {quote.originPostcode.state} {quote.originPostcode.postcode}
           </p>
           <p className="text-slate-600">
-            Delivery Date: <span className="font-bold text-slate-900">{quote.preferredDate}</span>
-          </p>
-          <p className="text-slate-600">
             Servicing Facility: <span className="font-medium text-slate-900">{quote.originDepot.name}</span>
           </p>
+          <div className="mt-1.5 pt-1.5 border-t border-slate-200/80 flex items-center gap-1.5 text-[11px] text-[#00a9d7] font-bold">
+            <Clock className="w-3.5 h-3.5 shrink-0" />
+            <span>Delivery window &amp; date selected in Next Steps upon booking</span>
+          </div>
         </div>
       </div>
 
@@ -197,10 +211,10 @@ export const TraditionalQuoteDocument: React.FC<TraditionalQuoteDocumentProps> =
                     {leg.containerCount || quote.containerCount} container{quote.containerCount > 1 ? 's' : ''}
                   </td>
                   <td className="py-3 px-4 text-right font-mono">
-                    ${leg.feePerContainer || leg.fee}
+                    ${formatMoney(leg.feePerContainer || leg.fee)}
                   </td>
                   <td className="py-3 px-4 text-right font-mono font-bold text-slate-900">
-                    ${leg.fee}
+                    ${formatMoney(leg.fee)}
                   </td>
                 </tr>
               ))}
@@ -222,7 +236,7 @@ export const TraditionalQuoteDocument: React.FC<TraditionalQuoteDocumentProps> =
                     $0 (Free)
                   </td>
                   <td className="py-3 px-4 text-right font-mono font-bold text-emerald-700">
-                    $0 {wLeg.waivedSavings ? `(-$${wLeg.waivedSavings})` : ''}
+                    $0 {wLeg.waivedSavings ? `(-$${formatMoney(wLeg.waivedSavings)})` : ''}
                   </td>
                 </tr>
               ))}
@@ -266,7 +280,7 @@ export const TraditionalQuoteDocument: React.FC<TraditionalQuoteDocumentProps> =
                   </p>
                   {quote.durationDiscountPercent && quote.durationDiscountPercent > 0 && (
                     <span className="inline-block mt-1 text-[10px] font-black text-emerald-800 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded">
-                      ✓ {quote.durationDiscountPercent}% Duration Discount Applied (-${durationDiscountAud}/mo)
+                      ✓ {quote.durationDiscountPercent}% Duration Discount Applied (-${formatMoney(durationDiscountAud)}/mo)
                     </span>
                   )}
                 </td>
@@ -275,13 +289,13 @@ export const TraditionalQuoteDocument: React.FC<TraditionalQuoteDocumentProps> =
                 </td>
                 <td className="py-3 px-4 text-right font-mono text-slate-400">
                   {durationDiscountAud > 0 ? (
-                    <span className="line-through">${baseMonthlyRate}/mo</span>
+                    <span className="line-through">${formatMoney(baseMonthlyRate)}/mo</span>
                   ) : (
-                    `$${baseMonthlyRate}/mo`
+                    `$${formatMoney(baseMonthlyRate)}/mo`
                   )}
                 </td>
                 <td className="py-3 px-4 text-right font-mono font-bold text-slate-900">
-                  ${monthlyStorageRate} /month
+                  ${formatMoney(monthlyStorageRate)} /month
                 </td>
               </tr>
             </tbody>
@@ -331,7 +345,7 @@ export const TraditionalQuoteDocument: React.FC<TraditionalQuoteDocumentProps> =
                     {quote.packingSupplies.blanketsPrice === 0 ? (
                       <span className="text-emerald-700 font-bold">$0 (100% Free)</span>
                     ) : (
-                      `$${quote.packingSupplies.blanketsPrice}`
+                      `$${formatMoney(quote.packingSupplies.blanketsPrice)}`
                     )}
                   </td>
                 </tr>
@@ -350,13 +364,13 @@ export const TraditionalQuoteDocument: React.FC<TraditionalQuoteDocumentProps> =
                     {quote.packingSupplies.locksCount} padlock{quote.packingSupplies.locksCount > 1 ? 's' : ''}
                   </td>
                   <td className="py-2.5 px-4 text-right font-mono text-slate-600">
-                    ${quote.packingSupplies.lockUnitPrice || 20} each
+                    ${formatMoney(quote.packingSupplies.lockUnitPrice || 20)} each
                   </td>
                   <td className="py-2.5 px-4 text-right font-mono font-bold text-slate-900">
                     {quote.packingSupplies.isLockFreePromo ? (
                       <span className="text-emerald-700 font-bold">$0 (Free Promo)</span>
                     ) : (
-                      `$${quote.packingSupplies.locksPrice}`
+                      `$${formatMoney(quote.packingSupplies.locksPrice)}`
                     )}
                   </td>
                 </tr>
@@ -378,7 +392,7 @@ export const TraditionalQuoteDocument: React.FC<TraditionalQuoteDocumentProps> =
                     Bundle Rate
                   </td>
                   <td className="py-2.5 px-4 text-right font-mono font-bold text-slate-900">
-                    ${quote.packingSupplies.boxesPrice}
+                    ${formatMoney(quote.packingSupplies.boxesPrice)}
                   </td>
                 </tr>
               )}
@@ -396,13 +410,13 @@ export const TraditionalQuoteDocument: React.FC<TraditionalQuoteDocumentProps> =
                     {quote.containerCount} container{quote.containerCount > 1 ? 's' : ''} (Monthly)
                   </td>
                   <td className="py-2.5 px-4 text-right font-mono text-slate-600">
-                    ${quote.insurance.monthlyPricePerContainer || 15}/mo
+                    ${formatMoney(quote.insurance.monthlyPricePerContainer || 15)}/mo
                   </td>
                   <td className="py-2.5 px-4 text-right font-mono font-bold text-slate-900">
                     {quote.insurance.isFreePromo ? (
                       <span className="text-emerald-700 font-bold">$0 (Free Promo)</span>
                     ) : (
-                      `$${quote.insurance.totalMonthlyInsuranceFee} /mo`
+                      `$${formatMoney(quote.insurance.totalMonthlyInsuranceFee)} /mo`
                     )}
                   </td>
                 </tr>
@@ -439,11 +453,11 @@ export const TraditionalQuoteDocument: React.FC<TraditionalQuoteDocumentProps> =
           <div className="w-full sm:w-80 bg-[#15385E] text-white p-5 rounded-2xl shadow-lg space-y-2.5">
             <div className="flex items-center justify-between text-xs text-sky-200">
               <span>First Payment Net (ex-GST):</span>
-              <span className="font-mono font-bold">${netUpfrontBeforeGst.toFixed(2)}</span>
+              <span className="font-mono font-bold">${formatMoney(netUpfrontBeforeGst, true)}</span>
             </div>
             <div className="flex items-center justify-between text-xs text-sky-200">
               <span>GST Included (10%):</span>
-              <span className="font-mono font-bold">${gstUpfrontComponent.toFixed(2)}</span>
+              <span className="font-mono font-bold">${formatMoney(gstUpfrontComponent, true)}</span>
             </div>
 
             <div className="pt-2 border-t border-sky-800 flex items-baseline justify-between">
@@ -454,7 +468,7 @@ export const TraditionalQuoteDocument: React.FC<TraditionalQuoteDocumentProps> =
                 <span className="text-[10px] text-slate-300">Due at booking (incl. delivery)</span>
               </div>
               <span className="font-mono text-2xl font-black text-white">
-                ${upfrontPayable}
+                ${formatMoney(upfrontPayable, true)}
               </span>
             </div>
 
@@ -464,7 +478,7 @@ export const TraditionalQuoteDocument: React.FC<TraditionalQuoteDocumentProps> =
                 <span className="text-[10px] text-slate-300">Commences month 2 (12-mo freeze)</span>
               </div>
               <span className="font-mono font-extrabold text-[#F7D347] text-base">
-                ${recurringMonthlyTotal} /mo
+                ${formatMoney(recurringMonthlyTotal, recurringMonthlyTotal % 1 !== 0)} /mo
               </span>
             </div>
           </div>
@@ -472,32 +486,241 @@ export const TraditionalQuoteDocument: React.FC<TraditionalQuoteDocumentProps> =
       </div>
 
       {/* 5. WHEN YOU'RE READY TO BOOK SECTION */}
-      <div className="p-6 rounded-2xl bg-slate-50 border-2 border-[#15385E]/20 space-y-3 print:bg-white print:border-slate-300">
-        <h4 className="text-sm font-black text-[#15385E] uppercase tracking-wider flex items-center gap-2">
-          <Phone className="w-4 h-4 text-[#00a9d7]" />
-          <span>When you're ready to book:</span>
-        </h4>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
-          <div className="flex items-start gap-3 p-4 rounded-xl bg-white border border-slate-200 shadow-2xs">
-            <span className="w-6 h-6 rounded-full bg-[#15385E] text-[#F7D347] font-black text-xs flex items-center justify-center shrink-0">1</span>
-            <div>
-              <p className="font-extrabold text-[#15385E] text-sm">Call Our Team</p>
-              <p className="text-slate-600 mt-1">
-                Call <a href={`tel:${phone.replace(/\s+/g, '')}`} className="font-black text-[#15385E] underline hover:text-[#00a9d7]">{phone}</a> to speak directly with our dispatch team.
+      <div className="p-6 rounded-2xl bg-slate-50 border-2 border-[#15385E]/20 space-y-4 print:bg-white print:border-slate-300">
+        <div className="flex items-center justify-between flex-wrap gap-2">
+          <h4 className="text-sm font-black text-[#15385E] uppercase tracking-wider flex items-center gap-2">
+            <Phone className="w-4 h-4 text-[#00a9d7]" />
+            <span>When you're ready to book:</span>
+          </h4>
+          <span className="text-[11px] font-semibold text-slate-500">
+            Quote Ref: <span className="font-mono font-bold text-[#15385E]">{quoteRef}</span>
+          </span>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3.5 text-xs">
+          {/* Option 1: Call Our Team */}
+          <div className="flex flex-col justify-between p-4 rounded-2xl bg-white border border-slate-200 shadow-2xs hover:border-slate-300 transition-all">
+            <div className="space-y-2">
+              <div className="flex items-center gap-2">
+                <span className="w-6 h-6 rounded-full bg-[#15385E] text-[#F7D347] font-black text-xs flex items-center justify-center shrink-0">1</span>
+                <p className="font-extrabold text-[#15385E] text-sm">Call Our Team</p>
+              </div>
+              <p className="text-slate-600 text-[11px] leading-relaxed">
+                Speak directly with our team to book over the phone and we will get you booked.
               </p>
             </div>
+            <div className="pt-3 mt-3 border-t border-slate-100">
+              <a
+                href={`tel:${phone.replace(/\s+/g, '')}`}
+                className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-[#15385E] font-bold text-xs transition-colors"
+              >
+                <Phone className="w-3.5 h-3.5 text-[#00a9d7]" />
+                <span>Call {phone}</span>
+              </a>
+            </div>
           </div>
-          <div className="flex items-start gap-3 p-4 rounded-xl bg-white border border-slate-200 shadow-2xs">
-            <span className="w-6 h-6 rounded-full bg-[#15385E] text-[#F7D347] font-black text-xs flex items-center justify-center shrink-0">2</span>
-            <div>
-              <p className="font-extrabold text-[#15385E] text-sm">Request Booking Form</p>
-              <p className="text-slate-600 mt-1">
-                Send an email to <a href="mailto:quotes@portabox.au" className="font-black text-[#15385E] underline hover:text-[#00a9d7]">quotes@portabox.au</a> and request a booking form to start the process.
+
+          {/* Option 2: Message us when you are ready to book - HIGHLIGHTED */}
+          <div className="relative flex flex-col justify-between p-4 rounded-2xl bg-gradient-to-br from-amber-50 via-yellow-50/70 to-amber-100/40 border-2 border-[#F7D347] shadow-sm ring-2 ring-[#F7D347]/30">
+            {/* Highlighted Ribbon Badge */}
+            <div className="absolute -top-2.5 right-3">
+              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-[#15385E] text-[#F7D347] text-[10px] font-black uppercase tracking-wider shadow-xs">
+                <Sparkles className="w-3 h-3 text-[#F7D347]" />
+                <span>Fastest · Highlighted</span>
+              </span>
+            </div>
+
+            <div className="space-y-2 pt-0.5">
+              <div className="flex items-center gap-2">
+                <span className="w-6 h-6 rounded-full bg-[#F7D347] text-[#15385E] font-black text-xs flex items-center justify-center shrink-0 shadow-2xs">2</span>
+                <p className="font-black text-[#15385E] text-sm">
+                  Message us when you are ready to book
+                </p>
+              </div>
+              <p className="text-slate-700 text-[11px] leading-relaxed font-medium">
+                Send an SMS or instant booking message with Quote Ref <strong className="font-mono text-[#15385E]">{quoteRef}</strong>. We confirm your date &amp; delivery window.
               </p>
+            </div>
+
+            <div className="pt-3 mt-3 border-t border-amber-200/80 flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setIsMessageModalOpen(true)}
+                className="flex-1 inline-flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl bg-[#15385E] hover:bg-[#1d4b7a] text-white font-extrabold text-xs shadow-xs transition-transform active:scale-95 cursor-pointer"
+              >
+                <MessageSquare className="w-3.5 h-3.5 text-[#F7D347]" />
+                <span>Message Us Now</span>
+              </button>
+              <a
+                href={`sms:0488883637?&body=${encodeURIComponent(`Hi Portabox team, I am ready to book quote ${quoteRef} for ${customerName}. Please confirm my delivery window.`)}`}
+                className="inline-flex items-center justify-center p-2 rounded-xl bg-white hover:bg-amber-100 text-[#15385E] border border-amber-300 font-bold transition-colors shrink-0"
+                title="Send SMS from mobile"
+              >
+                <Smartphone className="w-4 h-4 text-emerald-700" />
+              </a>
+            </div>
+          </div>
+
+          {/* Option 3: Request Booking Form */}
+          <div className="flex flex-col justify-between p-4 rounded-2xl bg-white border border-slate-200 shadow-2xs hover:border-slate-300 transition-all">
+            <div className="space-y-2">
+              <div className="flex items-center gap-2">
+                <span className="w-6 h-6 rounded-full bg-[#15385E] text-[#F7D347] font-black text-xs flex items-center justify-center shrink-0">3</span>
+                <p className="font-extrabold text-[#15385E] text-sm">Request Booking Form</p>
+              </div>
+              <p className="text-slate-600 text-[11px] leading-relaxed">
+                Send us an email and we will confirm a date and delivery window.
+              </p>
+            </div>
+            <div className="pt-3 mt-3 border-t border-slate-100">
+              <a
+                href={`mailto:quotes@portabox.au?subject=${encodeURIComponent(`Booking Form Request - ${quoteRef} (${customerName})`)}&body=${encodeURIComponent(`Hi Portabox,\n\nPlease send through the booking form for Quote ${quoteRef}.\n\nCustomer: ${customerName}\nPhone: ${customerMobile}\nEmail: ${customerEmail}\n\nThank you!`)}`}
+                className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-[#15385E] font-bold text-xs transition-colors"
+              >
+                <Mail className="w-3.5 h-3.5 text-[#00a9d7]" />
+                <span>Email quotes@portabox.au</span>
+              </a>
             </div>
           </div>
         </div>
       </div>
+
+      {/* Message Us to Book Modal */}
+      {isMessageModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-150">
+          <div className="bg-white rounded-3xl max-w-lg w-full p-6 sm:p-7 shadow-2xl border-2 border-slate-200 space-y-4">
+            <div className="flex items-start justify-between gap-3 pb-3 border-b border-slate-200">
+              <div className="flex items-center gap-2.5">
+                <div className="w-10 h-10 rounded-2xl bg-[#15385E] text-[#F7D347] flex items-center justify-center shadow-xs">
+                  <MessageSquare className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-black text-[#15385E]">Message Us to Book</h3>
+                  <p className="text-xs text-slate-500 font-medium">
+                    Portabox Dispatch &amp; Booking Desk · Fast Response
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsMessageModalOpen(false);
+                  setInquirySent(false);
+                }}
+                className="p-1.5 rounded-xl hover:bg-slate-100 text-slate-400 hover:text-slate-700 cursor-pointer transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {inquirySent ? (
+              <div className="p-5 rounded-2xl bg-emerald-50 border-2 border-emerald-300 text-emerald-950 space-y-2 text-center animate-in zoom-in-95">
+                <div className="w-12 h-12 rounded-full bg-emerald-600 text-white flex items-center justify-center mx-auto shadow-sm">
+                  <Check className="w-6 h-6" />
+                </div>
+                <h4 className="text-base font-black">Message Sent Successfully!</h4>
+                <p className="text-xs text-emerald-800 leading-relaxed">
+                  Your booking request for <strong>{quoteRef}</strong> has been received by Portabox Dispatch. Our team will contact you at <strong>{customerMobile}</strong> shortly to finalize your delivery date and container placement.
+                </p>
+                <div className="pt-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsMessageModalOpen(false);
+                      setInquirySent(false);
+                    }}
+                    className="px-5 py-2 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-black cursor-pointer shadow-xs transition-colors"
+                  >
+                    Done
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                <div className="p-3.5 rounded-2xl bg-amber-50/80 border border-amber-200 text-xs space-y-1.5">
+                  <div className="flex items-center justify-between text-slate-700">
+                    <span className="font-semibold">Quotation Reference:</span>
+                    <span className="font-mono font-black text-[#15385E]">{quoteRef}</span>
+                  </div>
+                  <div className="flex items-center justify-between text-slate-700">
+                    <span className="font-semibold">Customer:</span>
+                    <span className="font-bold text-slate-900">{customerName}</span>
+                  </div>
+                  <div className="flex items-center justify-between text-slate-700">
+                    <span className="font-semibold">Mobile:</span>
+                    <span className="font-mono font-bold text-slate-900">{customerMobile}</span>
+                  </div>
+                  <div className="flex items-center justify-between text-slate-700">
+                    <span className="font-semibold">Service:</span>
+                    <span className="font-medium text-slate-900">{quote.containerName || 'Portabox Container'}</span>
+                  </div>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="block text-xs font-black text-[#15385E] uppercase tracking-wider">
+                    Booking Message
+                  </label>
+                  <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-800 font-mono leading-relaxed select-all">
+                    {`Hi Portabox team, I am ready to book quote ${quoteRef} (${customerName}). Phone: ${customerMobile}. Please lock in my container and contact me to confirm delivery.`}
+                  </div>
+                </div>
+
+                <div className="flex flex-col sm:flex-row gap-2.5 pt-1">
+                  <a
+                    href={`sms:0488883637?&body=${encodeURIComponent(`Hi Portabox team, I am ready to book quote ${quoteRef} (${customerName}). Phone: ${customerMobile}. Please lock in my container and contact me to confirm delivery.`)}`}
+                    className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-[#15385E] hover:bg-[#1d4b7a] text-white font-black text-xs shadow-xs transition-colors"
+                  >
+                    <Smartphone className="w-4 h-4 text-[#F7D347]" />
+                    <span>Open SMS on Phone</span>
+                  </a>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const text = `Hi Portabox team, I am ready to book quote ${quoteRef} (${customerName}). Phone: ${customerMobile}. Please lock in my container and contact me to confirm delivery.`;
+                      navigator.clipboard.writeText(text);
+                      setCopiedMessage(true);
+                      setTimeout(() => setCopiedMessage(false), 2500);
+                    }}
+                    className="inline-flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 font-bold text-xs transition-colors cursor-pointer"
+                  >
+                    {copiedMessage ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+                    <span>{copiedMessage ? 'Copied!' : 'Copy Text'}</span>
+                  </button>
+                </div>
+
+                <div className="pt-2 border-t border-slate-200">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setInquirySent(true);
+                      // Notify Smartsheet / dispatch log
+                      window.dispatchEvent(
+                        new CustomEvent('portabox-quote-inquiry-sent', {
+                          detail: {
+                            quoteRef,
+                            customerName,
+                            customerMobile,
+                            customerEmail,
+                            timestamp: new Date().toISOString(),
+                          },
+                        })
+                      );
+                    }}
+                    className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white font-black text-xs shadow-sm transition-all cursor-pointer"
+                  >
+                    <Send className="w-4 h-4 text-[#F7D347]" />
+                    <span>Send Online Booking Request to Dispatch Desk</span>
+                  </button>
+                  <p className="text-[11px] text-slate-400 text-center mt-1.5">
+                    Our team typically responds in under 15 minutes during operating hours.
+                  </p>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 };

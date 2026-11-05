@@ -7,6 +7,7 @@ import {
   getMetroHubForPostcode,
   getDurationDiscount,
 } from '../services/pricingEngine';
+import { formatMoney } from '../utils/currency';
 import { AreYouStuckBanner } from './AreYouStuckBanner';
 
 interface Step4WhenProps {
@@ -337,29 +338,29 @@ export const Step4When: React.FC<Step4WhenProps> = ({
               <div className="text-base font-extrabold text-[#15385E] font-mono">
                 {isTwoWeeksSelected ? (
                   <>
-                    ${twoWeeksTotalFee}<span className="text-xs font-normal text-slate-500"> / 2 wks</span>
+                    ${formatMoney(twoWeeksTotalFee)}<span className="text-xs font-normal text-slate-500"> / 2 wks</span>
                   </>
                 ) : durationDiscountPct > 0 ? (
                   <>
                     <span className="line-through text-slate-400 text-xs font-normal mr-1.5 font-mono">
-                      ${monthlyRate}
+                      ${formatMoney(monthlyRate)}
                     </span>
                     <span className="text-emerald-700 font-extrabold font-mono">
-                      ${discountedMonthlyRate}
+                      ${formatMoney(discountedMonthlyRate)}
                     </span>
                     <span className="text-xs font-normal text-slate-500">/mo</span>
                   </>
                 ) : (
                   <>
-                    ${monthlyRate}<span className="text-xs font-normal text-slate-500">/mo</span>
+                    ${formatMoney(monthlyRate)}<span className="text-xs font-normal text-slate-500">/mo</span>
                   </>
                 )}
               </div>
               <span className="text-[11px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
                 {isTwoWeeksSelected
-                  ? `Standard rate ($${twoWeeksRatePerContainer}/container for 2 weeks) · Cancel anytime with 1 day notice`
+                  ? `Standard rate ($${formatMoney(twoWeeksRatePerContainer)}/container for 2 weeks) · Cancel anytime with 1 day notice`
                   : durationDiscountPct > 0
-                  ? `Save $${durationDiscountDollars}/mo (${durationDiscountPct}% duration discount) · Cancel anytime with 1 day notice`
+                  ? `Save $${formatMoney(durationDiscountDollars)}/mo (${durationDiscountPct}% duration discount) · Cancel anytime with 1 day notice`
                   : 'Cancel anytime with 1 day notice'}
               </span>
             </div>

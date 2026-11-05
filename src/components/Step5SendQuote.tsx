@@ -12,6 +12,11 @@ import {
 } from 'lucide-react';
 import { QuoteBreakdown } from '../types/quote';
 import { AreYouStuckBanner } from './AreYouStuckBanner';
+import {
+  isValidAustralianMobile,
+  getAustralianMobileValidationError,
+  formatAustralianMobile,
+} from '../utils/phoneValidation';
 
 interface Step5SendQuoteProps {
   quote: QuoteBreakdown;
@@ -67,21 +72,26 @@ export const Step5SendQuote: React.FC<Step5SendQuoteProps> = ({
     if (hasNoPhoneOrEmail) return true;
     const newErrors: { email?: string; mobile?: string } = {};
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    const phoneClean = mobile.replace(/[\s\-\(\)]/g, '');
     const hasEmail = Boolean(email.trim());
-    const hasMobile = Boolean(phoneClean && phoneClean.length >= 8);
+    const hasMobileInput = Boolean(mobile.trim());
 
-    // Accept either Email OR Mobile Phone per CEO requirements
-    if (!hasEmail && !hasMobile) {
+    // 1. When a phone number is entered, it MUST be a valid Australian mobile number
+    if (hasMobileInput) {
+      const mobileError = getAustralianMobileValidationError(mobile);
+      if (mobileError) {
+        newErrors.mobile = mobileError;
+      }
+    }
+
+    // 2. Validate email format if provided
+    if (hasEmail && !emailRegex.test(email.trim())) {
+      newErrors.email = 'Please enter a valid email address';
+    }
+
+    // 3. User must provide at least one valid contact channel (email or mobile)
+    if (!hasEmail && !hasMobileInput) {
       newErrors.email = 'Please enter an email address or mobile phone to receive your quote.';
-      newErrors.mobile = 'Please enter a mobile phone or email address to receive your quote.';
-    } else {
-      if (hasEmail && !emailRegex.test(email.trim())) {
-        newErrors.email = 'Please enter a valid email address';
-      }
-      if (mobile.trim() && phoneClean.length < 8) {
-        newErrors.mobile = 'Please enter a valid phone number (e.g. 0412 345 678)';
-      }
+      newErrors.mobile = 'Please enter a valid Australian mobile number (e.g. 0412 345 678) to receive your quote.';
     }
 
     setErrors(newErrors);
@@ -92,11 +102,17 @@ export const Step5SendQuote: React.FC<Step5SendQuoteProps> = ({
     if (e) e.preventDefault();
     if (!validate()) return;
 
+    const formattedMobile = hasNoPhoneOrEmail
+      ? 'No Mobile (Phone Booking)'
+      : mobile.trim()
+      ? formatAustralianMobile(mobile)
+      : '';
+
     onSendQuote({
       firstName: firstName.trim() || (hasNoPhoneOrEmail ? 'Phone Customer' : 'Valued Customer'),
       companyName: companyName.trim() || undefined,
       email: hasNoPhoneOrEmail ? 'no-email-phone-order@portabox.au' : email.trim(),
-      mobile: hasNoPhoneOrEmail ? 'No Mobile (Phone Booking)' : mobile.trim(),
+      mobile: formattedMobile,
       agreedToContact: !hasNoPhoneOrEmail,
       hasNoPhoneOrEmail,
       isAgentCallIn,
@@ -162,7 +178,7 @@ export const Step5SendQuote: React.FC<Step5SendQuoteProps> = ({
               {hasNoPhoneOrEmail ? (
                 <>Landline Phone <span className="text-slate-400 font-normal normal-case">(optional · no mobile)</span></>
               ) : (
-                <>Mobile Phone <span className="text-slate-500 font-normal normal-case">(required if no email)</span></>
+                <>Australian Mobile Phone <span className="text-slate-500 font-normal normal-case">(04XX XXX XXX)</span></>
               )}
             </label>
             <div className="relative">
@@ -176,6 +192,13 @@ export const Step5SendQuote: React.FC<Step5SendQuoteProps> = ({
                 onChange={(e) => {
                   setMobile(e.target.value);
                   if (errors.mobile) setErrors((prev) => ({ ...prev, mobile: undefined }));
+                }}
+                onBlur={() => {
+                  if (mobile.trim() && !hasNoPhoneOrEmail) {
+                    if (isValidAustralianMobile(mobile)) {
+                      setMobile(formatAustralianMobile(mobile));
+                    }
+                  }
                 }}
                 placeholder={hasNoPhoneOrEmail ? "(08) 8234 5678 (optional landline)" : "0412 345 678"}
                 className={`w-full pl-10 pr-4 py-3 rounded-2xl border text-sm font-medium transition-all focus:outline-none focus:ring-2 ${
@@ -256,23 +279,25 @@ export const Step5SendQuote: React.FC<Step5SendQuoteProps> = ({
           </span>
         </div>
 
-        {/* Validation error summary if customer clicks continue without entering mobile */}
-        {errors.mobile && (
+        {/* Validation error summary if customer clicks continue with invalid details */}
+        {(errors.mobile || errors.email) && (
           <div className="mt-4 p-3.5 rounded-2xl bg-rose-50 border-2 border-rose-300 text-rose-800 text-xs font-bold flex items-center justify-between gap-3 animate-in fade-in">
             <div className="flex items-center gap-2">
               <span className="text-base">⚠️</span>
-              <span>{errors.mobile}</span>
+              <span>{errors.mobile || errors.email}</span>
             </div>
-            <button
-              type="button"
-              onClick={() => {
-                mobileInputRef.current?.focus();
-                mobileInputRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-              }}
-              className="px-3 py-1 bg-rose-200 text-rose-900 rounded-lg text-xs font-black hover:bg-rose-300 cursor-pointer shrink-0"
-            >
-              Enter Mobile
-            </button>
+            {errors.mobile && (
+              <button
+                type="button"
+                onClick={() => {
+                  mobileInputRef.current?.focus();
+                  mobileInputRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }}
+                className="px-3 py-1 bg-rose-200 text-rose-900 rounded-lg text-xs font-black hover:bg-rose-300 cursor-pointer shrink-0"
+              >
+                Fix Mobile
+              </button>
+            )}
           </div>
         )}
 

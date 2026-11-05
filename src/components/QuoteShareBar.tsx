@@ -14,6 +14,11 @@ import {
   PhoneCall,
 } from 'lucide-react';
 import { QuoteBreakdown } from '../types/quote';
+import {
+  isValidAustralianMobile,
+  getAustralianMobileValidationError,
+  formatAustralianMobile,
+} from '../utils/phoneValidation';
 
 interface QuoteShareBarProps {
   quote: QuoteBreakdown;
@@ -58,7 +63,7 @@ export const QuoteShareBar: React.FC<QuoteShareBarProps> = ({
       `Customer: ${customerName}`,
       `Container: ${isMulti ? `${quote.containerCount} × ` : ''}${quote.containerName} (${quote.containerVolume})`,
       `Delivery To: ${quote.originPostcode.suburb} ${quote.originPostcode.state} ${quote.originPostcode.postcode}`,
-      `Preferred Date: ${quote.preferredDate}`,
+      `Delivery Window: Selected during booking in Next Steps`,
       ``,
       `--- FINANCIAL BREAKDOWN (AUD, GST INCL) ---`,
       `1. INITIAL MOVE-IN & DELIVERY: $${quote.initialDeliveryFee}`,
@@ -179,13 +184,15 @@ export const QuoteShareBar: React.FC<QuoteShareBarProps> = ({
 
   const handleSendMagicSms = () => {
     const mobileToUse = magicMobileInput || customerMobile;
-    if (!mobileToUse || mobileToUse.trim().length < 6) {
-      showToast('Please enter a valid mobile number');
+    if (!mobileToUse || !isValidAustralianMobile(mobileToUse)) {
+      showToast(getAustralianMobileValidationError(mobileToUse) || 'Please enter a valid Australian mobile number (e.g. 0412 345 678)');
       return;
     }
+    const formatted = formatAustralianMobile(mobileToUse);
+    setMagicMobileInput(formatted);
     generateMagicLink();
     setMagicSentSuccess(true);
-    showToast(`✓ Magic link simulated to ${mobileToUse}! You can resume this quote anytime.`);
+    showToast(`✓ Magic link simulated to ${formatted}! You can resume this quote anytime.`);
     setTimeout(() => {
       setIsMagicModalOpen(false);
       setMagicSentSuccess(false);

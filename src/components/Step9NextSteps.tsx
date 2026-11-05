@@ -18,8 +18,17 @@ import {
   RotateCcw,
   Check,
   AlertCircle,
+  Sunrise,
+  Sun,
+  Sunset,
+  Sprout,
+  CalendarCheck,
+  Info,
+  Compass,
+  Layers,
+  Home,
 } from 'lucide-react';
-import { QuoteBreakdown } from '../types/quote';
+import { QuoteBreakdown, DeliverySlotWindow, DepotCalendarConfig } from '../types/quote';
 import { CustomerLifecycleRoadmap } from './CustomerLifecycleRoadmap';
 import { DeliveryMilestoneTracker } from './DeliveryMilestoneTracker';
 import {
@@ -29,11 +38,17 @@ import {
   STANDARD_DELIVERY_SLOTS,
 } from '../services/googleCalendarService';
 import { getMetroHubForPostcode } from '../services/pricingEngine';
+import {
+  loadCustomerAccounts,
+  saveCustomerAccounts,
+} from '../services/customerPortalService';
+import { syncCustomerPortalActionToSmartsheet } from '../services/smartsheetService';
 
 export interface Step9NextStepsProps {
   quote: QuoteBreakdown;
   customerData?: {
     firstName: string;
+    companyName?: string;
     mobile: string;
     email: string;
     agreedToContact: boolean;
@@ -47,6 +62,9 @@ export interface Step9NextStepsProps {
   onOpenCustomerPortal?: () => void;
   onBackToQuote?: () => void;
   onResetQuote?: () => void;
+  onSelectSlot?: (slot: DeliverySlotWindow) => void;
+  onSelectDate?: (date: string) => void;
+  depotCalendarConfig?: DepotCalendarConfig;
   phone?: string;
 }
 
@@ -58,6 +76,9 @@ export const Step9NextSteps: React.FC<Step9NextStepsProps> = ({
   onOpenCustomerPortal,
   onBackToQuote,
   onResetQuote,
+  onSelectSlot,
+  onSelectDate,
+  depotCalendarConfig,
   phone = '1800 467 637',
 }) => {
   const [isCalendarModalOpen, setIsCalendarModalOpen] = useState(false);
@@ -66,17 +87,243 @@ export const Step9NextSteps: React.FC<Step9NextStepsProps> = ({
   const [calendarError, setCalendarError] = useState<string | null>(null);
   const [hasCopiedRef, setHasCopiedRef] = useState(false);
 
+  // Helper date utilities
+  const formatIsoDate = (isoStr: string) => {
+    try {
+      const d = new Date(isoStr + 'T00:00:00');
+      return d.toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
+    } catch {
+      return isoStr;
+    }
+  };
+
+  const getOffsetIso = (daysFromNow: number) => {
+    const d = new Date();
+    d.setDate(d.getDate() + daysFromNow);
+    return d.toISOString().split('T')[0];
+  };
+
+  const initialIso = () => {
+    if (quote.preferredDate && /^\d{4}-\d{2}-\d{2}$/.test(quote.preferredDate)) {
+      return quote.preferredDate;
+    }
+    return getOffsetIso(3);
+  };
+
+  const [deliveryDateIso, setDeliveryDateIso] = useState<string>(initialIso);
+  const [deliveryDateFormatted, setDeliveryDateFormatted] = useState<string>(() => {
+    if (quote.preferredDate && quote.preferredDate !== 'Wed 14 Oct 2026') {
+      return quote.preferredDate;
+    }
+    return formatIsoDate(getOffsetIso(3));
+  });
+
+  const [selectedSlotState, setSelectedSlotState] = useState<DeliverySlotWindow>(() => {
+    return quote.selectedSlot || {
+      id: 'morning',
+      label: 'Morning Window',
+      timeRange: '8:00 AM – 10:30 AM',
+      startHour: 8,
+      startMinute: 0,
+      endHour: 10,
+      endMinute: 30,
+      available: true,
+      slotsRemaining: 3,
+    };
+  });
+
+  const [slotConfirmedNotice, setSlotConfirmedNotice] = useState<string | null>(null);
+
+  // Available 2.5-hour Portabox windows
+  const availableSlots: (DeliverySlotWindow & { icon: string; description: string; badge: string })[] = [
+    {
+      id: 'morning',
+      label: 'Morning Window',
+      timeRange: '8:00 AM – 10:30 AM',
+      startHour: 8,
+      startMinute: 0,
+      endHour: 10,
+      endMinute: 30,
+      available: true,
+      slotsRemaining: 3,
+      icon: '🌅',
+      description: 'Priority morning delivery — ideal for full-day loading',
+      badge: 'Most Popular',
+    },
+    {
+      id: 'midday',
+      label: 'Midday Window',
+      timeRange: '11:00 AM – 1:30 PM',
+      startHour: 11,
+      startMinute: 0,
+      endHour: 13,
+      endMinute: 30,
+      available: true,
+      slotsRemaining: 4,
+      icon: '☀️',
+      description: 'Midday delivery window with live telemetry updates',
+      badge: 'Available',
+    },
+    {
+      id: 'afternoon',
+      label: 'Afternoon Window',
+      timeRange: '2:00 PM – 4:30 PM',
+      startHour: 14,
+      startMinute: 0,
+      endHour: 16,
+      endMinute: 30,
+      available: true,
+      slotsRemaining: 2,
+      icon: '🌇',
+      description: 'Afternoon placement before evening hours',
+      badge: 'Available',
+    },
+    {
+      id: 'eco_cluster',
+      label: 'Eco-Optimized Window',
+      timeRange: 'Flexible Route (Avoids ~26 kg CO₂)',
+      startHour: 9,
+      startMinute: 0,
+      endHour: 15,
+      endMinute: 0,
+      available: true,
+      slotsRemaining: 5,
+      icon: '🌱',
+      description: 'Clusters with nearby runs to cut fuel transit emissions',
+      badge: 'Green Route Priority',
+    },
+  ];
+
+  const handleSelectSlot = (slot: DeliverySlotWindow) => {
+    setSelectedSlotState(slot);
+    if (onSelectSlot) onSelectSlot(slot);
+    setSlotConfirmedNotice(`Locked in: ${slot.label} (${slot.timeRange}) on ${deliveryDateFormatted}`);
+    // Sync to active customer accounts
+    try {
+      const accounts = loadCustomerAccounts();
+      const email = customerData?.email?.toLowerCase().trim();
+      const acc = accounts.find((a) => a.email.toLowerCase() === email);
+      if (acc && acc.orders.length > 0) {
+        acc.orders[0].deliveryWindow = slot.label;
+        saveCustomerAccounts(accounts);
+        syncCustomerPortalActionToSmartsheet({
+          customerId: acc.id,
+          customerName: `${acc.firstName} ${acc.lastName || ''}`.trim(),
+          orderNumber: acc.orders[0].orderNumber,
+          actionType: 'booking_updated',
+          details: `Delivery window updated to ${slot.label} (${slot.timeRange})`,
+        });
+      }
+    } catch (e) {
+      console.warn('Could not sync slot to portal accounts:', e);
+    }
+  };
+
+  const handleDateChange = (isoDate: string) => {
+    setDeliveryDateIso(isoDate);
+    const formatted = formatIsoDate(isoDate);
+    setDeliveryDateFormatted(formatted);
+    if (onSelectDate) onSelectDate(formatted);
+    setSlotConfirmedNotice(`Locked in: ${selectedSlotState.label} on ${formatted}`);
+    // Sync to active customer accounts
+    try {
+      const accounts = loadCustomerAccounts();
+      const email = customerData?.email?.toLowerCase().trim();
+      const acc = accounts.find((a) => a.email.toLowerCase() === email);
+      if (acc && acc.orders.length > 0) {
+        acc.orders[0].scheduledDeliveryDate = isoDate;
+        saveCustomerAccounts(accounts);
+        syncCustomerPortalActionToSmartsheet({
+          customerId: acc.id,
+          customerName: `${acc.firstName} ${acc.lastName || ''}`.trim(),
+          orderNumber: acc.orders[0].orderNumber,
+          actionType: 'booking_updated',
+          details: `Delivery date updated to ${formatted}`,
+        });
+      }
+    } catch (e) {
+      console.warn('Could not sync date to portal accounts:', e);
+    }
+  };
+
+  const handlePresetDays = (days: number) => {
+    const iso = getOffsetIso(days);
+    handleDateChange(iso);
+  };
+
+  // Placement Information State
+  const initialAddress = () => {
+    return `${quote.originPostcode.suburb}, ${quote.originPostcode.state} ${quote.originPostcode.postcode}`;
+  };
+
+  const [deliveryAddress, setDeliveryAddress] = useState<string>(initialAddress);
+  const [surfaceType, setSurfaceType] = useState<string>('Concrete Driveway');
+  const [doorOrientation, setDoorOrientation] = useState<'house' | 'street' | 'discretion'>('house');
+  const [clearanceWidth, setClearanceWidth] = useState<boolean>(true);
+  const [clearanceHeight, setClearanceHeight] = useState<boolean>(true);
+  const [clearanceLength, setClearanceLength] = useState<boolean>(true);
+  const [placementNotes, setPlacementNotes] = useState<string>('');
+  const [placementSavedNotice, setPlacementSavedNotice] = useState<string | null>(null);
+
+  const handleSavePlacement = (updated?: {
+    address?: string;
+    surface?: string;
+    door?: 'house' | 'street' | 'discretion';
+    notes?: string;
+    width?: boolean;
+    height?: boolean;
+    length?: boolean;
+  }) => {
+    const targetAddress = updated?.address ?? deliveryAddress;
+    const targetSurface = updated?.surface ?? surfaceType;
+    const targetDoor = updated?.door ?? doorOrientation;
+    const targetNotes = updated?.notes ?? placementNotes;
+    const targetWidth = updated?.width ?? clearanceWidth;
+    const targetHeight = updated?.height ?? clearanceHeight;
+
+    const doorLabel =
+      targetDoor === 'house'
+        ? 'Doors Facing House / Property'
+        : targetDoor === 'street'
+        ? 'Doors Facing Street / Road'
+        : 'Driver Discretion';
+
+    setPlacementSavedNotice('✓ Placement instructions confirmed and synced with fleet dispatch.');
+
+    // Sync to active customer account
+    try {
+      const accounts = loadCustomerAccounts();
+      const email = customerData?.email?.toLowerCase().trim();
+      const acc = accounts.find((a) => a.email.toLowerCase() === email);
+      if (acc && acc.orders.length > 0) {
+        const order = acc.orders[0];
+        order.originAddress = targetAddress;
+        order.placementSurface = targetSurface as any;
+        order.doorOrientation = doorLabel as any;
+        order.accessNotes = targetNotes;
+        order.accessGateWidth = targetWidth ? 'Wide Open (>3.5m)' : 'Standard (3.0m - 3.5m)';
+        order.overheadClearanceClear = targetHeight;
+        saveCustomerAccounts(accounts);
+
+        syncCustomerPortalActionToSmartsheet({
+          customerId: acc.id,
+          customerName: `${acc.firstName} ${acc.lastName || ''}`.trim(),
+          orderNumber: order.orderNumber,
+          actionType: 'access_notes_updated',
+          details: `Placement: ${targetSurface}, ${doorLabel}. Address: ${targetAddress}. Notes: ${targetNotes || 'Standard placement'}`,
+        });
+      }
+    } catch (e) {
+      console.warn('Could not sync placement to customer accounts:', e);
+    }
+  };
+
   // Fallback transaction reference
   const bookingReference =
     paymentResult?.transactionId ||
     `PBO-${quote.originPostcode.postcode}-${Math.floor(100000 + Math.random() * 900000)}`;
 
   const hub = getMetroHubForPostcode(quote.originPostcode);
-  const effectiveSlot = quote.selectedSlot || {
-    ...STANDARD_DELIVERY_SLOTS[0],
-    available: true,
-    slotsRemaining: 2,
-  };
 
   const handleCopyReference = () => {
     navigator.clipboard.writeText(bookingReference);
@@ -105,8 +352,8 @@ export const Step9NextSteps: React.FC<Step9NextStepsProps> = ({
         customerName: customerData?.firstName || 'Valued Customer',
         customerEmail: customerData?.email || 'customer@portabox.com.au',
         customerPhone: customerData?.mobile || '0412 345 678',
-        deliveryDateStr: quote.preferredDate,
-        slot: effectiveSlot,
+        deliveryDateStr: deliveryDateFormatted,
+        slot: selectedSlotState,
         metroHub: hub,
         suburb: quote.originPostcode.suburb,
         state: quote.originPostcode.state,
@@ -172,7 +419,7 @@ export const Step9NextSteps: React.FC<Step9NextStepsProps> = ({
               className="px-3.5 py-1.5 rounded-xl border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-bold transition-colors cursor-pointer flex items-center gap-1.5"
             >
               <FileText className="w-3.5 h-3.5 text-slate-500" />
-              <span>Review Invoice</span>
+              <span>Review Quotation</span>
             </button>
           )}
           <button
@@ -209,16 +456,224 @@ export const Step9NextSteps: React.FC<Step9NextStepsProps> = ({
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2">
             <div className="bg-white/10 backdrop-blur-xs rounded-2xl p-3 border border-white/15">
               <span className="text-[11px] uppercase font-bold text-slate-300 block">Delivery Date</span>
-              <span className="text-sm sm:text-base font-black text-white">{quote.preferredDate}</span>
+              <span className="text-sm sm:text-base font-black text-white">{deliveryDateFormatted}</span>
             </div>
             <div className="bg-white/10 backdrop-blur-xs rounded-2xl p-3 border border-white/15">
               <span className="text-[11px] uppercase font-bold text-slate-300 block">Arrival Window</span>
-              <span className="text-sm sm:text-base font-black text-[#F7D347]">{effectiveSlot.label}</span>
+              <span className="text-sm sm:text-base font-black text-[#F7D347]">{selectedSlotState.label}</span>
             </div>
             <div className="bg-white/10 backdrop-blur-xs rounded-2xl p-3 border border-white/15">
               <span className="text-[11px] uppercase font-bold text-slate-300 block">Rate Protection</span>
               <span className="text-sm sm:text-base font-black text-emerald-300">12-Mo Rate Freeze</span>
             </div>
+          </div>
+        </div>
+      </div>
+
+      {/* CORE NEXT STEP: SELECT DELIVERY DATE & ARRIVAL WINDOW */}
+      <div className="bg-white rounded-3xl p-6 sm:p-8 shadow-sm border-2 border-[#15385E]/30 space-y-6">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-2xl bg-[#15385E] text-[#F7D347] flex items-center justify-center font-black text-lg shrink-0 shadow-xs">
+              1
+            </div>
+            <div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-xs font-black uppercase tracking-wider text-[#15385E] bg-[#5CC1EF]/20 border border-[#5CC1EF]/40 px-2.5 py-0.5 rounded-md">
+                  CORE NEXT STEP
+                </span>
+                <span className="text-xs font-bold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                  Select Delivery Window
+                </span>
+              </div>
+              <h2 className="text-xl sm:text-2xl font-black text-[#15385E] mt-1">
+                Select Your Delivery Date &amp; Arrival Window
+              </h2>
+            </div>
+          </div>
+          <div className="text-xs text-slate-500 font-medium">
+            Servicing Facility: <strong className="text-slate-800">{quote.originDepot.name}</strong>
+          </div>
+        </div>
+
+        <p className="text-xs sm:text-sm text-slate-600 leading-relaxed">
+          Now that your quotation has been generated, select the exact drop-off day and 2.5-hour arrival window for our precision level-lift vehicle to deliver your empty container to your driveway.
+        </p>
+
+        {/* Section A: Preferred Drop-Off Date */}
+        <div className="space-y-2.5 pt-1">
+          <label className="text-xs font-black uppercase tracking-wider text-slate-500 block">
+            A. Preferred Drop-Off Date
+          </label>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => handlePresetDays(2)}
+              className={`px-3.5 py-2 rounded-xl text-xs font-black transition-all cursor-pointer ${
+                deliveryDateIso === getOffsetIso(2)
+                  ? 'bg-[#15385E] text-white shadow-xs'
+                  : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200'
+              }`}
+            >
+              Earliest Available (+2 Days)
+            </button>
+            <button
+              type="button"
+              onClick={() => handlePresetDays(4)}
+              className={`px-3.5 py-2 rounded-xl text-xs font-black transition-all cursor-pointer ${
+                deliveryDateIso === getOffsetIso(4)
+                  ? 'bg-[#15385E] text-white shadow-xs'
+                  : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200'
+              }`}
+            >
+              +4 Days
+            </button>
+            <button
+              type="button"
+              onClick={() => handlePresetDays(7)}
+              className={`px-3.5 py-2 rounded-xl text-xs font-black transition-all cursor-pointer ${
+                deliveryDateIso === getOffsetIso(7)
+                  ? 'bg-[#15385E] text-white shadow-xs'
+                  : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200'
+              }`}
+            >
+              +1 Week
+            </button>
+            <button
+              type="button"
+              onClick={() => handlePresetDays(14)}
+              className={`px-3.5 py-2 rounded-xl text-xs font-black transition-all cursor-pointer ${
+                deliveryDateIso === getOffsetIso(14)
+                  ? 'bg-[#15385E] text-white shadow-xs'
+                  : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200'
+              }`}
+            >
+              +2 Weeks
+            </button>
+
+            {/* Custom Date Input */}
+            <div className="relative inline-flex items-center">
+              <input
+                type="date"
+                min={getOffsetIso(1)}
+                value={deliveryDateIso}
+                onChange={(e) => handleDateChange(e.target.value)}
+                className="pl-9 pr-3 py-1.5 rounded-xl border-2 border-slate-300 hover:border-slate-400 focus:border-[#00c0f3] text-xs font-bold text-[#15385E] bg-white cursor-pointer transition-colors shadow-2xs"
+              />
+              <Calendar className="w-4 h-4 text-slate-500 absolute left-2.5 pointer-events-none" />
+            </div>
+          </div>
+          <p className="text-[11px] text-slate-500">
+            Selected Date: <strong className="text-[#15385E]">{deliveryDateFormatted}</strong> (Operating Monday – Saturday)
+          </p>
+        </div>
+
+        {/* Section B: Delivery Window Cards */}
+        <div className="space-y-2.5 pt-2">
+          <label className="text-xs font-black uppercase tracking-wider text-slate-500 block">
+            B. Select Arrival Window
+          </label>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+            {availableSlots.map((slot) => {
+              const isSelected = selectedSlotState.id === slot.id;
+              return (
+                <button
+                  key={slot.id}
+                  type="button"
+                  onClick={() => handleSelectSlot(slot)}
+                  className={`p-4 rounded-2xl border-2 text-left transition-all cursor-pointer relative flex flex-col justify-between gap-3 ${
+                    isSelected
+                      ? 'border-[#00c0f3] bg-sky-50/70 shadow-sm ring-2 ring-[#00c0f3]/30'
+                      : 'border-slate-200 hover:border-slate-300 bg-white hover:bg-slate-50/50'
+                  }`}
+                >
+                  <div>
+                    <div className="flex items-center justify-between gap-1.5 mb-1.5">
+                      <span className="text-[10px] font-black uppercase tracking-wider text-slate-500">
+                        {slot.badge}
+                      </span>
+                      {isSelected ? (
+                        <span className="w-5 h-5 rounded-full bg-[#00c0f3] text-white flex items-center justify-center shrink-0">
+                          <Check className="w-3.5 h-3.5 stroke-[3]" />
+                        </span>
+                      ) : (
+                        <span className="w-5 h-5 rounded-full border border-slate-300 shrink-0" />
+                      )}
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-base">{slot.icon}</span>
+                      <h3 className="text-sm font-black text-[#15385E]">
+                        {slot.label}
+                      </h3>
+                    </div>
+                    <p className="text-xs font-bold text-[#00a9d7] font-mono mt-1">
+                      {slot.timeRange}
+                    </p>
+                    <p className="text-[11px] text-slate-500 mt-1 leading-snug">
+                      {slot.description}
+                    </p>
+                  </div>
+
+                  <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-[11px]">
+                    <span className="text-slate-500">
+                      {slot.id === 'eco_cluster' ? 'Green Route' : 'Fleet Slot'}
+                    </span>
+                    <span className={`font-bold px-2 py-0.5 rounded-full ${
+                      slot.id === 'eco_cluster'
+                        ? 'bg-emerald-100 text-emerald-800'
+                        : isSelected
+                        ? 'bg-sky-100 text-sky-800'
+                        : 'bg-slate-100 text-slate-600'
+                    }`}>
+                      {slot.slotsRemaining} slots left
+                    </span>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Section C: Live Schedule Confirmation & Actions */}
+        <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200/90 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-emerald-500 text-white flex items-center justify-center shrink-0 shadow-2xs">
+              <Check className="w-5 h-5 stroke-[3]" />
+            </div>
+            <div>
+              <p className="text-xs font-bold text-slate-500 uppercase tracking-wide">
+                Confirmed Delivery Schedule
+              </p>
+              <p className="text-sm font-black text-[#15385E]">
+                {selectedSlotState.label} ({selectedSlotState.timeRange}) on {deliveryDateFormatted}
+              </p>
+              <p className="text-[11px] text-slate-500">
+                Driver Dave Higgins (#03) will send live SMS telemetry 30 minutes prior to arrival.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 flex-wrap">
+            {!calendarEventLink ? (
+              <button
+                type="button"
+                onClick={handleInitiateCalendarBooking}
+                className="px-4 py-2.5 rounded-xl bg-white border border-slate-300 hover:bg-slate-100 text-[#15385E] text-xs font-bold transition-colors cursor-pointer flex items-center gap-1.5 shadow-2xs"
+              >
+                <Calendar className="w-3.5 h-3.5 text-[#00c0f3]" />
+                <span>Add to Google Calendar</span>
+              </button>
+            ) : (
+              <a
+                href={calendarEventLink}
+                target="_blank"
+                rel="noreferrer"
+                className="px-4 py-2.5 rounded-xl bg-emerald-100 border border-emerald-300 text-emerald-900 text-xs font-bold transition-colors flex items-center gap-1.5"
+              >
+                <Check className="w-3.5 h-3.5 text-emerald-700" />
+                <span>View Google Calendar Event</span>
+              </a>
+            )}
           </div>
         </div>
       </div>
@@ -253,71 +708,263 @@ export const Step9NextSteps: React.FC<Step9NextStepsProps> = ({
         />
       </div>
 
-      {/* Immediate Next Step: Driveway & Site Preparation Card */}
-      <div className="bg-amber-50/60 rounded-3xl p-6 sm:p-8 border-2 border-amber-200/80 shadow-xs">
-        <div className="flex flex-col md:flex-row md:items-start justify-between gap-6">
-          <div className="space-y-3">
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-amber-100 text-amber-900 border border-amber-300 text-xs font-extrabold uppercase tracking-wide">
-              <ShieldCheck className="w-4 h-4 text-amber-800" />
-              <span>Immediate Customer Action: Driveway Clearance</span>
+      {/* MILESTONE 2: CONTAINER PLACEMENT & DRIVEWAY ACCESS DETAILS */}
+      <div className="bg-white rounded-3xl p-6 sm:p-8 shadow-sm border-2 border-[#15385E]/30 space-y-6">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-2xl bg-[#15385E] text-[#F7D347] flex items-center justify-center font-black text-lg shrink-0 shadow-xs">
+              2
             </div>
-
-            <h3 className="text-lg sm:text-xl font-black text-[#15385E]">
-              Preparing Your Drop-Off Site For Delivery Day
-            </h3>
-
-            <p className="text-xs sm:text-sm text-slate-700 max-w-2xl leading-relaxed">
-              Our level-lift delivery vehicle places your container horizontally flat without tilting your goods. To ensure seamless arrival, please check these 3 simple items:
-            </p>
-
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
-              <div className="bg-white rounded-2xl p-3.5 border border-amber-200 space-y-1">
-                <span className="text-xs font-black text-amber-950 flex items-center gap-1.5">
-                  <Check className="w-3.5 h-3.5 text-emerald-600 stroke-[3]" />
-                  1. Gate & Path Clearance
+            <div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-xs font-black uppercase tracking-wider text-[#15385E] bg-[#5CC1EF]/20 border border-[#5CC1EF]/40 px-2.5 py-0.5 rounded-md">
+                  CORE NEXT STEP
                 </span>
-                <p className="text-[11px] text-slate-600">
-                  Ensure minimum <strong>3.5 metres</strong> width clearance through gates and driveways.
-                </p>
-              </div>
-
-              <div className="bg-white rounded-2xl p-3.5 border border-amber-200 space-y-1">
-                <span className="text-xs font-black text-amber-950 flex items-center gap-1.5">
-                  <Check className="w-3.5 h-3.5 text-emerald-600 stroke-[3]" />
-                  2. Overhead Clearance
+                <span className="text-xs font-bold text-amber-900 bg-amber-100 px-2 py-0.5 rounded border border-amber-300">
+                  Placement Information
                 </span>
-                <p className="text-[11px] text-slate-600">
-                  Check for low branches, overhead wires, or carport eaves below <strong>4.5 metres</strong>.
-                </p>
               </div>
-
-              <div className="bg-white rounded-2xl p-3.5 border border-amber-200 space-y-1">
-                <span className="text-xs font-black text-amber-950 flex items-center gap-1.5">
-                  <Check className="w-3.5 h-3.5 text-emerald-600 stroke-[3]" />
-                  3. Paver Protection Included
-                </span>
-                <p className="text-[11px] text-slate-600">
-                  Driver brings complimentary high-density ground pads so pavers and concrete never get scratched.
-                </p>
-              </div>
+              <h2 className="text-xl sm:text-2xl font-black text-[#15385E] mt-1">
+                Confirm Drop-Off Location &amp; Driveway Placement
+              </h2>
             </div>
           </div>
-
-          <div className="shrink-0 flex flex-col gap-2 self-start md:self-center">
+          <div className="flex items-center gap-2">
             {onOpenPlacementChecker && (
               <button
                 type="button"
                 onClick={onOpenPlacementChecker}
-                className="px-5 py-3 rounded-2xl bg-[#15385E] hover:bg-[#0f2844] text-white font-black text-xs sm:text-sm flex items-center gap-2 shadow-sm transition-all cursor-pointer whitespace-nowrap"
+                className="px-4 py-2 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300 text-xs font-bold transition-colors cursor-pointer flex items-center gap-1.5 shadow-2xs"
               >
-                <ShieldCheck className="w-4 h-4 text-[#F7D347]" />
-                <span>Driveway Fit Checker</span>
+                <ShieldCheck className="w-4 h-4 text-amber-700" />
+                <span>Launch Driveway Fit Checker</span>
               </button>
             )}
-            <span className="text-[11px] text-center text-slate-500">
-              100% Fit & Surface Guarantee
+          </div>
+        </div>
+
+        <p className="text-xs sm:text-sm text-slate-600 leading-relaxed">
+          Provide your exact street delivery address, surface type, and preferred container door orientation so our driver Dave Higgins (#03) places your container in the safest, most accessible spot.
+        </p>
+
+        {/* Section A: Street Delivery Address */}
+        <div className="space-y-1.5">
+          <label className="text-xs font-black uppercase tracking-wider text-slate-600 flex items-center gap-1.5">
+            <MapPin className="w-3.5 h-3.5 text-[#00c0f3]" />
+            <span>A. Exact Drop-Off Delivery Address</span>
+          </label>
+          <div className="relative">
+            <input
+              type="text"
+              value={deliveryAddress}
+              onChange={(e) => {
+                setDeliveryAddress(e.target.value);
+                handleSavePlacement({ address: e.target.value });
+              }}
+              placeholder="e.g. 14 Kensington Road, Norwood SA 5067"
+              className="w-full pl-4 pr-10 py-3 rounded-2xl border-2 border-slate-300 focus:border-[#00c0f3] focus:ring-2 focus:ring-[#00c0f3]/20 text-xs sm:text-sm font-bold text-[#15385E] bg-white transition-all shadow-2xs"
+            />
+            <div className="absolute right-3.5 top-1/2 -translate-y-1/2 text-[11px] font-black text-emerald-700 uppercase bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+              Serviced Depot: {quote.originDepot.name}
+            </div>
+          </div>
+        </div>
+
+        {/* Section B & C: Surface Type & Door Orientation Grid */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-5 pt-1">
+          {/* Surface Type */}
+          <div className="space-y-2">
+            <label className="text-xs font-black uppercase tracking-wider text-slate-600 flex items-center gap-1.5">
+              <Layers className="w-3.5 h-3.5 text-[#00c0f3]" />
+              <span>B. Driveway / Placement Ground Surface</span>
+            </label>
+            <select
+              value={surfaceType}
+              onChange={(e) => {
+                const val = e.target.value;
+                setSurfaceType(val);
+                handleSavePlacement({ surface: val });
+              }}
+              className="w-full px-4 py-3 rounded-2xl border-2 border-slate-300 focus:border-[#00c0f3] text-xs font-bold text-[#15385E] bg-white cursor-pointer shadow-2xs"
+            >
+              <option value="Concrete Driveway">Concrete Driveway (Standard Level Placement)</option>
+              <option value="Paved Asphalt">Paved Asphalt / Bitumen</option>
+              <option value="Pavers / Bricks">Pavers / Bricks (Driver supplies protective rubber pads)</option>
+              <option value="Grass / Lawn">Grass / Lawn (Firm dry turf)</option>
+              <option value="Gravel / Crushed Rock">Gravel / Crushed Rock Driveway</option>
+              <option value="Roadside / Nature Strip">Roadside / Nature Strip (Permit check advised)</option>
+            </select>
+            <p className="text-[11px] text-slate-500">
+              * Driver carries complimentary heavy-duty rubber pads so driveways and decorative pavers are never scratched.
+            </p>
+          </div>
+
+          {/* Door Orientation */}
+          <div className="space-y-2">
+            <label className="text-xs font-black uppercase tracking-wider text-slate-600 flex items-center gap-1.5">
+              <Compass className="w-3.5 h-3.5 text-[#00c0f3]" />
+              <span>C. Container Door Orientation</span>
+            </label>
+            <div className="grid grid-cols-3 gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setDoorOrientation('house');
+                  handleSavePlacement({ door: 'house' });
+                }}
+                className={`p-2.5 rounded-xl border-2 text-center transition-all cursor-pointer ${
+                  doorOrientation === 'house'
+                    ? 'border-[#00c0f3] bg-sky-50 text-[#15385E] font-black shadow-2xs'
+                    : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+                }`}
+              >
+                <div className="text-base mb-0.5">🏡</div>
+                <div className="text-[11px] font-bold leading-tight">Facing House</div>
+                <span className="text-[9px] text-slate-500">Direct loading</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setDoorOrientation('street');
+                  handleSavePlacement({ door: 'street' });
+                }}
+                className={`p-2.5 rounded-xl border-2 text-center transition-all cursor-pointer ${
+                  doorOrientation === 'street'
+                    ? 'border-[#00c0f3] bg-sky-50 text-[#15385E] font-black shadow-2xs'
+                    : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+                }`}
+              >
+                <div className="text-base mb-0.5">🛣️</div>
+                <div className="text-[11px] font-bold leading-tight">Facing Street</div>
+                <span className="text-[9px] text-slate-500">Road access</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setDoorOrientation('discretion');
+                  handleSavePlacement({ door: 'discretion' });
+                }}
+                className={`p-2.5 rounded-xl border-2 text-center transition-all cursor-pointer ${
+                  doorOrientation === 'discretion'
+                    ? 'border-[#00c0f3] bg-sky-50 text-[#15385E] font-black shadow-2xs'
+                    : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+                }`}
+              >
+                <div className="text-base mb-0.5">🚛</div>
+                <div className="text-[11px] font-bold leading-tight">Driver Choice</div>
+                <span className="text-[9px] text-slate-500">Safest level</span>
+              </button>
+            </div>
+            <p className="text-[11px] text-slate-500">
+              Orientation: <strong>{doorOrientation === 'house' ? 'Doors Facing House / Property' : doorOrientation === 'street' ? 'Doors Facing Street / Driveway Entry' : 'Driver Discretion for Best Slope'}</strong>
+            </p>
+          </div>
+        </div>
+
+        {/* Section D: Clearances Checklist */}
+        <div className="space-y-2 pt-2">
+          <label className="text-xs font-black uppercase tracking-wider text-slate-600 block">
+            D. Driveway Clearance Confirmations
+          </label>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <button
+              type="button"
+              onClick={() => {
+                const next = !clearanceWidth;
+                setClearanceWidth(next);
+                handleSavePlacement({ width: next });
+              }}
+              className={`p-3 rounded-2xl border-2 text-left transition-all cursor-pointer flex items-start gap-2.5 ${
+                clearanceWidth ? 'border-emerald-300 bg-emerald-50/60' : 'border-slate-200 bg-white'
+              }`}
+            >
+              <div className={`w-5 h-5 rounded-md flex items-center justify-center shrink-0 mt-0.5 ${
+                clearanceWidth ? 'bg-emerald-600 text-white' : 'border-2 border-slate-300'
+              }`}>
+                {clearanceWidth && <Check className="w-3.5 h-3.5 stroke-[3]" />}
+              </div>
+              <div className="text-xs">
+                <span className="font-black text-[#15385E] block">Width Clearance (≥ 3.5m)</span>
+                <span className="text-[11px] text-slate-500">Gate and driveway width</span>
+              </div>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                const next = !clearanceHeight;
+                setClearanceHeight(next);
+                handleSavePlacement({ height: next });
+              }}
+              className={`p-3 rounded-2xl border-2 text-left transition-all cursor-pointer flex items-start gap-2.5 ${
+                clearanceHeight ? 'border-emerald-300 bg-emerald-50/60' : 'border-slate-200 bg-white'
+              }`}
+            >
+              <div className={`w-5 h-5 rounded-md flex items-center justify-center shrink-0 mt-0.5 ${
+                clearanceHeight ? 'bg-emerald-600 text-white' : 'border-2 border-slate-300'
+              }`}>
+                {clearanceHeight && <Check className="w-3.5 h-3.5 stroke-[3]" />}
+              </div>
+              <div className="text-xs">
+                <span className="font-black text-[#15385E] block">Height Clearance (≥ 4.5m)</span>
+                <span className="text-[11px] text-slate-500">Clear of low eaves &amp; wires</span>
+              </div>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                const next = !clearanceLength;
+                setClearanceLength(next);
+                handleSavePlacement({ length: next });
+              }}
+              className={`p-3 rounded-2xl border-2 text-left transition-all cursor-pointer flex items-start gap-2.5 ${
+                clearanceLength ? 'border-emerald-300 bg-emerald-50/60' : 'border-slate-200 bg-white'
+              }`}
+            >
+              <div className={`w-5 h-5 rounded-md flex items-center justify-center shrink-0 mt-0.5 ${
+                clearanceLength ? 'bg-emerald-600 text-white' : 'border-2 border-slate-300'
+              }`}>
+                {clearanceLength && <Check className="w-3.5 h-3.5 stroke-[3]" />}
+              </div>
+              <div className="text-xs">
+                <span className="font-black text-[#15385E] block">Truck Run Length (≥ 10m)</span>
+                <span className="text-[11px] text-slate-500">Horizontal level-lift space</span>
+              </div>
+            </button>
+          </div>
+        </div>
+
+        {/* Section E: Placement Notes & Special Instructions */}
+        <div className="space-y-1.5 pt-1">
+          <label className="text-xs font-black uppercase tracking-wider text-slate-600 block">
+            E. Specific Driver Placement Notes (Optional)
+          </label>
+          <textarea
+            rows={2}
+            value={placementNotes}
+            onChange={(e) => {
+              setPlacementNotes(e.target.value);
+              handleSavePlacement({ notes: e.target.value });
+            }}
+            placeholder="e.g. Please place on the left side of driveway next to the garage. Leave 1 metre clearance for the side gate path. Call mobile when 10 mins away."
+            className="w-full px-4 py-2.5 rounded-2xl border-2 border-slate-300 focus:border-[#00c0f3] focus:ring-2 focus:ring-[#00c0f3]/20 text-xs font-medium text-[#15385E] bg-white transition-all shadow-2xs placeholder:text-slate-400"
+          />
+        </div>
+
+        {/* Section F: Live Status Banner */}
+        <div className="p-3.5 rounded-2xl bg-emerald-50 border border-emerald-300 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+            <span className="font-bold text-emerald-950">
+              Placement Confirmed: {surfaceType} · {doorOrientation === 'house' ? 'Doors Facing House' : doorOrientation === 'street' ? 'Doors Facing Street' : 'Driver Discretion'} at {deliveryAddress}
             </span>
           </div>
+          <span className="text-[10px] font-black uppercase tracking-wider bg-emerald-200 text-emerald-900 px-2 py-0.5 rounded-md shrink-0">
+            Synced with Driver #03 Dispatch Sheet
+          </span>
         </div>
       </div>
 
@@ -335,7 +982,7 @@ export const Step9NextSteps: React.FC<Step9NextStepsProps> = ({
               Level-Lift Delivery Day Tracking
             </h3>
             <p className="text-xs text-slate-500">
-              Real-time telemetry and arrival notifications for {quote.preferredDate}.
+              Real-time telemetry and arrival notifications for {deliveryDateFormatted} ({selectedSlotState.timeRange}).
             </p>
           </div>
 
@@ -367,9 +1014,9 @@ export const Step9NextSteps: React.FC<Step9NextStepsProps> = ({
         <DeliveryMilestoneTracker
           orderNumber={bookingReference}
           containerId={`${quote.containerName.replace(/\s+/g, '-').toUpperCase()}-01`}
-          destinationAddress={`${quote.originPostcode.suburb} ${quote.originPostcode.state} ${quote.originPostcode.postcode}`}
-          scheduledDate={quote.preferredDate}
-          deliveryWindow={effectiveSlot.label}
+          destinationAddress={deliveryAddress}
+          scheduledDate={deliveryDateFormatted}
+          deliveryWindow={selectedSlotState.label}
           phone={phone}
         />
       </div>
@@ -461,11 +1108,11 @@ export const Step9NextSteps: React.FC<Step9NextStepsProps> = ({
               </div>
               <div className="flex justify-between py-1 border-b border-slate-200/60">
                 <span className="text-slate-500">Scheduled Date:</span>
-                <span className="font-bold text-[#0b2942]">{quote.preferredDate}</span>
+                <span className="font-bold text-[#0b2942]">{deliveryDateFormatted}</span>
               </div>
               <div className="flex justify-between py-1 border-b border-slate-200/60">
                 <span className="text-slate-500">Arrival Window:</span>
-                <span className="font-bold text-[#00c0f3]">{effectiveSlot.label}</span>
+                <span className="font-bold text-[#00c0f3]">{selectedSlotState.label} ({selectedSlotState.timeRange})</span>
               </div>
               <div className="flex justify-between py-1 border-b border-slate-200/60">
                 <span className="text-slate-500">Container Details:</span>

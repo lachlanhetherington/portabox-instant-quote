@@ -37,6 +37,7 @@ import { DEFAULT_DEPOT_CALENDARS } from './googleCalendarService';
 import { getSlotEfficiencyIncentive } from './routingOptimizationService';
 import { DEFAULT_BUSINESS_HOURS_CONFIG, DEFAULT_LOCATION_SERVICE_HOURS } from './businessHoursService';
 import { DEFAULT_POSTCODE_SERVICE_TIERS } from './postcodeServiceTierEngine';
+import { formatMoney } from '../utils/currency';
 
 export const DEFAULT_CONTAINER_INSURANCE: ContainerInsuranceConfig = {
   enabled: true,
@@ -113,14 +114,14 @@ export function calculateLegFuelSurcharge(params: {
     const zoneKey = (zone?.toUpperCase() as keyof FuelSurchargeZoneRates) || 'A';
     const ratePerContainer = rates[zoneKey] !== undefined ? rates[zoneKey] : (DEFAULT_FUEL_SURCHARGE_ZONE_RATES[zoneKey] ?? 5);
     const totalAmount = ratePerContainer * containerCount;
-    const note = `Zone ${zoneKey} fixed fuel levy: $${ratePerContainer}/container${containerCount > 1 ? ` × ${containerCount} = $${totalAmount}` : ''}`;
+    const note = `Zone ${zoneKey} fixed fuel levy: $${formatMoney(ratePerContainer)}/container${containerCount > 1 ? ` × ${containerCount} = $${formatMoney(totalAmount)}` : ''}`;
     return { ratePerContainer, totalAmount, note, model };
   } else {
     const ratePerKm = config.fuelSurchargeRatePerKm !== undefined ? config.fuelSurchargeRatePerKm : 0.50;
     const dist = Math.max(0, distanceKm || 0);
     const ratePerContainer = Math.round(dist * ratePerKm * 100) / 100;
     const totalAmount = Math.round(ratePerContainer * containerCount * 100) / 100;
-    const note = `${dist} km @ $${ratePerKm.toFixed(2)}/km: $${ratePerContainer}/container${containerCount > 1 ? ` × ${containerCount} = $${totalAmount}` : ''}`;
+    const note = `${dist} km @ $${ratePerKm.toFixed(2)}/km: $${formatMoney(ratePerContainer)}/container${containerCount > 1 ? ` × ${containerCount} = $${formatMoney(totalAmount)}` : ''}`;
     return { ratePerContainer, totalAmount, note, model };
   }
 }
@@ -600,6 +601,7 @@ export const DEFAULT_CONFIG: AppConfig = {
   enableSelectWeeks: false, // Feature flag: off by default; admin can activate in Admin Portal
   twoWeeksStorageRate: 199, // Standard rate for 2 weeks storage across Small, Med, Large
   enableMovingCartons: false, // Feature flag: off by default (Portabox does not provide moving cartons at the moment)
+  enableNextStepsFlow: false, // Feature flag: off by default (post-quote Next Steps & self-booking flow)
   enableEcoEfficiencyIncentive: true,
   enableDrivewayFitGuarantee: false, // Feature flag: deactivated by default; admin can reactivate in Admin Portal
   enableGoogleCalendarLink: false, // Feature flag: deactivated by default (turned off for now); admin can toggle in Admin Portal
@@ -1040,6 +1042,7 @@ export function loadAppConfig(): AppConfig {
       enableSelectWeeks: false,
       twoWeeksStorageRate: parsed.twoWeeksStorageRate !== undefined ? Number(parsed.twoWeeksStorageRate) : 199,
       enableMovingCartons: parsed.enableMovingCartons !== undefined ? Boolean(parsed.enableMovingCartons) : false,
+      enableNextStepsFlow: parsed.enableNextStepsFlow !== undefined ? Boolean(parsed.enableNextStepsFlow) : false,
       enableEcoEfficiencyIncentive: parsed.enableEcoEfficiencyIncentive !== undefined ? Boolean(parsed.enableEcoEfficiencyIncentive) : DEFAULT_CONFIG.enableEcoEfficiencyIncentive,
       enableDrivewayFitGuarantee: parsed.enableDrivewayFitGuarantee !== undefined ? Boolean(parsed.enableDrivewayFitGuarantee) : false,
       enableGoogleCalendarLink: parsed.enableGoogleCalendarLink !== undefined ? Boolean(parsed.enableGoogleCalendarLink) : false,
@@ -1818,7 +1821,7 @@ export function calculateQuote(params: {
     if (!isOriginDepot) {
       legs.push({
         label: `Delivery to ${originPostcode.suburb} (empty)`,
-        description: `${preferredDate} · ${originHub} Zone ${deliveryZone} (${containerCount > 1 ? `$${domesticLegFee}/container × ${containerCount} = $${legBaseFee}` : `$${domesticLegFee} Zone ${deliveryZone} base`}${kmTotalCharge > 0 ? ` + $${kmTotalCharge} per-km fee (${originDistanceKm} km @ $${kmRate}/km)` : ''}${isFuelSurchargeIncluded && fuelSurchargeAmount > 0 ? ` + $${fuelSurchargeAmount} fuel levy (${initialLegFuel.note})` : ''})`,
+        description: `${originHub} Zone ${deliveryZone} (${containerCount > 1 ? `$${domesticLegFee}/container × ${containerCount} = $${legBaseFee}` : `$${domesticLegFee} Zone ${deliveryZone} base`}${kmTotalCharge > 0 ? ` + $${kmTotalCharge} per-km fee (${originDistanceKm} km @ $${kmRate}/km)` : ''}${isFuelSurchargeIncluded && fuelSurchargeAmount > 0 ? ` + $${fuelSurchargeAmount} fuel levy (${initialLegFuel.note})` : ''})`,
         fee: initialFee,
         isPayableNow: true,
         feePerContainer: domesticLegFee,
@@ -2904,7 +2907,7 @@ export function calculateQuote(params: {
 
   const smsPreviewText = `Hi [Customer], here's your Portabox quote: ${containerName} (${containerVolume}) at ${
     originPostcode.suburb
-  }, ${storageRateFormatted}, delivery $${initialDeliveryFee}, first payment $${firstPaymentTotal}. Full breakdown: portabox.au/q/${Math.random()
+  }, ${storageRateFormatted}, delivery $${formatMoney(initialDeliveryFee)}, first payment $${formatMoney(firstPaymentTotal)}. Full breakdown: portabox.au/q/${Math.random()
     .toString(36)
     .substring(2, 6)
     .toUpperCase()}. Reply here with any questions, or reply BOOK to lock in ${preferredDate}.`;

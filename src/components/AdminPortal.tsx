@@ -7125,6 +7125,59 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
               </div>
             </div>
 
+            {/* Feature: Post-Quote Next Steps & Self-Booking Flow (Default OFF) */}
+            <div className="p-6 rounded-2xl border border-slate-200 bg-white shadow-xs">
+              <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
+                <div className="flex items-start gap-4">
+                  <div className={`p-3 rounded-2xl text-white shrink-0 ${
+                    currentConfig.enableNextStepsFlow ? 'bg-emerald-600' : 'bg-slate-400'
+                  }`}>
+                    <ArrowRight className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2.5 flex-wrap">
+                      <h4 className="text-base font-extrabold text-[#0b2942]">
+                        Post-Quote Next Steps &amp; Self-Booking Flow
+                      </h4>
+                      <span className={`text-[10px] font-black uppercase px-2.5 py-0.5 rounded-full ${
+                        currentConfig.enableNextStepsFlow
+                          ? 'bg-emerald-100 text-emerald-800 border border-emerald-200 font-bold'
+                          : 'bg-amber-100 text-amber-800 border border-amber-200 font-bold'
+                      }`}>
+                        {currentConfig.enableNextStepsFlow ? 'Active (Next Steps Flow Enabled)' : 'Turned Off (Admin Default)'}
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-600 mt-1 max-w-2xl leading-relaxed">
+                      Controls customer access to self-service delivery window selection, placement verification, and online card deposit flow immediately after generating the instant quote. When turned off (default), customers are guided to call, message, or email Portabox booking desk directly from the quotation.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex sm:flex-col items-end gap-2 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const updated: AppConfig = {
+                        ...currentConfig,
+                        enableNextStepsFlow: !currentConfig.enableNextStepsFlow,
+                      };
+                      setCurrentConfig(updated);
+                      onSaveConfig(updated);
+                      setSaveSuccess(true);
+                      setTimeout(() => setSaveSuccess(false), 2500);
+                    }}
+                    className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer shadow-xs ${
+                      currentConfig.enableNextStepsFlow
+                        ? 'bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300'
+                        : 'bg-[#15385E] hover:bg-[#1f4a7a] text-white font-extrabold'
+                    }`}
+                  >
+                    {currentConfig.enableNextStepsFlow ? 'Turn Off Next Steps Flow' : 'Enable Next Steps Flow'}
+                  </button>
+                </div>
+              </div>
+            </div>
+
             {/* Feature: Select Weeks Duration Option & 2-Week Rate (Default OFF) */}
             <div className="p-6 rounded-2xl border border-slate-200 bg-white shadow-xs">
               <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">

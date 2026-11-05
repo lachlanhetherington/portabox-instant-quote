@@ -479,7 +479,7 @@ export const Step5Quote: React.FC<Step5QuoteProps> = ({
           quote={quote}
           customerData={customerData}
           phone={phone}
-          onBookNow={onOpenBookingModal}
+          onBookNow={onGoToNextSteps || onOpenBookingModal}
         />
       </div>
 
@@ -492,103 +492,9 @@ export const Step5Quote: React.FC<Step5QuoteProps> = ({
         >
           ← Back to Edit Quote
         </button>
-        {onGoToNextSteps && (
-          <button
-            type="button"
-            onClick={onGoToNextSteps}
-            className="px-4 py-2 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white font-black text-xs flex items-center gap-1.5 cursor-pointer shadow-xs"
-          >
-            <span>Continue to Next Steps</span>
-            <ArrowRight className="w-3.5 h-3.5" />
-          </button>
-        )}
       </div>
 
-      {/* Explicit User Confirmation Modal for Google Calendar event creation (Mandatory per Skill) */}
-      {isCalendarModalOpen && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl max-w-lg w-full p-6 sm:p-8 shadow-2xl border border-slate-200 space-y-5 animate-in zoom-in-95 duration-200">
-            <div className="flex items-center gap-3 pb-3 border-b border-slate-100">
-              <div className="p-3 bg-sky-50 text-[#00c0f3] rounded-2xl">
-                <Calendar className="w-6 h-6" />
-              </div>
-              <div>
-                <h3 className="text-lg font-black text-[#0b2942]">Confirm Calendar Reservation</h3>
-                <p className="text-xs text-slate-500">Google Calendar dispatch event</p>
-              </div>
-            </div>
 
-            <div className="space-y-2 text-xs bg-slate-50 p-4 rounded-2xl border border-slate-200 text-slate-700">
-              <div className="flex justify-between py-1 border-b border-slate-200/60">
-                <span className="text-slate-500">Delivery Event:</span>
-                <span className="font-bold text-[#0b2942]">Portabox Container Delivery</span>
-              </div>
-              <div className="flex justify-between py-1 border-b border-slate-200/60">
-                <span className="text-slate-500">Scheduled Date:</span>
-                <span className="font-bold text-[#0b2942]">{quote.preferredDate}</span>
-              </div>
-              <div className="flex justify-between py-1 border-b border-slate-200/60">
-                <span className="text-slate-500">Arrival Window:</span>
-                <span className="font-bold text-[#00c0f3]">{effectiveSlot.label} ({effectiveSlot.timeRange})</span>
-              </div>
-              <div className="flex justify-between py-1 border-b border-slate-200/60">
-                <span className="text-slate-500">Container Details:</span>
-                <span className="font-bold text-[#0b2942]">{quote.containerCount}x {quote.containerName}</span>
-              </div>
-              <div className="flex justify-between py-1 border-b border-slate-200/60">
-                <span className="text-slate-500">Delivery Location:</span>
-                <span className="font-bold text-[#0b2942]">{quote.originPostcode.suburb}, {quote.originPostcode.state} {quote.originPostcode.postcode}</span>
-              </div>
-              <div className="flex justify-between py-1">
-                <span className="text-slate-500">Invited Attendee:</span>
-                <span className="font-bold text-[#0b2942]">{customerData?.email || 'customer@portabox.com.au'}</span>
-              </div>
-            </div>
-
-            <p className="text-[11px] text-slate-500 leading-normal">
-              This action will schedule a calendar appointment on your connected Google Calendar with automated reminders 24h and 2h before arrival.
-            </p>
-
-            {calendarError && (
-              <p className="text-xs text-rose-600 font-semibold bg-rose-50 p-2.5 rounded-xl border border-rose-200">
-                {calendarError}
-              </p>
-            )}
-
-            <div className="flex items-center justify-end gap-3 pt-2">
-              <button
-                type="button"
-                onClick={() => setIsCalendarModalOpen(false)}
-                disabled={isSchedulingCalendar}
-                className="px-4 py-2.5 rounded-xl border border-slate-200 text-slate-600 hover:text-slate-900 text-xs font-bold transition-colors cursor-pointer"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={handleConfirmCalendarBooking}
-                disabled={isSchedulingCalendar}
-                className="px-5 py-2.5 rounded-xl bg-[#00c0f3] hover:bg-[#00abda] text-white text-xs font-black shadow-xs transition-colors flex items-center gap-2 cursor-pointer disabled:opacity-60"
-              >
-                {isSchedulingCalendar ? (
-                  <>
-                    <svg className="animate-spin h-4 w-4 text-white" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                    </svg>
-                    <span>Scheduling Event...</span>
-                  </>
-                ) : (
-                  <>
-                    <Check className="w-4 h-4 stroke-[2.5]" />
-                    <span>Confirm Calendar Reservation</span>
-                  </>
-                )}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Are You Stuck Banner on Every Page */}
       <div className="print:hidden">

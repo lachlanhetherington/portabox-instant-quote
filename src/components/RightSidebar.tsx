@@ -4,6 +4,7 @@ import { PostcodeRecord } from '../data/australianPostcodes';
 import { BillingCycle, ContainerSizeId, DeliverySlotWindow, LogisticsMethod, MetroHub, ServiceType, StorageDuration } from '../types/quote';
 import { calculateCompetitorComparison } from '../services/competitorPricingService';
 import { generateGoogleCalendarUrl } from '../services/deliveryCalendarService';
+import { formatMoney } from '../utils/currency';
 
 interface RightSidebarProps {
   currentStep: number;
@@ -279,17 +280,17 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({
                             <div className="text-[11px] text-slate-500 font-medium pl-0.5 space-y-0.5">
                               {interstateFeePerContainer !== undefined && interstateFeePerContainer > 0 && (
                                 <div className="text-[#15385E] font-bold text-[10px]">
-                                  Interstate freight: <span className="font-mono text-[#15385E]">${interstateFeePerContainer}/container</span>
+                                  Interstate freight: <span className="font-mono text-[#15385E]">${formatMoney(interstateFeePerContainer)}/container</span>
                                 </div>
                               )}
                               {movingKmCharge !== undefined && movingKmCharge > 0 && (
                                 <div className="text-[#15385E] font-bold text-[10px]">
-                                  +${movingKmCharge} extra delivery charge {containerCount > 1 ? `(${containerCount} containers)` : ''}
+                                  +${formatMoney(movingKmCharge, true)} extra delivery charge {containerCount > 1 ? `(${containerCount} containers)` : ''}
                                 </div>
                               )}
                               {fuelSurchargeAmount !== undefined && fuelSurchargeAmount > 0 && (
                                 <div className="text-[#15385E] font-bold text-[10px]">
-                                  +${fuelSurchargeAmount} fuel levy (initial leg · future legs deferred)
+                                  +${formatMoney(fuelSurchargeAmount, true)} fuel levy (initial leg · future legs deferred)
                                 </div>
                               )}
                             </div>
@@ -409,7 +410,7 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({
                 </p>
                 {!isMyPlaceStorage && (legsSavedDollarTotal > 0 || legsSavedCount > 0) && (
                   <span className="inline-block text-[10px] font-extrabold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded border border-emerald-300">
-                    ${legsSavedDollarTotal || (legsSavedCount === 4 ? 300 : 150)} saved
+                    ${formatMoney(legsSavedDollarTotal || (legsSavedCount === 4 ? 300 : 150), true)} saved
                   </span>
                 )}
               </div>

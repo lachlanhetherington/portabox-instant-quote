@@ -18,6 +18,7 @@ import {
   calculateBoxPrice,
   calculateLockSalesPrice,
 } from '../services/pricingEngine';
+import { formatMoney } from '../utils/currency';
 import { AreYouStuckBanner } from './AreYouStuckBanner';
 
 interface Step6PackingSuppliesAndInsuranceProps {
@@ -308,13 +309,13 @@ export const Step6PackingSuppliesAndInsurance: React.FC<Step6PackingSuppliesAndI
 
           {/* Pricing Matrix Banner */}
           <div className="mt-3 p-2.5 rounded-xl bg-white border border-slate-200/80 text-[11px] text-slate-600 flex items-center justify-between flex-wrap gap-2">
-            <span>${config.packingSupplies?.boxSinglePrice || 2.50} ea</span>
+            <span>${formatMoney(config.packingSupplies?.boxSinglePrice || 2.50, true)} ea</span>
             <span>·</span>
-            <span className="font-bold text-[#15385E]">10 for ${config.packingSupplies?.box10Price || 20}</span>
+            <span className="font-bold text-[#15385E]">10 for ${formatMoney(config.packingSupplies?.box10Price || 20)}</span>
             <span>·</span>
-            <span className="font-bold text-[#15385E]">50 for ${config.packingSupplies?.box50Price || 40}</span>
+            <span className="font-bold text-[#15385E]">50 for ${formatMoney(config.packingSupplies?.box50Price || 40)}</span>
             <span>·</span>
-            <span className="font-bold text-[#5CC1EF]">100 for ${config.packingSupplies?.box100Price || 70}</span>
+            <span className="font-bold text-[#5CC1EF]">100 for ${formatMoney(config.packingSupplies?.box100Price || 70)}</span>
           </div>
 
           {/* Quick Bundle Selector */}

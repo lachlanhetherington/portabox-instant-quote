@@ -34,6 +34,11 @@ import {
 } from '../services/customerPortalService';
 import { syncCustomerPortalActionToSmartsheet } from '../services/smartsheetService';
 import { DrivewayPlacementCheckerModal } from './DrivewayPlacementCheckerModal';
+import {
+  isValidAustralianMobile,
+  getAustralianMobileValidationError,
+  formatAustralianMobile,
+} from '../utils/phoneValidation';
 
 interface BookingDecisionModalProps {
   isOpen: boolean;
@@ -161,12 +166,25 @@ export const BookingDecisionModal: React.FC<BookingDecisionModalProps> = ({
       setCurrentStage('security');
     } else if (currentStage === 'security') {
       if (!firstName.trim() || !mobile.trim()) {
-        setError('Please provide your first name and mobile phone number.');
+        setError('Please provide your first name and Australian mobile phone number.');
+        return;
+      }
+      if (!isValidAustralianMobile(mobile)) {
+        setError(getAustralianMobileValidationError(mobile) || 'Please enter a valid Australian mobile number (e.g. 0412 345 678).');
+        return;
+      }
+      if (altMobile.trim() && !isValidAustralianMobile(altMobile)) {
+        setError(getAustralianMobileValidationError(altMobile) || 'Please enter a valid Australian mobile number for the alternate contact.');
         return;
       }
       if (!accountPin || accountPin.length < 4) {
         setError('Please enter a 4-digit security PIN to secure your customer portal.');
         return;
+      }
+      // Format valid mobiles
+      setMobile(formatAustralianMobile(mobile));
+      if (altMobile.trim()) {
+        setAltMobile(formatAustralianMobile(altMobile));
       }
       setCurrentStage('payment');
     }

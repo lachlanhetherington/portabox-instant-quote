@@ -229,6 +229,7 @@ export interface AppConfig {
   enableDrivewayFitGuarantee?: boolean; // Feature flag: 100% Driveway Fit Guarantee & assessment process
   enableGoogleCalendarLink?: boolean; // Feature flag: Google Calendar availability & slot integrations in customer flow (default off)
   enableMovingCartons?: boolean; // Feature flag: Portabox moving cartons & boxes (default: false, Portabox does not provide cartons currently)
+  enableNextStepsFlow?: boolean; // Feature flag: Post-quote Next Steps & self-booking flow (default: false)
   quoteValidityDays?: number; // Exactly 30 calendar days
   rateLockDurationMonths?: number; // Mandatory 12-month freeze
   annualPriceAdjustmentCapPercent?: number; // Default 10%

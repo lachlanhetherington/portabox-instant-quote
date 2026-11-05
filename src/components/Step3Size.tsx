@@ -21,6 +21,7 @@ import {
   getLocationPricingForHub,
   getMetroHubForPostcode,
 } from '../services/pricingEngine';
+import { formatMoney } from '../utils/currency';
 import {
   SpaceCalculatorModal,
   formatContainerMixLabel,
@@ -47,6 +48,8 @@ interface ContainerDetail {
   idealFor: string;
   dimensions: string;
   image: string;
+  imageClassName?: string;
+  gallery?: { label: string; url: string }[];
   highlightTag?: string;
 }
 
@@ -58,7 +61,7 @@ const CONTAINER_DETAILS: ContainerDetail[] = [
     subtitle: '10 m³ capacity',
     idealFor: '1 bedroom, home renovation, or decluttering',
     dimensions: '2.1m (L) × 2.1m (W) × 2.4m (H)',
-    image: PORTABOX_IMAGES.smallContainer,
+    image: '/assets/aistudio/portabox-small-storage-container-couple-with-coffee_db26ca9d.jpeg',
   },
   {
     id: 'medium_19m3',
@@ -67,7 +70,8 @@ const CONTAINER_DETAILS: ContainerDetail[] = [
     subtitle: '19 m³ capacity',
     idealFor: '2 bedroom home',
     dimensions: '3.6m (L) × 2.4m (W) × 2.4m (H)',
-    image: PORTABOX_IMAGES.mediumContainer,
+    image: '/assets/aistudio/portabox-storage-container-couple-home-driveway_cda49232.png',
+    imageClassName: 'scale-[1.42] origin-[50%_58%] group-hover:scale-[1.48]',
   },
   {
     id: 'large_25m3',
@@ -76,7 +80,7 @@ const CONTAINER_DETAILS: ContainerDetail[] = [
     subtitle: '25 m³ capacity',
     idealFor: '3 bedroom home',
     dimensions: '4.8m (L) × 2.4m (W) × 2.4m (H)',
-    image: PORTABOX_IMAGES.largeContainer,
+    image: '/assets/aistudio/portabox-melbourne-home-storage-container-packed-boxes-square_b7997913.jpeg',
   },
 ];
 
@@ -218,8 +222,10 @@ export const Step3Size: React.FC<Step3SizeProps> = ({
                 <div className="aspect-[4/3] rounded-2xl overflow-hidden bg-slate-100 mb-3.5 relative border border-[#DAD7D1] group">
                   <img
                     src={detail.image}
-                    alt={`${detail.name}`}
-                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                    alt={detail.name}
+                    className={`w-full h-full object-cover transition-transform duration-300 ${
+                      detail.imageClassName || 'group-hover:scale-105'
+                    }`}
                   />
                   <div className="absolute bottom-2 left-2 bg-[#15385E]/90 text-white text-[10px] font-mono font-bold px-2 py-0.5 rounded-md backdrop-blur-xs">
                     {detail.dimensions}
@@ -247,7 +253,7 @@ export const Step3Size: React.FC<Step3SizeProps> = ({
                       {isOnsite ? 'Onsite Storage' : 'Facility Storage'}
                     </span>
                     <span className="text-base sm:text-lg font-black text-[#15385E]">
-                      ${priceConfig.monthlyRate}
+                      ${formatMoney(priceConfig.monthlyRate)}
                       <span className="text-xs font-normal text-slate-500">/mo</span>
                     </span>
                   </div>
@@ -255,7 +261,7 @@ export const Step3Size: React.FC<Step3SizeProps> = ({
 
                 {isInterstateMove && interstateRoutePrices && (
                   <div className="mt-2 text-[11px] font-bold text-amber-900 bg-amber-50 px-2 py-1 rounded-md border border-amber-200">
-                    Interstate Freight: ${interstateRoutePrices[sizeId as keyof typeof interstateRoutePrices]}
+                    Interstate Freight: ${formatMoney(interstateRoutePrices[sizeId as keyof typeof interstateRoutePrices])}
                   </div>
                 )}
               </div>

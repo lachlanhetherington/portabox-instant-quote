@@ -370,16 +370,16 @@ export default function App() {
             });
           }
           setMagicResumeBanner(`Welcome back, ${parsed.customerName || 'Valued Customer'}! Your 30-day locked quote (${parsed.ref || magicQuote}) has been resumed.`);
-          setCurrentStep(9);
+          setCurrentStep(config.enableNextStepsFlow ? 9 : 8);
         } else {
           setMagicResumeBanner(`Welcome back! Resumed your locked quotation (${magicQuote}).`);
-          setCurrentStep(9);
+          setCurrentStep(config.enableNextStepsFlow ? 9 : 8);
         }
       }
     } catch {
       // Ignore URL parse errors
     }
-  }, []);
+  }, [config.enableNextStepsFlow]);
 
   // Admin config save handler
   const handleSaveConfig = (newConfig: AppConfig) => {
@@ -879,25 +879,45 @@ export default function App() {
                     onSelectSlot={(slot) => setSelectedSlot(slot)}
                     depotCalendarConfig={config.depotCalendars?.[currentHub]}
                     onPaymentSuccess={handleLeadPaymentSuccess}
-                    onGoToNextSteps={() => setCurrentStep(9)}
+                    onGoToNextSteps={config.enableNextStepsFlow ? () => setCurrentStep(9) : undefined}
                     onOpenBookingModal={() => handleOpenBookingModal(activeQuote)}
                     phone={config.phone}
                     config={config}
                   />
                 )}
 
-                {/* Step 9: Next Steps Page After Payment (with Customer Lifecycle Roadmap) */}
+                {/* Step 9: Next Steps Page After Payment (with Customer Lifecycle Roadmap) - Feature Flagged */}
                 {currentStep === 9 && activeQuote && (
-                  <Step9NextSteps
-                    quote={activeQuote}
-                    customerData={customerContact || undefined}
-                    paymentResult={lastPaymentResult}
-                    onOpenPlacementChecker={() => setIsPlacementCheckerOpen(true)}
-                    onOpenCustomerPortal={() => setIsCustomerPortalOpen(true)}
-                    onBackToQuote={() => setCurrentStep(8)}
-                    onResetQuote={handleResetQuote}
-                    phone={config.phone}
-                  />
+                  config.enableNextStepsFlow ? (
+                    <Step9NextSteps
+                      quote={activeQuote}
+                      customerData={customerContact || undefined}
+                      paymentResult={lastPaymentResult}
+                      onOpenPlacementChecker={() => setIsPlacementCheckerOpen(true)}
+                      onOpenCustomerPortal={() => setIsCustomerPortalOpen(true)}
+                      onBackToQuote={() => setCurrentStep(8)}
+                      onResetQuote={handleResetQuote}
+                      onSelectSlot={(slot) => setSelectedSlot(slot)}
+                      onSelectDate={(date) => setPreferredDate(date)}
+                      depotCalendarConfig={config.depotCalendars?.[currentHub]}
+                      phone={config.phone}
+                    />
+                  ) : (
+                    <Step5Quote
+                      quote={activeQuote}
+                      customerData={customerContact || undefined}
+                      onResetQuote={handleResetQuote}
+                      onApplyPromoCode={(code) => setAppliedPromoCode(code)}
+                      onUpdateBoxesCount={(cnt) => setBoxesCount(cnt)}
+                      onUpdateBlanketsCount={(cnt) => setBlanketsCount(cnt)}
+                      onSelectSlot={(slot) => setSelectedSlot(slot)}
+                      depotCalendarConfig={config.depotCalendars?.[currentHub]}
+                      onPaymentSuccess={handleLeadPaymentSuccess}
+                      onOpenBookingModal={() => handleOpenBookingModal(activeQuote)}
+                      phone={config.phone}
+                      config={config}
+                    />
+                  )
                 )}
               </div>
 
