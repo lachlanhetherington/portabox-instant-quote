@@ -358,7 +358,7 @@ export const Header: React.FC<HeaderProps> = ({
           <div className="w-full bg-[#44aee2]/40 h-1.5 relative overflow-hidden">
             <div
               className="h-full bg-[#F7D347] transition-all duration-300 ease-out shadow-xs"
-              style={{ width: `${Math.min(100, Math.round((currentStep / 8) * 100))}%` }}
+              style={{ width: `${Math.min(100, Math.round((currentStep / 9) * 100))}%` }}
             />
           </div>
         )}

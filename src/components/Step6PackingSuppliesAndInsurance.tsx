@@ -66,12 +66,12 @@ export const Step6PackingSuppliesAndInsurance: React.FC<Step6PackingSuppliesAndI
   return (
     <div className="bg-white rounded-2xl sm:rounded-3xl p-4 sm:p-8 lg:p-10 shadow-xs border-2 border-[#DAD7D1]">
       <h1 className="text-2xl sm:text-4xl font-black text-[#15385E] tracking-tight mb-2">
-        Packing Supplies &amp; Accessories
+        Supplies
       </h1>
       <p className="text-xs sm:text-sm text-slate-500 mb-8 max-w-2xl">
         {config.enableMovingCartons
-          ? 'Equip your move with heavy-duty container padlocks, furniture protection blankets, and sturdy packing cartons delivered inside your container. (Transit insurance protection is selected in the booking flow).'
-          : 'Equip your move with heavy-duty container padlocks and furniture protection blankets delivered inside your container. (Transit insurance protection is selected in the booking flow).'}
+          ? 'Equip your move with heavy-duty container padlocks, furniture protection blankets, and sturdy packing cartons delivered inside your container. (Protection plans are selected on the next step).'
+          : 'Equip your move with heavy-duty container padlocks and furniture protection blankets delivered inside your container. (Protection plans are selected on the next step).'}
       </p>
 
       {/* SECTION 1: MOVING SUPPLIES - PADLOCKS */}

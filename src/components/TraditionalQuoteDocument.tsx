@@ -47,7 +47,7 @@ export const TraditionalQuoteDocument: React.FC<TraditionalQuoteDocumentProps> =
   const [copiedMessage, setCopiedMessage] = useState(false);
   const [inquirySent, setInquirySent] = useState(false);
 
-  const quoteRef = `PBQ-${(quote.quoteCreatedAt ? new Date(quote.quoteCreatedAt).getTime() : Date.now()).toString().slice(-6)}`;
+  const quoteRef = `Q-${(quote.quoteCreatedAt ? new Date(quote.quoteCreatedAt).getTime() : Date.now()).toString().slice(-6)}`;
   const issueDateStr = quote.quoteCreatedAt
     ? new Date(quote.quoteCreatedAt).toLocaleDateString('en-AU', {
         day: 'numeric',
@@ -256,7 +256,7 @@ export const TraditionalQuoteDocument: React.FC<TraditionalQuoteDocumentProps> =
               </h4>
             </div>
             <span className="text-[10px] font-bold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-full uppercase">
-              12-Month Rate Freeze Included
+              1-Year Booking Price Guarantee Included
             </span>
           </div>
 
@@ -439,7 +439,7 @@ export const TraditionalQuoteDocument: React.FC<TraditionalQuoteDocumentProps> =
           <div className="space-y-2 max-w-md text-xs text-slate-600">
             <div className="flex items-center gap-2 text-emerald-800 font-black text-xs">
               <ShieldCheck className="w-4 h-4 text-emerald-600" />
-              <span>30-Day Rate Lock &amp; 12-Month Price Freeze Guaranteed</span>
+              <span>30-Day Quote Price Guarantee &amp; 1-Year Booking Price Guarantee</span>
             </div>
             <p className="text-[11px] leading-relaxed">
               This quotation is issued pursuant to Portabox Standard Terms of Service. Rates quoted are in Australian Dollars (AUD) and inclusive of 10% Goods and Services Tax (GST).

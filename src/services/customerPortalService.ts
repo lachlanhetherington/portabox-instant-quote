@@ -799,7 +799,7 @@ export function upsertCustomerFromLead(lead: {
 
   const newQuote = {
     id: `QUO-${Date.now().toString().slice(-4)}`,
-    quoteNumber: `PBQ-${Date.now().toString().slice(-4)}`,
+    quoteNumber: `Q-${Date.now().toString().slice(-4)}`,
     createdAt: new Date().toLocaleDateString('en-AU'),
     validUntil: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toLocaleDateString('en-AU'),
     containerSize: lead.quote.containerSize,

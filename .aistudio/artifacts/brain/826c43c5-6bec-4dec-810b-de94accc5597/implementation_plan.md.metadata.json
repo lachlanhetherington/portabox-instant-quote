@@ -1,6 +1,6 @@
 {
-  "summary":  "Architectural plan to relocate Schedule & Placement and Transit Insurance into the post-quote Booking flow, streamlining the initial quote questionnaire into 7 focused steps with packing supplies.",
-  "updatedAt":  "2026-10-31T21:10:57.297531594Z",
+  "summary":  "Implementation plan for Call Center In-App Response System with Dual-Channel Dispatch (Portal Chat & SMS) and Gemini Smart Reply Suggestions with 3 editable tone presets and Smartsheet auto-logging.",
+  "updatedAt":  "2026-11-09T05:09:53.400058886Z",
   "requestFeedback":  true,
   "userFacing":  true
 }

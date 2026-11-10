@@ -12,6 +12,9 @@ const STAFF_SESSION_STORAGE_KEY = 'portabox_staff_active_session_v1';
 
 export const DEFAULT_ROLE_PERMISSIONS: RolePermissionMatrix = {
   ceo: {
+    daily_operations: true,
+    field_logistics: true,
+    communications_config: true,
     pricing_and_rates: true,
     dispatch_calendar: true,
     softphone_telephony: true,
@@ -22,50 +25,65 @@ export const DEFAULT_ROLE_PERMISSIONS: RolePermissionMatrix = {
     manage_permissions: true,
   },
   manager: {
-    pricing_and_rates: true,
+    daily_operations: false,
+    field_logistics: false,
+    communications_config: false,
+    pricing_and_rates: false,
     dispatch_calendar: true,
     softphone_telephony: true,
     driver_portal: true,
     customer_crm: true,
     yard_inventory: true,
-    ai_copilot: true,
-    manage_permissions: true,
+    ai_copilot: false,
+    manage_permissions: false,
   },
   call_center: {
+    daily_operations: false,
+    field_logistics: false,
+    communications_config: false,
     pricing_and_rates: false,
     dispatch_calendar: true,
     softphone_telephony: true,
     driver_portal: false,
-    customer_crm: true,
+    customer_crm: false,
     yard_inventory: false,
-    ai_copilot: true,
+    ai_copilot: false,
     manage_permissions: false,
   },
   driver: {
+    daily_operations: false,
+    field_logistics: false,
+    communications_config: false,
     pricing_and_rates: false,
     dispatch_calendar: false,
     softphone_telephony: false,
     driver_portal: true,
     customer_crm: false,
-    yard_inventory: true,
+    yard_inventory: false,
     ai_copilot: false,
     manage_permissions: false,
   },
   admin_pricing: {
+    daily_operations: false,
+    field_logistics: false,
+    communications_config: false,
     pricing_and_rates: true,
     dispatch_calendar: false,
     softphone_telephony: false,
     driver_portal: false,
-    customer_crm: true,
+    customer_crm: false,
     yard_inventory: false,
-    ai_copilot: true,
+    ai_copilot: false,
     manage_permissions: false,
   },
   warehouse: {
+    daily_operations: false,
+    field_logistics: false,
+    communications_config: false,
     pricing_and_rates: false,
     dispatch_calendar: false,
     softphone_telephony: false,
-    driver_portal: true,
+    driver_portal: false,
     customer_crm: false,
     yard_inventory: true,
     ai_copilot: false,
@@ -191,7 +209,18 @@ export function loadRolePermissions(): RolePermissionMatrix {
       return DEFAULT_ROLE_PERMISSIONS;
     }
     const parsed = JSON.parse(raw);
-    return parsed && typeof parsed === 'object' ? parsed : DEFAULT_ROLE_PERMISSIONS;
+    if (parsed && typeof parsed === 'object') {
+      // Merge with default role permissions so newly configured sections exist
+      const merged: RolePermissionMatrix = {};
+      Object.keys(DEFAULT_ROLE_PERMISSIONS).forEach((role) => {
+        merged[role] = {
+          ...DEFAULT_ROLE_PERMISSIONS[role],
+          ...(parsed[role] || {}),
+        };
+      });
+      return merged;
+    }
+    return DEFAULT_ROLE_PERMISSIONS;
   } catch (err) {
     console.error('Failed to load role permissions:', err);
     return DEFAULT_ROLE_PERMISSIONS;
@@ -252,7 +281,18 @@ export function canManageStaffPermissions(member: StaffMember | null | undefined
 export function getStaffSession(): StaffSession | null {
   try {
     const raw = localStorage.getItem(STAFF_SESSION_STORAGE_KEY);
-    if (!raw) return null;
+    if (!raw) {
+      // Initialize default session as CEO Dan Harrington for immediate executive access
+      const staff = loadStaffMembers();
+      const ceo = staff.find((s) => s.role === 'ceo') || INITIAL_STAFF_MEMBERS[0];
+      return {
+        user: ceo,
+        token: `pbox_ceo_initial_${Date.now()}`,
+        verifiedVia: '2fa_sms',
+        loginTime: '08:30 AM',
+        expiresAt: Date.now() + 12 * 60 * 60 * 1000,
+      };
+    }
     const session: StaffSession = JSON.parse(raw);
     if (session.expiresAt && Date.now() > session.expiresAt) {
       clearStaffSession();

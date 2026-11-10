@@ -82,9 +82,20 @@ export const AdminPhoneIntakeDrawer: React.FC<AdminPhoneIntakeDrawerProps> = ({
   // Container & Service
   const [serviceType, setServiceType] = useState<ServiceType>('storage_at_place');
   const [containerSize, setContainerSize] = useState<ContainerSizeId>('large_25m3');
+  const [containerCount, setContainerCount] = useState<number>(1);
   const [scheduledDate, setScheduledDate] = useState(() => {
     const d = new Date();
     d.setDate(d.getDate() + 3);
+    return d.toISOString().slice(0, 10);
+  });
+  const [staggeredDate2, setStaggeredDate2] = useState<string>(() => {
+    const d = new Date();
+    d.setDate(d.getDate() + 6);
+    return d.toISOString().slice(0, 10);
+  });
+  const [staggeredDate3, setStaggeredDate3] = useState<string>(() => {
+    const d = new Date();
+    d.setDate(d.getDate() + 9);
     return d.toISOString().slice(0, 10);
   });
   const [deliveryWindow, setDeliveryWindow] = useState('09:00 AM – 11:30 AM (Morning Window)');
@@ -151,14 +162,14 @@ export const AdminPhoneIntakeDrawer: React.FC<AdminPhoneIntakeDrawerProps> = ({
       originPostcode: selectedPostcode,
       serviceType,
       containerSize,
-      containerCount: 1,
+      containerCount,
       billingCycle: 'monthly',
       storageDuration: '1_to_3_months',
       storageDurationMonths: 1,
       preferredDate: scheduledDate,
       config,
     });
-  }, [selectedPostcode, serviceType, containerSize, scheduledDate, config]);
+  }, [selectedPostcode, serviceType, containerSize, containerCount, scheduledDate, config]);
 
   const finalFirstPayment = Math.max(0, (quote?.firstPaymentTotal || 368) - adminDiscount);
 
@@ -238,6 +249,9 @@ export const AdminPhoneIntakeDrawer: React.FC<AdminPhoneIntakeDrawerProps> = ({
         postcode: selectedPostcode.postcode,
         state: selectedPostcode.state,
         deliveryZone: `Zone ${quote?.deliveryZone || 'A'}`,
+        zoneFromLetter: `Zone ${quote?.deliveryZone || 'A'}`,
+        containerCount,
+        staggeredDates: [scheduledDate, staggeredDate2, staggeredDate3],
         containerSize:
           containerSize === 'small_10m3'
             ? '10 m³'
@@ -1001,10 +1015,33 @@ Payment: ${hasNoPhoneOrEmail || paymentPreference.includes('Credit Card') ? 'Cre
                   ))}
                 </div>
 
+                {/* Container Quantity Toggle */}
+                <div>
+                  <label className="text-[11px] font-bold text-slate-700 block mb-1">
+                    Number of Containers (Generates Linked Line Items in Smartsheet)
+                  </label>
+                  <div className="grid grid-cols-3 gap-2">
+                    {[1, 2, 3].map((num) => (
+                      <button
+                        key={num}
+                        type="button"
+                        onClick={() => setContainerCount(num)}
+                        className={`py-2 px-3 rounded-xl border text-xs font-bold transition-all cursor-pointer text-center ${
+                          containerCount === num
+                            ? 'border-[#00c0f3] bg-[#00c0f3] text-white shadow-xs'
+                            : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                        }`}
+                      >
+                        {num} Container{num > 1 ? 's' : ''}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
                   <div>
                     <label className="text-[11px] font-bold text-slate-700 block mb-1">
-                      Preferred Delivery Date
+                      {containerCount > 1 ? 'Container 1 Delivery Date' : 'Preferred Delivery Date'}
                     </label>
                     <input
                       type="date"
@@ -1030,6 +1067,41 @@ Payment: ${hasNoPhoneOrEmail || paymentPreference.includes('Credit Card') ? 'Cre
                     </select>
                   </div>
                 </div>
+
+                {/* Staggered Delivery Scheduling for Container 2 & 3 */}
+                {containerCount > 1 && (
+                  <div className="p-3 rounded-2xl bg-amber-50/70 border border-amber-200/80 space-y-2.5">
+                    <div className="flex items-center gap-1.5 text-amber-900 font-bold text-[11px]">
+                      <span>⚡ Staggered Logistics Scheduling (Independent Line Items)</span>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="text-[10px] font-bold text-amber-900 block mb-1">
+                          Container 2 Delivery Date (e.g. +3 Days)
+                        </label>
+                        <input
+                          type="date"
+                          value={staggeredDate2}
+                          onChange={(e) => setStaggeredDate2(e.target.value)}
+                          className="w-full px-3 py-1.5 rounded-xl border border-amber-300 bg-white text-xs font-semibold"
+                        />
+                      </div>
+                      {containerCount >= 3 && (
+                        <div>
+                          <label className="text-[10px] font-bold text-amber-900 block mb-1">
+                            Container 3 Delivery Date (e.g. +6 Days)
+                          </label>
+                          <input
+                            type="date"
+                            value={staggeredDate3}
+                            onChange={(e) => setStaggeredDate3(e.target.value)}
+                            className="w-full px-3 py-1.5 rounded-xl border border-amber-300 bg-white text-xs font-semibold"
+                          />
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* SECTION 4: Smartsheet Physical Logistics & Site Access */}

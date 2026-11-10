@@ -136,11 +136,14 @@ export interface PackingSuppliesConfig {
   isLockFreePromo?: boolean; // admin incentive toggle (free padlock with container rental)
 }
 
+export type ProtectionPlanType = 'cpo' | 'coo' | 'none';
+
 export interface ContainerInsuranceConfig {
   enabled: boolean;
-  monthlyPricePerContainer: number; // default: $15/mo per container
+  monthlyPricePerContainer: number; // default: $15/mo per container for CPO
+  cooMonthlyPricePerContainer?: number; // default: $10/mo per container for COO (onsite only)
   isFreePromo: boolean; // admin incentive toggle: offer free insurance to incentivise sales
-  coverageAmountPerContainer: number; // e.g., $10,000 coverage
+  coverageAmountPerContainer: number; // max $5,000 coverage per container
   description?: string;
 }
 
@@ -168,6 +171,47 @@ export interface InterstateRoutePricing {
   small_10m3: number;
   medium_19m3: number;
   large_25m3: number;
+}
+
+export type AnnualMilestoneOption = '400A' | '400B';
+
+export interface DiscountMatrixRule {
+  id: string;
+  name: string;
+  active: boolean;
+  minMonths: number; // 0.5 (2 weeks), 1, 2, 3..11, 12
+  maxMonths?: number; // e.g. 0.5 for 2 weeks, 1 for 1 month, 11 for 11 months, undefined for 12+
+  containerSizes: ('small_10m3' | 'medium_19m3' | 'large_25m3')[]; // 7', 12', 16'
+  moveScope: 'all' | 'local' | 'interstate';
+  storagePlacement: 'all' | 'my_place' | 'facility';
+  hubLocations: ('all' | MetroHub)[];
+
+  // Specific benefits
+  freeBlanketsCount?: number;
+  freeLockIncluded?: boolean;
+  firstMonthFree?: boolean;
+  discountPercent?: number; // e.g. 5% for 6m upfront, 10% for 12m upfront
+  milestoneDiscountAmount?: number; // $400 for 400A or $200 for 400B
+  milestoneDiscountOption?: AnnualMilestoneOption;
+
+  description?: string;
+  notes?: string;
+  isPriceFreezeProtected?: boolean; // 1-Year Booking Price Guarantee applies to discounted rate
+  earlyTerminationClawbackEnabled?: boolean; // Clawback applies if customer terminates early
+}
+
+export interface EarlyTerminationResult {
+  isViolation: boolean;
+  committedMonths: number;
+  actualMonthsCompleted: number;
+  totalClawbackAmount: number;
+  itemizedClawbacks: {
+    item: string;
+    waivedValue: number;
+    reason: string;
+  }[];
+  revisedFinalBalanceDue: number;
+  customerNotificationText: string;
 }
 
 export interface DurationDiscountTier {
@@ -208,6 +252,7 @@ export interface AppConfig {
   fuelSurchargeZoneRates?: FuelSurchargeZoneRates; // Fixed rate per leg by delivery zone (A, B, C, D, E)
   promotions: PromotionRule[];
   durationDiscounts?: DurationDiscountTier[];
+  discountMatrixRules?: DiscountMatrixRule[];
   blockedPostcodes: BlockedPostcode[];
   depotCalendars?: Record<string, DepotCalendarConfig>;
   braintreeMerchantId?: string;
@@ -374,6 +419,11 @@ export interface QuoteBreakdown {
   insuranceSelected?: boolean;
   insuranceMonthlyFee?: number;
   insuranceSavingsMonthly?: number;
+  protectionPlan?: ProtectionPlanType;
+  protectionPlanName?: string;
+  protectionMonthlyFee?: number;
+  protectionCoverageAmount?: number;
+  isInterstateProtectionMandatory?: boolean;
   config?: any;
   
   legs: QuoteLegBreakdown[];
@@ -382,6 +432,8 @@ export interface QuoteBreakdown {
   destinationLogisticsMethod?: LogisticsMethod;
   legsSavedCount?: number;
   legsSavedDollarTotal?: number;
+  totalLegsCount?: number;
+  requiredAddressesCount?: number;
   initialDeliveryFee: number;
   firstPaymentTotal: number;
   monthlyStorageFee: number;
@@ -396,6 +448,19 @@ export interface QuoteBreakdown {
   durationCompletionBonusDollars?: number;
   durationFreeBlanketsCount?: number;
   baseMonthlyStorageFee?: number;
+
+  // Multi-dimensional discount matrix results
+  annualDiscountOption?: AnnualMilestoneOption;
+  isFirstMonthFree?: boolean;
+  firstMonthSavingsAmount?: number;
+  freeLockIncluded?: boolean;
+  freeBlanketsIncluded?: boolean;
+  freeSuppliesRetailValue?: number;
+  upfrontDiscountAmount?: number;
+  milestoneCreditTotal?: number;
+  milestoneCreditOption?: AnnualMilestoneOption;
+  discountMatrixMatchedRule?: DiscountMatrixRule;
+  earlyTerminationWarning?: string;
   
   appliedPromotions: {
     rule: PromotionRule;

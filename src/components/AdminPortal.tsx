@@ -143,11 +143,19 @@ import { DurationDiscountsAdminWorkspace } from './admin/DurationDiscountsAdminW
 import { FrozenPricingDashboard } from './admin/FrozenPricingDashboard';
 import { PostcodeTiersAdminWorkspace } from './admin/PostcodeTiersAdminWorkspace';
 import { LocationServiceHoursManager } from './admin/LocationServiceHoursManager';
+import { MorningOvernightDigestBanner } from './admin/MorningOvernightDigestBanner';
 import { AdminCopilotChat } from './admin/AdminCopilotChat';
 import { FinancialDataExportModal } from './admin/FinancialDataExportModal';
 import { CompetitorPricingWorkspace } from './admin/CompetitorPricingWorkspace';
 import { StaffPermissionsWorkspace } from './admin/StaffPermissionsWorkspace';
-import { getStaffSession } from '../services/adminAuthService';
+import {
+  getStaffSession,
+  setStaffSession,
+  hasStaffPermission,
+  loadStaffMembers,
+  INITIAL_STAFF_MEMBERS,
+} from '../services/adminAuthService';
+import { StaffSession, StaffPermissionKey } from '../types/adminAuth';
 
 interface AdminPortalProps {
   config: AppConfig;
@@ -177,6 +185,81 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
       setActiveTab(initialTab);
     }
   }, [initialTab]);
+
+  // Active Staff & Executive Session (Dan Harrington CEO by default)
+  const [staffSession, setStaffSessionState] = useState<StaffSession | null>(getStaffSession());
+
+  const handleSwitchToCeoSession = () => {
+    const staff = loadStaffMembers();
+    const ceo = staff.find((s) => s.role === 'ceo') || INITIAL_STAFF_MEMBERS[0];
+    const newSession = setStaffSession(ceo, 'passkey');
+    setStaffSessionState(newSession);
+  };
+
+  const getRequiredPermissionForTab = (tab: AdminTabId): StaffPermissionKey | null => {
+    switch (tab) {
+      case 'customers':
+      case 'leads':
+      case 'smartsheet':
+      case 'call_center_routing':
+      case 'dropoffs':
+        return 'daily_operations';
+      case 'inventory':
+      case 'postcode_tiers':
+      case 'depots':
+      case 'blocked':
+        return 'field_logistics';
+      case 'telephony':
+      case 'business_hours':
+      case 'branding':
+      case 'features':
+        return 'communications_config';
+      case 'pricing_matrix':
+      case 'pricing':
+      case 'competitor_pricing':
+      case 'duration_discounts':
+      case 'quote_lifecycle':
+      case 'freeze_management':
+      case 'zones':
+      case 'interstate':
+      case 'promotions':
+        return 'pricing_and_rates';
+      case 'staff_permissions':
+        return 'manage_permissions';
+      case 'admin_copilot':
+        return 'ai_copilot';
+      default:
+        return null;
+    }
+  };
+
+  const getTabDisplayName = (tab: AdminTabId): string => {
+    switch (tab) {
+      case 'customers': return 'Customers & Accounts (Daily Operations)';
+      case 'leads': return 'Quote Leads & CRM (Daily Operations)';
+      case 'smartsheet': return 'Yard Dispatch & Smartsheet (Daily Operations)';
+      case 'call_center_routing': return 'Fleet Calendar & Routing (Daily Operations)';
+      case 'dropoffs': return 'Drop-Off Funnel (Daily Operations)';
+      case 'inventory': return 'Container Inventory & QR (Field Logistics)';
+      case 'postcode_tiers': return 'Postcode Coverage Tiers (Field Logistics)';
+      case 'depots': return 'Depot Locations (Field Logistics)';
+      case 'blocked': return 'Blocked Postcodes (Field Logistics)';
+      case 'telephony': return 'Telephony & Call Routing (Communications & Config)';
+      case 'business_hours': return 'Business Hours & SMS (Communications & Config)';
+      case 'branding': return 'Branding & Slogan (Communications & Config)';
+      case 'features': return 'Feature Toggles (Communications & Config)';
+      case 'pricing_matrix': return 'Tariff Matrix & Simulator';
+      case 'staff_permissions': return 'Staff Roles & 2FA Governance';
+      case 'admin_copilot': return 'Admin AI Copilot';
+      default: return tab;
+    }
+  };
+
+  const requiredPermissionForCurrentTab = getRequiredPermissionForTab(activeTab);
+  const isCurrentTabAuthorized =
+    !requiredPermissionForCurrentTab ||
+    (staffSession?.user ? hasStaffPermission(staffSession.user, requiredPermissionForCurrentTab) : true);
+  const isDailyOpsAuthorized = staffSession?.user ? hasStaffPermission(staffSession.user, 'daily_operations') : true;
 
   // Admin Enterprise Security Gate (Passkey & 2FA)
   const [adminAuthSession, setAdminAuthSessionState] = useState<AdminAuthSession | null>(getAdminAuthSession());
@@ -1180,6 +1263,10 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
         onToggleViewMode={setAdminViewMode}
         onOpenPhoneIntake={() => setIsPhoneIntakeOpen(true)}
         onOpenFinancialExport={() => setIsFinancialExportOpen(true)}
+        onNavigateToQuote={(qid) => {
+          setAdminViewMode('smartsheet');
+          setGlobalSearchQuery(qid);
+        }}
       />
 
       {/* Main Workspace Frame: Persistent CRM Sidebar + Active Content */}
@@ -1192,6 +1279,8 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
           onToggleCollapse={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
           config={currentConfig}
           onOpenPhoneIntake={() => setIsPhoneIntakeOpen(true)}
+          staffSession={staffSession}
+          onSelectSession={(session) => setStaffSessionState(session)}
           counts={{
             customers: customers.length,
             leads: leads.length,
@@ -1205,8 +1294,86 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
         />
 
         {/* Center / Right Content Workspace Area */}
-        <div className="flex-1 overflow-y-auto bg-slate-50/80 p-4 sm:p-6 lg:p-8">
-          {adminViewMode === 'smartsheet' ? (
+        <div className="flex-1 overflow-y-auto bg-slate-50/80 p-4 sm:p-6 lg:p-8 space-y-4">
+          {/* Morning Overnight Digest Greeting Banner */}
+          <MorningOvernightDigestBanner
+            onFilterOvernightQuotes={() => {
+              setAdminViewMode('smartsheet');
+            }}
+          />
+
+          {!isCurrentTabAuthorized || (adminViewMode === 'smartsheet' && !isDailyOpsAuthorized) ? (
+            <div className="bg-white rounded-3xl p-6 sm:p-10 shadow-sm border border-slate-200 text-center max-w-2xl mx-auto my-8 space-y-6 animate-in fade-in">
+              <div className="w-16 h-16 rounded-3xl bg-amber-500/10 text-amber-600 flex items-center justify-center mx-auto border border-amber-200 shadow-xs">
+                <Lock className="w-8 h-8" />
+              </div>
+              <div className="space-y-2">
+                <div className="inline-flex items-center gap-2 px-3 py-1 bg-amber-50 border border-amber-200 rounded-full text-[11px] font-black text-amber-900 uppercase tracking-wider">
+                  <ShieldCheck className="w-3.5 h-3.5 text-amber-600" />
+                  <span>CEO Executive Access Restricted</span>
+                </div>
+                <h3 className="text-xl sm:text-2xl font-black text-[#0b2942]">
+                  {adminViewMode === 'smartsheet' ? 'Smartsheet Yard Dispatch (Daily Operations)' : getTabDisplayName(activeTab)}
+                </h3>
+                <p className="text-xs sm:text-sm text-slate-600 max-w-lg mx-auto">
+                  By company governance, this section is restricted to <strong>Dan Harrington (CEO & Managing Director)</strong> by default.
+                  The CEO can grant access to Call Center Operatives, Ops Managers, or other staff via Staff Roles & 2FA Governance.
+                </p>
+              </div>
+
+              <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 text-left space-y-2.5">
+                <div className="flex items-center justify-between text-xs pb-1.5 border-b border-slate-200/70">
+                  <span className="text-slate-500 font-medium">Logged-in Persona:</span>
+                  <span className="font-bold text-slate-800 flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
+                    {staffSession?.user.name || 'Anonymous Staff'} · {staffSession?.user.title || staffSession?.user.role.toUpperCase()}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between text-xs pb-1.5 border-b border-slate-200/70">
+                  <span className="text-slate-500 font-medium">Required Permission Key:</span>
+                  <span className="font-mono text-amber-800 font-bold bg-amber-50 px-2.5 py-0.5 rounded border border-amber-200 text-[11px]">
+                    {adminViewMode === 'smartsheet' ? 'daily_operations' : (requiredPermissionForCurrentTab || 'executive_only')}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-slate-500 font-medium">Delegation:</span>
+                  <span className="text-slate-700 font-medium">
+                    CEO can toggle permissions anytime or create/revoke operative access.
+                  </span>
+                </div>
+              </div>
+
+              <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={handleSwitchToCeoSession}
+                  className="w-full sm:w-auto px-5 py-3 bg-[#0b2942] hover:bg-[#15385E] text-white rounded-xl text-xs font-black flex items-center justify-center gap-2 transition-all cursor-pointer shadow-md hover:scale-[1.02]"
+                >
+                  <Shield className="w-4 h-4 text-amber-400" />
+                  <span>Switch to CEO Persona (Dan Harrington)</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (adminViewMode === 'smartsheet') setAdminViewMode('crm');
+                    handleSelectNavTab('staff_permissions', 'Staff Roles & 2FA Governance');
+                  }}
+                  className="w-full sm:w-auto px-4 py-3 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all cursor-pointer"
+                >
+                  <Users className="w-4 h-4 text-slate-600" />
+                  <span>Open Staff Permissions</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsPhoneIntakeOpen(true)}
+                  className="w-full sm:w-auto px-4 py-3 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-black flex items-center justify-center gap-2 transition-all cursor-pointer shadow-xs"
+                >
+                  <Phone className="w-4 h-4" />
+                  <span>Phone Intake (Always Open)</span>
+                </button>
+              </div>
+            </div>
+          ) : adminViewMode === 'smartsheet' ? (
             <div className="space-y-4">
               <div className="bg-[#0b2942] text-white p-4 sm:p-5 rounded-3xl flex flex-col md:flex-row md:items-center justify-between gap-4 border border-slate-700 shadow-md">
                 <div className="flex items-center gap-3">
@@ -1220,10 +1387,10 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                         Smartsheet Transition Mode
                       </span>
                       <span className="text-xs text-slate-200 font-bold">
-                        User: <strong className="text-white">ahammo@gmail.com</strong>
+                        User: <strong className="text-white">andrew@weva.ai</strong>
                       </span>
                       <span className="text-xs text-slate-300 font-semibold">
-                        Sheet: <strong className="text-emerald-400">portabox smart sheet Ai agent</strong>
+                        Sheet: <strong className="text-emerald-400">CRM-Phase I (Quotezilla - QZ4)</strong>
                       </span>
                     </div>
                     <p className="text-xs text-slate-300">
@@ -1256,8 +1423,8 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                 rows={smartsheetRows}
                 onRefreshRows={(updated) => setSmartsheetRows(updated)}
                 onOpenPhoneIntake={() => setIsPhoneIntakeOpen(true)}
-                sheetName="portabox smart sheet Ai agent"
-                userEmail="ahammo@gmail.com"
+                sheetName="CRM-Phase I (Quotezilla - QZ4)"
+                userEmail="andrew@weva.ai"
               />
             </div>
           ) : (
@@ -1281,7 +1448,8 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
           {/* ================= TAB: STAFF ROLES & 2FA GOVERNANCE (CEO & OPS MANAGER) ================= */}
           {activeTab === 'staff_permissions' && (
             <StaffPermissionsWorkspace
-              currentSession={getStaffSession()}
+              currentSession={staffSession || getStaffSession()}
+              onRefreshPermissions={() => setStaffSessionState(getStaffSession())}
             />
           )}
 
@@ -2147,7 +2315,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                       <div>
                         <span className="text-[10px] text-purple-700 uppercase font-black block">Active Status</span>
                         <span className="font-bold text-emerald-700 text-sm block">
-                          {pricingOverrideCustomer.pricingOverride?.isActive ? 'Active Custom Override' : 'Standard Rate Freeze'}
+                          {pricingOverrideCustomer.pricingOverride?.isActive ? 'Active Custom Override' : 'Standard 1-Year Price Guarantee'}
                         </span>
                         {pricingOverrideCustomer.pricingOverride?.isActive && (
                           <span className="text-[10px] text-purple-600 font-bold block">
@@ -2778,8 +2946,8 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                 rows={smartsheetRows}
                 onRefreshRows={(updated) => setSmartsheetRows(updated)}
                 onOpenPhoneIntake={() => setIsPhoneIntakeOpen(true)}
-                sheetName={smartsheetConfig.sheetName || 'portabox smart sheet Ai agent'}
-                userEmail="ahammo@gmail.com"
+                sheetName={smartsheetConfig.sheetName || 'CRM-Phase I (Quotezilla - QZ4)'}
+                userEmail="andrew@weva.ai"
               />
             )}
 
@@ -4731,9 +4899,9 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                       Contents Cover
                     </span>
                   </h5>
-                  <div className="grid grid-cols-2 gap-2 text-xs">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
                     <div>
-                      <label className="text-[10px] text-slate-500 block">Price / Container ($/mo)</label>
+                      <label className="text-[10px] text-slate-500 block">CPO / Container ($/mo)</label>
                       <input
                         type="number"
                         min="0"
@@ -4745,8 +4913,9 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                               ...(currentConfig.insurance || {
                                 enabled: true,
                                 monthlyPricePerContainer: 15,
+                                cooMonthlyPricePerContainer: 10,
                                 isFreePromo: false,
-                                coverageAmountPerContainer: 10000,
+                                coverageAmountPerContainer: 5000,
                               }),
                               monthlyPricePerContainer: Number(e.target.value),
                             },
@@ -4756,12 +4925,11 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                       />
                     </div>
                     <div>
-                      <label className="text-[10px] text-slate-500 block">Cover Amount / Container ($)</label>
+                      <label className="text-[10px] text-slate-500 block">COO / Container ($/mo, Onsite)</label>
                       <input
                         type="number"
-                        min="1000"
-                        step="1000"
-                        value={currentConfig.insurance?.coverageAmountPerContainer ?? 10000}
+                        min="0"
+                        value={currentConfig.insurance?.cooMonthlyPricePerContainer ?? 10}
                         onChange={(e) =>
                           setCurrentConfig({
                             ...currentConfig,
@@ -4769,8 +4937,34 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                               ...(currentConfig.insurance || {
                                 enabled: true,
                                 monthlyPricePerContainer: 15,
+                                cooMonthlyPricePerContainer: 10,
                                 isFreePromo: false,
-                                coverageAmountPerContainer: 10000,
+                                coverageAmountPerContainer: 5000,
+                              }),
+                              cooMonthlyPricePerContainer: Number(e.target.value),
+                            },
+                          })
+                        }
+                        className="w-full px-2 py-1 rounded-lg border font-mono font-bold text-xs"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-slate-500 block">CPO Max Cover / Container ($)</label>
+                      <input
+                        type="number"
+                        min="1000"
+                        step="500"
+                        value={currentConfig.insurance?.coverageAmountPerContainer ?? 5000}
+                        onChange={(e) =>
+                          setCurrentConfig({
+                            ...currentConfig,
+                            insurance: {
+                              ...(currentConfig.insurance || {
+                                enabled: true,
+                                monthlyPricePerContainer: 15,
+                                cooMonthlyPricePerContainer: 10,
+                                isFreePromo: false,
+                                coverageAmountPerContainer: 5000,
                               }),
                               coverageAmountPerContainer: Number(e.target.value),
                             },

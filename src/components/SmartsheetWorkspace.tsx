@@ -414,8 +414,8 @@ export const SmartsheetWorkspace: React.FC<SmartsheetWorkspaceProps> = ({
             rows={bookingRows}
             onRefreshRows={(updated) => setBookingRows(updated)}
             onOpenPhoneIntake={() => setIsPhoneIntakeOpen(true)}
-            sheetName="portabox smart sheet Ai agent"
-            userEmail="ahammo@gmail.com"
+            sheetName="CRM-Phase I (Quotezilla - QZ4)"
+            userEmail="andrew@weva.ai"
           />
         ) : (
         <div className="bg-white rounded-3xl border border-slate-200 shadow-xs overflow-hidden">
@@ -1104,10 +1104,36 @@ export const SmartsheetWorkspace: React.FC<SmartsheetWorkspaceProps> = ({
                   />
                 </div>
 
+                {/* Multi-Container Logistics Fields */}
                 <div>
-                  <label className="block font-bold text-slate-700 mb-1">Scheduled Delivery Date</label>
+                  <label className="block font-bold text-slate-700 mb-1">Container Line / Number</label>
                   <input
                     type="text"
+                    value={editingRow.containerNumber || '1 of 1'}
+                    onChange={(e) => setEditingRow({ ...editingRow, containerNumber: e.target.value })}
+                    placeholder="e.g. 1 of 2, 2 of 2"
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 font-bold"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">Container Size</label>
+                  <select
+                    value={editingRow.containerSize}
+                    onChange={(e) => setEditingRow({ ...editingRow, containerSize: e.target.value })}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 font-bold"
+                  >
+                    <option value="10 m³">10 m³</option>
+                    <option value="19 m³">19 m³</option>
+                    <option value="25 m³">25 m³</option>
+                    <option value="50 m³ (2x 25m³)">50 m³ (2x 25m³)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">Scheduled Delivery Date (Staggered)</label>
+                  <input
+                    type="date"
                     value={editingRow.scheduledDeliveryDate}
                     onChange={(e) =>
                       setEditingRow({ ...editingRow, scheduledDeliveryDate: e.target.value })
@@ -1136,6 +1162,98 @@ export const SmartsheetWorkspace: React.FC<SmartsheetWorkspaceProps> = ({
                     <option value="4:30 PM – 7:00 PM (Evening Window)">
                       4:30 PM – 7:00 PM (Evening Window)
                     </option>
+                  </select>
+                </div>
+
+                {/* Zone Pricing Transition (Zone A-E) */}
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">Pricing Zone (A–E Transition)</label>
+                  <select
+                    value={editingRow.zoneFromLetter || editingRow.deliveryZone || 'Zone A'}
+                    onChange={(e) =>
+                      setEditingRow({
+                        ...editingRow,
+                        zoneFromLetter: e.target.value,
+                        deliveryZone: e.target.value,
+                      })
+                    }
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 font-bold text-[#0b2942]"
+                  >
+                    <option value="Zone A">Zone A (&lt;25 km · $5 Fuel Levy)</option>
+                    <option value="Zone B">Zone B (25–50 km · $15 Fuel Levy)</option>
+                    <option value="Zone C">Zone C (50–75 km · $25 Fuel Levy)</option>
+                    <option value="Zone D">Zone D (75–100 km · $35 Fuel Levy)</option>
+                    <option value="Zone E">Zone E (&gt;100 km · $50 Fuel Levy)</option>
+                  </select>
+                </div>
+
+                {/* Protection Plan */}
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">Protection Plan</label>
+                  <select
+                    value={editingRow.protectionPlan || 'Customer Goods in Transit/Storage Cover ($5,000 Included)'}
+                    onChange={(e) =>
+                      setEditingRow({
+                        ...editingRow,
+                        protectionPlan: e.target.value,
+                      })
+                    }
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 font-semibold"
+                  >
+                    <option value="Customer Goods in Transit/Storage Cover ($5,000 Included)">
+                      CPO $5,000 Cover (Included Free)
+                    </option>
+                    <option value="Customer Goods Extended Cover ($25,000)">
+                      Extended Cover ($25,000 · +$35/mth)
+                    </option>
+                    <option value="Customer Opt-Out / Own Policy">
+                      Customer Own Insurance (COO)
+                    </option>
+                  </select>
+                </div>
+
+                {/* Duration Discounts Matrix Fields */}
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">Duration Discount Offer</label>
+                  <select
+                    value={editingRow.discountOffered || 'None'}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setEditingRow({
+                        ...editingRow,
+                        discountOffered: val,
+                        isFirstMonthFree: val.includes('1st Mth Free'),
+                      });
+                    }}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 font-semibold"
+                  >
+                    <option value="None">None (Standard Rate)</option>
+                    <option value="Free Blankets, Free Lock">Free Blankets, Free Lock (1 Month)</option>
+                    <option value="Free Blankets, Free Lock, 1st Mth Free">Free Blankets, Free Lock, 1st Mth Free (2–11 Months)</option>
+                    <option value="400A - $400 off 12 mth lump sum">400A - $400 off 12 mth lump sum</option>
+                    <option value="400B - $200 off 6th mth / $200 off 12 mth">400B - $200 off 6th / $200 off 12th mth</option>
+                  </select>
+                </div>
+
+                {/* Follow-Up Status */}
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">Call Center Follow-Up Status</label>
+                  <select
+                    value={editingRow.followUpCustomerStatus || 'New Quote Active'}
+                    onChange={(e) =>
+                      setEditingRow({
+                        ...editingRow,
+                        followUpCustomerStatus: e.target.value,
+                      })
+                    }
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 font-semibold"
+                  >
+                    <option value="New Quote Active">New Quote Active</option>
+                    <option value="1st Follow UP Completed">1st Follow UP Completed</option>
+                    <option value="2nd Follow UP Completed - LVM/EMAIL">2nd Follow UP Completed - LVM/EMAIL</option>
+                    <option value="Requoted CLOSE ROW">Requoted CLOSE ROW</option>
+                    <option value="Booked (Moved to Ozilla)">Booked (Moved to Ozilla)</option>
+                    <option value="No Sale - see notes">No Sale - see notes</option>
                   </select>
                 </div>
 

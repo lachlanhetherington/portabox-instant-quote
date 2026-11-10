@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Check, CheckCircle2, Pencil, ChevronDown, TrendingDown, ShieldCheck, Sparkles, Truck, Calendar, ExternalLink } from 'lucide-react';
 import { PostcodeRecord } from '../data/australianPostcodes';
-import { BillingCycle, ContainerSizeId, DeliverySlotWindow, LogisticsMethod, MetroHub, ServiceType, StorageDuration } from '../types/quote';
+import { BillingCycle, ContainerSizeId, DeliverySlotWindow, LogisticsMethod, MetroHub, ProtectionPlanType, ServiceType, StorageDuration } from '../types/quote';
 import { calculateCompetitorComparison } from '../services/competitorPricingService';
 import { generateGoogleCalendarUrl } from '../services/deliveryCalendarService';
 import { formatMoney } from '../utils/currency';
@@ -34,11 +34,21 @@ interface RightSidebarProps {
   locksCount?: number;
   insuranceSelected?: boolean;
   insuranceMonthlyFee?: number;
+  protectionPlan?: ProtectionPlanType;
+  protectionMonthlyFee?: number;
   deliveryFeePerContainer?: number;
   deliveryZone?: string | number;
   deliveryZoneRangeLabel?: string;
   interstateFeePerContainer?: number;
+  isInterstate?: boolean;
   monthlyStorageFee?: number;
+  initialDeliveryFee?: number;
+  isFirstMonthFree?: boolean;
+  freeBlanketsIncluded?: boolean;
+  freeLockIncluded?: boolean;
+  milestoneCreditTotal?: number;
+  milestoneCreditOption?: string;
+  upfrontDiscountPercent?: number;
   enableDrivewayFitGuarantee?: boolean;
   enableGoogleCalendarLink?: boolean;
   onOpenPlacementChecker?: () => void;
@@ -73,11 +83,21 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({
   locksCount = 0,
   insuranceSelected = true,
   insuranceMonthlyFee,
+  protectionPlan = 'cpo',
+  protectionMonthlyFee,
   deliveryFeePerContainer = 149,
   deliveryZone = 'A',
   deliveryZoneRangeLabel = '< 25 km',
   interstateFeePerContainer,
+  isInterstate = false,
   monthlyStorageFee,
+  initialDeliveryFee,
+  isFirstMonthFree,
+  freeBlanketsIncluded,
+  freeLockIncluded,
+  milestoneCreditTotal,
+  milestoneCreditOption,
+  upfrontDiscountPercent,
   enableDrivewayFitGuarantee = false,
   enableGoogleCalendarLink = false,
   onOpenPlacementChecker,
@@ -104,6 +124,11 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({
   const isMyPlaceStorage =
     serviceType === 'storage_at_place' ||
     (serviceType !== 'moving' && serviceType !== 'moving_storage' && storagePlacement === 'my_place');
+
+  const isDirectLocalMove =
+    serviceType === 'moving' && !isInterstate;
+
+  const isBypassStep3 = isMyPlaceStorage || isDirectLocalMove;
 
   // Competitor benchmarking consistent with Page 6 (Modular container competitor benchmark: $99 delivery fee each, 8 m³ capacity):
   const selSmall = containerSelections?.small_10m3 || 0;
@@ -260,18 +285,23 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({
             </div>
             {currentStep > 1 && originPostcode && (
               <div className="mt-1.5 ml-7.5 space-y-1">
-                {(serviceType === 'moving' || serviceType === 'moving_storage') ? (
-                  <>
-                    <div className="text-xs text-slate-700 font-medium flex items-baseline gap-1.5 flex-wrap">
-                      <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400">From:</span>
-                      <span>{originPostcode.suburb}, {originPostcode.state} {originPostcode.postcode}</span>
+                {serviceType === 'moving_storage' ? (
+                  <div className="space-y-1">
+                    <div className="text-xs text-slate-700 font-medium flex items-baseline gap-1.5 whitespace-nowrap">
+                      <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-500">FROM:</span>
+                      <span className="font-bold text-slate-800">{originPostcode.suburb}, {originPostcode.state} {originPostcode.postcode}</span>
+                    </div>
+
+                    <div className="text-xs font-semibold flex items-baseline gap-1.5 whitespace-nowrap">
+                      <span className="text-[10px] font-extrabold uppercase tracking-wider text-[#15385E]">VIA:</span>
+                      <span className="font-bold text-[#15385E]">Portabox Location</span>
                     </div>
 
                     <div className="text-xs font-medium pt-0.5">
                       {destinationPostcode ? (
                         <div className="space-y-0.5">
-                          <div className="flex items-baseline gap-1.5">
-                            <span className="text-[10px] font-extrabold uppercase tracking-wider text-[#15385E]">Moving to:</span>
+                          <div className="flex items-baseline gap-1.5 whitespace-nowrap">
+                            <span className="text-[10px] font-extrabold uppercase tracking-wider text-[#15385E]">TO:</span>
                             <span className="font-bold text-[#15385E]">
                               {destinationPostcode.suburb}, {destinationPostcode.state} {destinationPostcode.postcode}
                             </span>
@@ -288,17 +318,51 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({
                                   +${formatMoney(movingKmCharge, true)} extra delivery charge {containerCount > 1 ? `(${containerCount} containers)` : ''}
                                 </div>
                               )}
-                              {fuelSurchargeAmount !== undefined && fuelSurchargeAmount > 0 && (
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <div className="text-[11px] text-amber-600 font-medium flex items-center gap-1 whitespace-nowrap">
+                          <span className="text-[10px] font-extrabold uppercase tracking-wider text-amber-500">TO:</span>
+                          <span>Select in Step 2</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ) : serviceType === 'moving' ? (
+                  <>
+                    <div className="text-xs text-slate-700 font-medium flex items-baseline gap-1.5 whitespace-nowrap">
+                      <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-500">FROM:</span>
+                      <span className="font-bold text-slate-800">{originPostcode.suburb}, {originPostcode.state} {originPostcode.postcode}</span>
+                    </div>
+
+                    <div className="text-xs font-medium pt-0.5">
+                      {destinationPostcode ? (
+                        <div className="space-y-0.5">
+                          <div className="flex items-baseline gap-1.5 whitespace-nowrap">
+                            <span className="text-[10px] font-extrabold uppercase tracking-wider text-[#15385E]">To:</span>
+                            <span className="font-bold text-[#15385E]">
+                              {destinationPostcode.suburb}, {destinationPostcode.state} {destinationPostcode.postcode}
+                            </span>
+                          </div>
+                          {movingDistanceKm !== undefined && movingDistanceKm !== null && (
+                            <div className="text-[11px] text-slate-500 font-medium pl-0.5 space-y-0.5">
+                              {interstateFeePerContainer !== undefined && interstateFeePerContainer > 0 && (
                                 <div className="text-[#15385E] font-bold text-[10px]">
-                                  +${formatMoney(fuelSurchargeAmount, true)} fuel levy (initial leg · future legs deferred)
+                                  Interstate freight: <span className="font-mono text-[#15385E]">${formatMoney(interstateFeePerContainer)}/container</span>
+                                </div>
+                              )}
+                              {movingKmCharge !== undefined && movingKmCharge > 0 && (
+                                <div className="text-[#15385E] font-bold text-[10px]">
+                                  +${formatMoney(movingKmCharge, true)} extra delivery charge {containerCount > 1 ? `(${containerCount} containers)` : ''}
                                 </div>
                               )}
                             </div>
                           )}
                         </div>
                       ) : (
-                        <div className="text-[11px] text-amber-600 font-medium flex items-center gap-1">
-                          <span className="text-[10px] font-extrabold uppercase tracking-wider text-amber-500">Moving to:</span>
+                        <div className="text-[11px] text-amber-600 font-medium flex items-center gap-1 whitespace-nowrap">
+                          <span className="text-[10px] font-extrabold uppercase tracking-wider text-amber-500">To:</span>
                           <span>Select in Step 2</span>
                         </div>
                       )}
@@ -306,8 +370,11 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({
                   </>
                 ) : (
                   <div>
-                    <p className="text-xs text-slate-600 font-medium">
-                      {originPostcode.suburb}, {originPostcode.state} {originPostcode.postcode}
+                    <p className="text-xs text-slate-700 font-medium whitespace-nowrap">
+                      <span className="font-bold">{originPostcode.suburb}, {originPostcode.state} {originPostcode.postcode}</span>
+                      <span className="text-[#15385E] font-extrabold ml-1.5">
+                        - Initial Delivery ${formatMoney(initialDeliveryFee ?? (deliveryFeePerContainer || 179), true)}
+                      </span>
                     </p>
                   </div>
                 )}
@@ -367,7 +434,7 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({
           >
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2.5">
-                {(isMyPlaceStorage ? currentStep >= 4 : currentStep > 3) ? (
+                {(isBypassStep3 ? currentStep >= 4 : currentStep > 3) ? (
                   <div className="w-5 h-5 rounded-full bg-[#5CC1EF] flex items-center justify-center text-[#15385E]">
                     <Check className="w-3.5 h-3.5 stroke-[3]" />
                   </div>
@@ -381,24 +448,26 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({
                   </div>
                 )}
                 <span className={`text-sm font-bold ${currentStep === 3 ? 'text-[#15385E]' : 'text-slate-700'}`}>
-                  {isMyPlaceStorage ? 'Driveway delivery & collection' : 'Loading options'}
+                  {isMyPlaceStorage ? 'Driveway delivery & collection' : isDirectLocalMove ? 'Direct home delivery' : 'Loading options'}
                 </span>
               </div>
-              {(isMyPlaceStorage ? currentStep >= 4 : currentStep > 3) && (
+              {(isBypassStep3 ? currentStep >= 4 : currentStep > 3) && (
                 <button
-                  onClick={() => onJumpToStep(isMyPlaceStorage ? 2 : 3)}
-                  aria-label={isMyPlaceStorage ? 'Edit storage placement' : 'Edit loading options'}
+                  onClick={() => onJumpToStep(isBypassStep3 ? 2 : 3)}
+                  aria-label={isBypassStep3 ? 'Edit move setup' : 'Edit loading options'}
                   className="text-slate-400 hover:text-[#15385E] transition-colors p-1"
                 >
                   <Pencil className="w-3.5 h-3.5 text-[#15385E]" />
                 </button>
               )}
             </div>
-            {(isMyPlaceStorage ? currentStep >= 4 : currentStep > 3) && (
+            {(isBypassStep3 ? currentStep >= 4 : currentStep > 3) && (
               <div className="mt-1 ml-7.5 space-y-1">
                 <p className="text-xs text-slate-600 font-medium">
                   {isMyPlaceStorage ? (
                     'Delivered to your driveway & collected when done'
+                  ) : isDirectLocalMove ? (
+                    'Direct delivery to home & transport to new home'
                   ) : (
                     <>
                       {originLogisticsMethod === 'depot_loading' ? 'Self-load at Portabox Location' : 'Delivery to My Location'}
@@ -408,7 +477,7 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({
                     </>
                   )}
                 </p>
-                {!isMyPlaceStorage && (legsSavedDollarTotal > 0 || legsSavedCount > 0) && (
+                {!isBypassStep3 && (legsSavedDollarTotal > 0 || legsSavedCount > 0) && (
                   <span className="inline-block text-[10px] font-extrabold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded border border-emerald-300">
                     ${formatMoney(legsSavedDollarTotal || (legsSavedCount === 4 ? 300 : 150), true)} saved
                   </span>
@@ -497,8 +566,23 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({
               )}
             </div>
             {currentStep > 5 && (
-              <div className="mt-1 ml-7.5 space-y-0.5">
+              <div className="mt-1 ml-7.5 space-y-1">
                 <p className="text-xs text-slate-600 font-medium">{getDurationLabel()}</p>
+                {isFirstMonthFree && (
+                  <span className="inline-block text-[10px] font-black text-emerald-800 bg-emerald-100 border border-emerald-300 px-1.5 py-0.2 rounded">
+                    ★ 1st Month Free Storage
+                  </span>
+                )}
+                {milestoneCreditTotal !== undefined && milestoneCreditTotal > 0 && (
+                  <span className="inline-block text-[10px] font-black text-[#15385E] bg-[#F7D347] border border-[#e6c338] px-1.5 py-0.2 rounded ml-1">
+                    ★ ${milestoneCreditTotal} Milestone ({milestoneCreditOption || '400B'})
+                  </span>
+                )}
+                {upfrontDiscountPercent !== undefined && upfrontDiscountPercent > 0 && (
+                  <span className="inline-block text-[10px] font-bold text-sky-800 bg-sky-100 border border-sky-300 px-1.5 py-0.2 rounded ml-1">
+                    +{upfrontDiscountPercent}% Upfront Off
+                  </span>
+                )}
               </div>
             )}
           </div>
@@ -527,13 +611,13 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({
                   </div>
                 )}
                 <span className={`text-sm font-bold ${currentStep === 6 ? 'text-[#15385E]' : 'text-slate-700'}`}>
-                  Packing supplies
+                  Supplies
                 </span>
               </div>
               {currentStep > 6 && (
                 <button
                   onClick={() => onJumpToStep(6)}
-                  aria-label="Edit packing supplies"
+                  aria-label="Edit supplies"
                   className="text-slate-400 hover:text-[#15385E] transition-colors p-1"
                 >
                   <Pencil className="w-3.5 h-3.5 text-[#15385E]" />
@@ -557,7 +641,7 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({
             )}
           </div>
 
-          {/* Step 7: Send Quote */}
+          {/* Step 7: Protection */}
           <div
             className={`p-3.5 rounded-xl transition-all border ${
               currentStep === 7
@@ -580,13 +664,67 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({
                     7
                   </div>
                 )}
-                <span className={`text-sm font-bold ${currentStep === 7 ? 'text-[#15385E]' : 'text-slate-600'}`}>
-                  Send quote
+                <span className={`text-sm font-bold ${currentStep === 7 ? 'text-[#15385E]' : 'text-slate-700'}`}>
+                  Protection
                 </span>
               </div>
               {currentStep > 7 && (
                 <button
                   onClick={() => onJumpToStep(7)}
+                  aria-label="Edit protection option"
+                  className="text-slate-400 hover:text-[#15385E] transition-colors p-1"
+                >
+                  <Pencil className="w-3.5 h-3.5 text-[#15385E]" />
+                </button>
+              )}
+            </div>
+            {currentStep > 7 && (
+              <div className="mt-1 ml-7.5 space-y-0.5 text-[11px] text-[#15385E]">
+                {protectionPlan === 'cpo' ? (
+                  <p className="text-slate-600 font-medium">
+                    CPO (${(5000 * containerCount).toLocaleString()} cover) · {insuranceMonthlyFee ? `$${insuranceMonthlyFee}/mo` : 'Included'}
+                  </p>
+                ) : protectionPlan === 'coo' ? (
+                  <p className="text-slate-600 font-medium">
+                    COO (Container only) · {insuranceMonthlyFee ? `$${insuranceMonthlyFee}/mo` : '$10/mo'}
+                  </p>
+                ) : (
+                  <p className="text-slate-400">Declined (Customer self-insures)</p>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Step 8: Send Quote */}
+          <div
+            className={`p-3.5 rounded-xl transition-all border ${
+              currentStep === 8
+                ? 'border-[#F7D347] bg-[#F7D347]/15 ring-2 ring-[#F7D347]/50'
+                : 'border-slate-100 bg-white'
+            }`}
+          >
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                {currentStep > 8 ? (
+                  <div className="w-5 h-5 rounded-full bg-[#5CC1EF] flex items-center justify-center text-[#15385E]">
+                    <Check className="w-3.5 h-3.5 stroke-[3]" />
+                  </div>
+                ) : (
+                  <div
+                    className={`w-5 h-5 rounded-full flex items-center justify-center text-xs font-black ${
+                      currentStep === 8 ? 'bg-[#F7D347] text-[#1A1A1A] border border-[#e6c338]' : 'bg-slate-100 text-slate-500'
+                    }`}
+                  >
+                    8
+                  </div>
+                )}
+                <span className={`text-sm font-bold ${currentStep === 8 ? 'text-[#15385E]' : 'text-slate-600'}`}>
+                  Send quote
+                </span>
+              </div>
+              {currentStep > 8 && (
+                <button
+                  onClick={() => onJumpToStep(8)}
                   aria-label="Edit contact details"
                   className="text-slate-400 hover:text-[#15385E] transition-colors p-1"
                 >
@@ -598,147 +736,179 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({
         </div>
       </div>
 
-      {/* 3 Value Guarantee Cards in Descending Order (Starting on Page 2, Hidden on Page 1) */}
-      {currentStep >= 2 && (
+      {/* 3 Value Guarantee Cards: Reordered by step and removed on Page 8 */}
+      {currentStep >= 2 && currentStep <= 7 && (
         <>
-          {/* Card 1: Price Match Guarantee Open to Price Comparison */}
-          <div className="rounded-2xl border-2 border-[#DAD7D1] bg-[#112F4F] p-4 sm:p-5 space-y-3 shadow-xs">
-            <div>
-              {/* Badge: Pure White #FFFFFF background with #1A1A1A text */}
-              <span className="inline-flex items-center gap-1.5 text-[10px] font-black uppercase tracking-wider bg-white text-[#1A1A1A] px-2.5 py-1 rounded-md shadow-2xs border border-white">
-                <span className="w-2 h-2 rounded-full bg-[#F7D347]" />
-                <span>PRICE MATCH GUARANTEE</span>
-              </span>
-
-              {/* Headline Text: Pure White #FFFFFF */}
-              <h4 className="text-base font-black text-white mt-2">
-                Seen it cheaper? We'll beat it.
-              </h4>
-              <p className="text-xs text-slate-200 mt-0.5 leading-relaxed">
-                Provide any comparable written quote from another Australian container service and we guarantee a lower rate per cubic meter.
-              </p>
-            </div>
-
-            {/* Check out our competitors prices container (open by default) */}
-            <details open className="group border border-[#DAD7D1] rounded-xl bg-white p-3.5 transition-all">
-              <summary className="flex items-center justify-between cursor-pointer list-none select-none text-xs font-bold text-[#15385E] hover:text-[#5CC1EF] transition-colors">
-                <span className="flex items-center gap-2 text-[#15385E]">
-                  <TrendingDown className="w-4 h-4 shrink-0 text-[#15385E]" />
-                  <span className="text-[#15385E] font-black">Check out our competitors prices</span>
-                </span>
-                <ChevronDown className="w-4 h-4 text-[#15385E] group-open:rotate-180 transition-transform shrink-0" />
-              </summary>
-
-              <div className="pt-3 mt-3 border-t border-slate-100 space-y-3 text-xs">
-                {isDefaultComparisonStep ? (
-                  <div className="text-[11px] font-semibold text-[#15385E] bg-sky-50 px-2.5 py-1.5 rounded-lg border border-[#5CC1EF]/30 flex items-center justify-between">
-                    <span>Default: 1 x Large Portabox (25 m³) vs small modular boxes</span>
-                    <span className="text-[10px] text-slate-500 font-normal">Updates in Step 4</span>
-                  </div>
-                ) : (
-                  <div className="text-[11px] font-semibold text-[#15385E] bg-emerald-50 px-2.5 py-1.5 rounded-lg border border-emerald-200 flex items-center justify-between">
-                    <span>Live comparison for: {comparisonPortaboxLabel}</span>
-                    <span className="text-[10px] text-emerald-700 font-bold">{comparisonVolumeM3} m³</span>
-                  </div>
-                )}
-
-                <p className="text-slate-600 leading-relaxed text-xs">
-                  {comp.benchmark.competitorName} use small {comp.benchmark.containerVolumeM3} m³ boxes with a ${comp.competitorDeliveryFeePerUnit} delivery fee per leg and high ${comp.benchmark.monthlyStorageRatePerM3}/m³ storage fees. Portabox provides full-size container capacity with zero-tilt horizontal level-lift delivery, fewer boxes, and massive savings.
+          {/* Helper Card Renderers */}
+          {(() => {
+            const priceLockCard = (
+              <div key="price-lock" className="rounded-2xl border border-slate-200/90 bg-white p-4 sm:p-5 shadow-xs space-y-2">
+                <div className="flex items-center gap-2">
+                  <Sparkles className="w-4 h-4 sm:w-5 sm:h-5 text-[#00a9d7] shrink-0" />
+                  <h4 className="text-xs sm:text-sm font-extrabold tracking-wide uppercase text-[#15385E]">
+                    30–DAY QUOTE PRICE GUARANTEE
+                  </h4>
+                </div>
+                <p className="text-xs text-slate-600 leading-relaxed font-normal">
+                  Quoted prices are locked for 30 days from quote date. Changes to quotes that affect pricing will result in updated pricing and a new 30–day quote price guarantee period. This does not include date changes or other non-pricing items.
                 </p>
-
-                <div className="grid grid-cols-1 gap-2.5 pt-1">
-                  {/* 1. Monthly Storage Rate Comparison */}
-                  <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 space-y-2">
-                    <span className="text-[10px] uppercase font-bold text-slate-500 block">
-                      1. Monthly Storage Rate ({comparisonVolumeM3} m³)
-                    </span>
-                    <div className="flex justify-between items-baseline text-xs">
-                      <span className="text-slate-600">{comp.benchmark.competitorName} ({competitorSmallContainersCount} x {comp.benchmark.containerVolumeM3} m³ @ ${comp.benchmark.monthlyStorageRatePerM3}/m³):</span>
-                      <span className="font-mono font-bold text-slate-700">${marketMonthlyCost}/mo</span>
-                    </div>
-                    <div className="flex justify-between items-baseline text-xs">
-                      <span className="text-slate-900 font-semibold">{comparisonPortaboxLabel} (${portaboxRatePerM3}/m³):</span>
-                      <span className="font-mono font-bold text-[#15385E]">${comparisonMonthlyStorageFee}/mo</span>
-                    </div>
-                    <div className="pt-1.5 border-t border-slate-200 text-[11px] text-emerald-700 font-bold">
-                      {monthlyCubicSavings > 0
-                        ? `✓ Save $${monthlyCubicSavings}/mo on storage (${cubicSavingsPercent}% lower rate)`
-                        : `✓ Guaranteed lowest cubic rate with Price Match Guarantee`}
-                    </div>
-                  </div>
-
-                  {/* 2. Excess Delivery Charges for Multiple Smaller Containers */}
-                  <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 space-y-2">
-                    <span className="text-[10px] uppercase font-bold text-slate-500 block">
-                      2. Excess Container Delivery Fees
-                    </span>
-                    <div className="flex justify-between items-baseline text-xs">
-                      <span className="text-slate-600">{competitorSmallContainersCount} x modular containers (${comp.competitorDeliveryFeePerUnit} fee each):</span>
-                      <span className="font-mono font-bold text-slate-700">${competitorDeliveryCost}</span>
-                    </div>
-                    <div className="flex justify-between items-baseline text-xs">
-                      <span className="text-slate-900 font-semibold">{comparisonContainerCount} x Portabox (${deliveryFeePerContainer} level-lift):</span>
-                      <span className="font-mono font-bold text-[#15385E]">${comparisonDeliveryCost}</span>
-                    </div>
-                    <div className="pt-1.5 border-t border-slate-200 text-[11px] text-emerald-700 font-bold">
-                      ✓ Save ${excessDeliveryCharges} in excess delivery fees avoided
-                    </div>
-                  </div>
-                </div>
-
-                {/* Combined Savings Total */}
-                <div className="p-3 rounded-xl bg-emerald-500 text-white flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs">
-                  <div>
-                    <span className="text-xs font-black uppercase tracking-wider block">
-                      First-Month Combined Savings
-                    </span>
-                    <span className="text-[11px] text-emerald-100">
-                      Storage rate saving (${monthlyCubicSavings}) + excess delivery fees avoided (${excessDeliveryCharges})
-                    </span>
-                  </div>
-                  <div className="text-left sm:text-right shrink-0">
-                    <span className="text-2xl font-black font-mono">
-                      ${firstMonthTotalSavings}
-                    </span>
-                    <div className="text-[10px] text-emerald-100 font-bold">
-                      Total Advantage
-                    </div>
-                  </div>
-                </div>
-
-                <div className="text-[10px] text-slate-400 flex items-center justify-between pt-1">
-                  <span>Benchmark: ${comp.competitorDeliveryFeePerUnit}/fee · ${comp.benchmark.monthlyStorageRatePerM3}/m³</span>
-                  <span className="font-mono font-semibold">Audit: {comp.benchmark.lastCheckedDate}</span>
-                </div>
               </div>
-            </details>
-          </div>
+            );
 
-          {/* Card 2: 30-Day Price-Lock Guarantee */}
-          <div className="rounded-2xl border border-slate-200/90 bg-white p-4 sm:p-5 shadow-xs space-y-2">
-            <div className="flex items-center gap-2">
-              <Sparkles className="w-4 h-4 sm:w-5 sm:h-5 text-[#00a9d7] shrink-0" />
-              <h4 className="text-xs sm:text-sm font-extrabold tracking-wide uppercase text-[#15385E]">
-                30–DAY PRICE-LOCK GUARANTEE
-              </h4>
-            </div>
-            <p className="text-xs text-slate-600 leading-relaxed font-normal">
-              Quoted prices are locked for 30 days from quote date. Changes to quotes that affect pricing will result in updated pricing and a new 30–day lock period. This does not include date changes or other non-pricing items.
-            </p>
-          </div>
+            const rateFreezeCard = (
+              <div key="rate-freeze" className="rounded-2xl border border-slate-200/90 bg-white p-4 sm:p-5 shadow-xs space-y-2">
+                <div className="flex items-center gap-2">
+                  <ShieldCheck className="w-4 h-4 sm:w-5 sm:h-5 text-emerald-600 shrink-0" />
+                  <h4 className="text-xs sm:text-sm font-extrabold tracking-wide uppercase text-[#15385E]">
+                    1–YEAR BOOKING PRICE GUARANTEE
+                  </h4>
+                </div>
+                <p className="text-xs text-slate-600 leading-relaxed font-normal">
+                  When a booking is made, prices on all attributes (container rental, delivery fees, ancillaries, etc.) are locked for 1 year with our 1-Year Booking Price Guarantee. Beyond 1 year, delivery fees will default to live pricing and container rental prices can go up or down with a 30–day notification.
+                </p>
+              </div>
+            );
 
-          {/* Card 3: 1-Year Rate Freeze Guarantee */}
-          <div className="rounded-2xl border border-slate-200/90 bg-white p-4 sm:p-5 shadow-xs space-y-2">
-            <div className="flex items-center gap-2">
-              <ShieldCheck className="w-4 h-4 sm:w-5 sm:h-5 text-emerald-600 shrink-0" />
-              <h4 className="text-xs sm:text-sm font-extrabold tracking-wide uppercase text-[#15385E]">
-                1–YEAR RATE FREEZE GUARANTEE
-              </h4>
-            </div>
-            <p className="text-xs text-slate-600 leading-relaxed font-normal">
-              When a booking is made, prices on all attributes (container rental, delivery fees, ancillaries, etc.) are locked for 1 year. Beyond 1 year, delivery fees will default to live pricing and container rental prices can go up or down with a 30–day notification.
-            </p>
-          </div>
+            const priceMatchCard = (
+              <div key="price-match" className="rounded-2xl border-2 border-[#DAD7D1] bg-[#112F4F] p-4 sm:p-5 space-y-3 shadow-xs">
+                <div>
+                  {/* Badge: Pure White #FFFFFF background with #1A1A1A text */}
+                  <span className="inline-flex items-center gap-1.5 text-[10px] font-black uppercase tracking-wider bg-white text-[#1A1A1A] px-2.5 py-1 rounded-md shadow-2xs border border-white">
+                    <span className="w-2 h-2 rounded-full bg-[#F7D347]" />
+                    <span>PRICE MATCH GUARANTEE</span>
+                  </span>
+
+                  {/* Headline Text: Pure White #FFFFFF */}
+                  <h4 className="text-base font-black text-white mt-2">
+                    Seen it cheaper? We'll beat it.
+                  </h4>
+                  <p className="text-xs text-slate-200 mt-0.5 leading-relaxed">
+                    Provide any comparable written quote from another Australian container service and we guarantee a lower rate per cubic meter.
+                  </p>
+                </div>
+
+                {/* Check out our competitors prices container (closed by default on pages 2-7) */}
+                <details className="group border border-[#DAD7D1] rounded-xl bg-white p-3.5 transition-all">
+                  <summary className="flex items-center justify-between cursor-pointer list-none select-none text-xs font-bold text-[#15385E] hover:text-[#5CC1EF] transition-colors">
+                    <span className="flex items-center gap-2 text-[#15385E]">
+                      <TrendingDown className="w-4 h-4 shrink-0 text-[#15385E]" />
+                      <span className="text-[#15385E] font-black">Check out our competitors prices</span>
+                    </span>
+                    <ChevronDown className="w-4 h-4 text-[#15385E] group-open:rotate-180 transition-transform shrink-0" />
+                  </summary>
+
+                  <div className="pt-3 mt-3 border-t border-slate-100 space-y-3 text-xs">
+                    {isDefaultComparisonStep ? (
+                      <div className="text-[11px] font-semibold text-[#15385E] bg-sky-50 px-2.5 py-1.5 rounded-lg border border-[#5CC1EF]/30 flex items-center justify-between">
+                        <span>Default: 1 x Large Portabox (25 m³) vs small modular boxes</span>
+                        <span className="text-[10px] text-slate-500 font-normal">Updates in Step 4</span>
+                      </div>
+                    ) : (
+                      <div className="text-[11px] font-semibold text-[#15385E] bg-emerald-50 px-2.5 py-1.5 rounded-lg border border-emerald-200 flex items-center justify-between">
+                        <span>Live comparison for: {comparisonPortaboxLabel}</span>
+                        <span className="text-[10px] text-emerald-700 font-bold">{comparisonVolumeM3} m³</span>
+                      </div>
+                    )}
+
+                    <p className="text-slate-600 leading-relaxed text-xs">
+                      {comp.benchmark.competitorName} use small {comp.benchmark.containerVolumeM3} m³ boxes with a ${comp.competitorDeliveryFeePerUnit} delivery fee per leg and high ${comp.benchmark.monthlyStorageRatePerM3}/m³ storage fees. Portabox provides full-size container capacity with zero-tilt horizontal level-lift delivery, fewer boxes, and massive savings.
+                    </p>
+
+                    <div className="grid grid-cols-1 gap-2.5 pt-1">
+                      {/* 1. Monthly Storage Rate Comparison */}
+                      <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 space-y-2">
+                        <span className="text-[10px] uppercase font-bold text-slate-500 block">
+                          1. Monthly Storage Rate ({comparisonVolumeM3} m³)
+                        </span>
+                        <div className="flex justify-between items-baseline text-xs">
+                          <span className="text-slate-600">{comp.benchmark.competitorName} ({competitorSmallContainersCount} x {comp.benchmark.containerVolumeM3} m³ @ ${comp.benchmark.monthlyStorageRatePerM3}/m³):</span>
+                          <span className="font-mono font-bold text-slate-700">${marketMonthlyCost}/mo</span>
+                        </div>
+                        <div className="flex justify-between items-baseline text-xs">
+                          <span className="text-slate-900 font-semibold">{comparisonPortaboxLabel} (${portaboxRatePerM3}/m³):</span>
+                          <span className="font-mono font-bold text-[#15385E]">${comparisonMonthlyStorageFee}/mo</span>
+                        </div>
+                        <div className="pt-1.5 border-t border-slate-200 text-[11px] text-emerald-700 font-bold">
+                          {monthlyCubicSavings > 0
+                            ? `✓ Save $${monthlyCubicSavings}/mo on storage (${cubicSavingsPercent}% lower rate)`
+                            : `✓ Guaranteed lowest cubic rate with Price Match Guarantee`}
+                        </div>
+                      </div>
+
+                      {/* 2. Excess Delivery Charges for Multiple Smaller Containers */}
+                      <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 space-y-2">
+                        <span className="text-[10px] uppercase font-bold text-slate-500 block">
+                          2. Excess Container Delivery Fees
+                        </span>
+                        <div className="flex justify-between items-baseline text-xs">
+                          <span className="text-slate-600">{competitorSmallContainersCount} x modular containers (${comp.competitorDeliveryFeePerUnit} fee each):</span>
+                          <span className="font-mono font-bold text-slate-700">${competitorDeliveryCost}</span>
+                        </div>
+                        <div className="flex justify-between items-baseline text-xs">
+                          <span className="text-slate-900 font-semibold">{comparisonContainerCount} x Portabox (${deliveryFeePerContainer} level-lift):</span>
+                          <span className="font-mono font-bold text-[#15385E]">${comparisonDeliveryCost}</span>
+                        </div>
+                        <div className="pt-1.5 border-t border-slate-200 text-[11px] text-emerald-700 font-bold">
+                          ✓ Save ${excessDeliveryCharges} in excess delivery fees avoided
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Combined Savings Total */}
+                    <div className="p-3 rounded-xl bg-emerald-500 text-white flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs">
+                      <div>
+                        <span className="text-xs font-black uppercase tracking-wider block">
+                          First-Month Combined Savings
+                        </span>
+                        <span className="text-[11px] text-emerald-100">
+                          Storage rate saving (${monthlyCubicSavings}) + excess delivery fees avoided (${excessDeliveryCharges})
+                        </span>
+                      </div>
+                      <div className="text-left sm:text-right shrink-0">
+                        <span className="text-2xl font-black font-mono">
+                          ${firstMonthTotalSavings}
+                        </span>
+                        <div className="text-[10px] text-emerald-100 font-bold">
+                          Total Advantage
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="text-[10px] text-slate-400 flex items-center justify-between pt-1">
+                      <span>Benchmark: ${comp.competitorDeliveryFeePerUnit}/fee · ${comp.benchmark.monthlyStorageRatePerM3}/m³</span>
+                      <span className="font-mono font-semibold">Audit: {comp.benchmark.lastCheckedDate}</span>
+                    </div>
+                  </div>
+                </details>
+              </div>
+            );
+
+            // Page 2 & 3 order:
+            // 1. 30-Day Quote Price Guarantee
+            // 2. 1-Year Booking Price Guarantee
+            // 3. Price Match Guarantee (closed by default)
+            if (currentStep === 2 || currentStep === 3) {
+              return (
+                <>
+                  {priceLockCard}
+                  {rateFreezeCard}
+                  {priceMatchCard}
+                </>
+              );
+            }
+
+            // Page 4, 5, 6, and 7 order:
+            // 1. Price Match Guarantee (closed by default)
+            // 2. 1-Year Booking Price Guarantee
+            // 3. 30-Day Quote Price Guarantee
+            return (
+              <>
+                {priceMatchCard}
+                {rateFreezeCard}
+                {priceLockCard}
+              </>
+            );
+          })()}
         </>
       )}
 

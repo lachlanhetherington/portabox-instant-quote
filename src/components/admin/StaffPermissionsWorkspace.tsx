@@ -158,6 +158,28 @@ export const StaffPermissionsWorkspace: React.FC<StaffPermissionsWorkspaceProps>
     onRefreshPermissions?.();
   };
 
+  const handleDeleteStaff = (staffId: string, staffName: string) => {
+    if (!isAuthorized) return;
+    if (!window.confirm(`Permanently revoke access for "${staffName}"? This will delete their staff account and 2FA credentials.`)) return;
+
+    const updated = staffMembers.filter((s) => s.id !== staffId);
+    setStaffMembers(updated);
+    saveStaffMembers(updated);
+
+    addAuditLog(`${currentSession?.user.name || 'CEO'} permanently revoked access and removed staff account: ${staffName}`);
+    setSaveBanner(`Removed access for ${staffName}`);
+    setTimeout(() => setSaveBanner(null), 3500);
+
+    onRefreshPermissions?.();
+  };
+
+  const handleOpenAddCallCenterModal = () => {
+    setNewStaffRole('call_center');
+    setNewStaffTitle('Call Center Operative & Phone Intake Specialist');
+    setNewStaffDepot('Adelaide Call Center');
+    setIsAddStaffModalOpen(true);
+  };
+
   const handleToggleIndividualOverride = (permissionKey: StaffPermissionKey) => {
     if (!selectedStaffForOverride || !isAuthorized) return;
 
@@ -356,6 +378,143 @@ export const StaffPermissionsWorkspace: React.FC<StaffPermissionsWorkspaceProps>
           </div>
         </div>
       )}
+
+      {/* DEDICATED CALL CENTER OPERATIVES ACCESS CARD (CEO COMMAND) */}
+      <div className="bg-gradient-to-r from-emerald-900 to-teal-900 rounded-2xl p-5 text-white shadow-md border border-emerald-700/60">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-emerald-700/50">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-emerald-500/20 border border-emerald-400/40 flex items-center justify-center text-emerald-300">
+              <PhoneCall className="w-5 h-5 animate-pulse" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h3 className="text-sm font-black text-white uppercase tracking-wider">
+                  Call Center Operatives Access Control
+                </h3>
+                <span className="bg-emerald-400 text-emerald-950 text-[10px] font-black px-2 py-0.2 rounded-full uppercase">
+                  {staffMembers.filter((s) => s.role === 'call_center').length} Active Operatives
+                </span>
+              </div>
+              <p className="text-xs text-emerald-200 mt-0.5">
+                CEO executive provisioning: Create new call center operatives, grant permissions, suspend logins, or permanently revoke access.
+              </p>
+            </div>
+          </div>
+
+          {isAuthorized && (
+            <button
+              type="button"
+              onClick={handleOpenAddCallCenterModal}
+              className="px-4 py-2 bg-[#F7D347] hover:bg-[#ebd034] text-[#1A1A1A] font-black text-xs rounded-xl flex items-center gap-2 transition-all cursor-pointer shadow-md shrink-0 active:scale-95"
+            >
+              <UserPlus className="w-4 h-4 text-[#15385E]" />
+              <span>+ Add Call Center Operative</span>
+            </button>
+          )}
+        </div>
+
+        {/* Quick Permission Toggles for All Call Center Staff */}
+        <div className="mt-4 pt-1">
+          <div className="text-[11px] font-extrabold uppercase text-emerald-300 tracking-wider mb-2 flex items-center justify-between">
+            <span>Call Center Baseline Feature Toggles (Global Role Access):</span>
+            <span className="text-[10px] text-emerald-400/80 font-normal">Click toggle to grant or restrict</span>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+            {[
+              { key: 'daily_operations' as StaffPermissionKey, label: 'Daily Operations Suite' },
+              { key: 'softphone_telephony' as StaffPermissionKey, label: 'Twilio Softphone Dialer' },
+              { key: 'dispatch_calendar' as StaffPermissionKey, label: 'Fleet Dispatch Calendar' },
+              { key: 'customer_crm' as StaffPermissionKey, label: 'Customer Accounts CRM' },
+            ].map(({ key, label }) => {
+              const isAllowed = !!rolePermissions['call_center']?.[key];
+              return (
+                <div
+                  key={key}
+                  className="p-2.5 rounded-xl bg-black/25 border border-emerald-700/40 flex items-center justify-between gap-2"
+                >
+                  <div className="min-w-0">
+                    <div className="text-xs font-bold text-white truncate">{label}</div>
+                    <div className="text-[10px] text-emerald-300/80">
+                      {isAllowed ? 'Access Granted' : 'Restricted (CEO Only)'}
+                    </div>
+                  </div>
+                  {isAuthorized && (
+                    <button
+                      type="button"
+                      onClick={() => handleToggleRolePermission('call_center', key)}
+                      className={`px-2.5 py-1 rounded-lg text-[10px] font-black transition-all cursor-pointer ${
+                        isAllowed
+                          ? 'bg-emerald-400 text-emerald-950 hover:bg-emerald-300'
+                          : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+                      }`}
+                    >
+                      {isAllowed ? 'ENABLED' : 'OFF'}
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Operatives Quick List */}
+        <div className="mt-4 pt-3 border-t border-emerald-700/40">
+          <div className="text-[11px] font-extrabold uppercase text-emerald-300 tracking-wider mb-2">
+            Active Call Center Operatives:
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            {staffMembers
+              .filter((s) => s.role === 'call_center')
+              .map((op) => (
+                <div
+                  key={op.id}
+                  className="p-2.5 rounded-xl bg-black/20 border border-emerald-700/30 flex items-center justify-between gap-3 text-xs"
+                >
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <div className="w-8 h-8 rounded-lg bg-emerald-700 text-white flex items-center justify-center font-black text-xs shrink-0">
+                      {op.name.split(' ').map((n) => n[0]).join('')}
+                    </div>
+                    <div className="min-w-0">
+                      <div className="font-bold text-white truncate flex items-center gap-1.5">
+                        <span>{op.name}</span>
+                        <span
+                          className={`text-[9px] font-black px-1.5 py-0.2 rounded-full uppercase ${
+                            op.status === 'active' ? 'bg-emerald-400 text-emerald-950' : 'bg-rose-400 text-rose-950'
+                          }`}
+                        >
+                          {op.status}
+                        </span>
+                      </div>
+                      <div className="text-[10px] text-emerald-200/80 truncate font-mono">
+                        {op.email} · {op.mobile}
+                      </div>
+                    </div>
+                  </div>
+                  {isAuthorized && (
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => handleToggleStaffStatus(op.id)}
+                        className="px-2 py-1 bg-white/10 hover:bg-white/20 text-white text-[10px] font-bold rounded-lg transition-colors cursor-pointer"
+                        title={op.status === 'active' ? 'Suspend access' : 'Activate access'}
+                      >
+                        {op.status === 'active' ? 'Suspend' : 'Activate'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteStaff(op.id, op.name)}
+                        className="p-1 bg-rose-500/20 hover:bg-rose-500/40 text-rose-300 rounded-lg transition-colors cursor-pointer"
+                        title={`Permanently delete and revoke access for ${op.name}`}
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  )}
+                </div>
+              ))}
+          </div>
+        </div>
+      </div>
 
       {/* SECTION 1: ROLE PERMISSION MATRIX TABLE */}
       <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
@@ -556,16 +715,27 @@ export const StaffPermissionsWorkspace: React.FC<StaffPermissionsWorkspaceProps>
                       </button>
 
                       {staff.role !== 'ceo' && (
-                        <button
-                          onClick={() => handleToggleStaffStatus(staff.id)}
-                          className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer ${
-                            staff.status === 'active'
-                              ? 'bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200'
-                              : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200'
-                          }`}
-                        >
-                          {staff.status === 'active' ? 'Suspend' : 'Activate'}
-                        </button>
+                        <>
+                          <button
+                            onClick={() => handleToggleStaffStatus(staff.id)}
+                            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer ${
+                              staff.status === 'active'
+                                ? 'bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200'
+                                : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200'
+                            }`}
+                          >
+                            {staff.status === 'active' ? 'Suspend' : 'Activate'}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteStaff(staff.id, staff.name)}
+                            title={`Permanently delete and remove access for ${staff.name}`}
+                            className="px-2.5 py-1.5 rounded-lg text-xs font-bold bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 transition-colors cursor-pointer flex items-center gap-1"
+                          >
+                            <Trash2 className="w-3.5 h-3.5 text-rose-600" />
+                            <span>Remove</span>
+                          </button>
+                        </>
                       )}
                     </>
                   )}

@@ -7,6 +7,9 @@ export type StaffRole =
   | 'warehouse';
 
 export type StaffPermissionKey =
+  | 'daily_operations'
+  | 'field_logistics'
+  | 'communications_config'
   | 'pricing_and_rates'
   | 'dispatch_calendar'
   | 'softphone_telephony'
@@ -25,6 +28,27 @@ export interface PermissionDefinition {
 }
 
 export const PERMISSION_DEFINITIONS: PermissionDefinition[] = [
+  {
+    key: 'daily_operations',
+    label: 'Daily Operations Suite (Customers, Leads & Yard)',
+    shortLabel: 'Daily Operations',
+    description: 'Access customer accounts, quote inquiries, Smartsheet yard dispatch, fleet calendar, and drop-off analytics. Restricted to CEO by default.',
+    category: 'Logistics',
+  },
+  {
+    key: 'field_logistics',
+    label: 'Field Assets & Logistics (Containers, Depots & Postcodes)',
+    shortLabel: 'Field Logistics',
+    description: 'Container asset tracking, QR codes, postcode coverage tiers, and depot hubs. Restricted to CEO by default.',
+    category: 'Logistics',
+  },
+  {
+    key: 'communications_config',
+    label: 'Communications & App Config (Twilio, SMS & Flags)',
+    shortLabel: 'Comms & Config',
+    description: 'Twilio telephony configuration, business hours SMS, promotional branding, and feature flags. Restricted to CEO by default.',
+    category: 'Security',
+  },
   {
     key: 'pricing_and_rates',
     label: 'Tariff Matrix & Pricing Engine',

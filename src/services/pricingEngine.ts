@@ -26,6 +26,10 @@ import {
   StorageDuration,
   FuelSurchargeModel,
   FuelSurchargeZoneRates,
+  ProtectionPlanType,
+  DiscountMatrixRule,
+  AnnualMilestoneOption,
+  EarlyTerminationResult,
 } from '../types/quote';
 import {
   calculateDrivingDistance,
@@ -33,6 +37,8 @@ import {
   findClosestDepot,
   PostcodeRecord,
 } from '../data/australianPostcodes';
+
+export { findClosestDepot };
 import { DEFAULT_DEPOT_CALENDARS } from './googleCalendarService';
 import { getSlotEfficiencyIncentive } from './routingOptimizationService';
 import { DEFAULT_BUSINESS_HOURS_CONFIG, DEFAULT_LOCATION_SERVICE_HOURS } from './businessHoursService';
@@ -42,9 +48,10 @@ import { formatMoney } from '../utils/currency';
 export const DEFAULT_CONTAINER_INSURANCE: ContainerInsuranceConfig = {
   enabled: true,
   monthlyPricePerContainer: 15,
+  cooMonthlyPricePerContainer: 10,
   isFreePromo: false,
   coverageAmountPerContainer: 5000,
-  description: 'Portabox Container Protection Option (CPO) / Customer Owner Option (COO) – Up to $5,000 comprehensive contents cover for theft, fire, water, storm & transit.',
+  description: 'Portabox Container Protection Option (CPO) / Container Only Option (COO) – Up to $5,000 comprehensive contents cover for theft, fire, water, storm & transit.',
 };
 
 export const DEFAULT_PACKING_SUPPLIES: PackingSuppliesConfig = {
@@ -124,6 +131,384 @@ export function calculateLegFuelSurcharge(params: {
     const note = `${dist} km @ $${ratePerKm.toFixed(2)}/km: $${formatMoney(ratePerContainer)}/container${containerCount > 1 ? ` × ${containerCount} = $${formatMoney(totalAmount)}` : ''}`;
     return { ratePerContainer, totalAmount, note, model };
   }
+}
+
+export const DEFAULT_DISCOUNT_MATRIX_RULES: DiscountMatrixRule[] = [
+  // 2 weeks (0.5 months)
+  {
+    id: 'dm-2w-both',
+    name: '2 Weeks Storage',
+    active: true,
+    minMonths: 0.5,
+    maxMonths: 0.5,
+    containerSizes: ['medium_19m3', 'large_25m3'],
+    moveScope: 'all',
+    storagePlacement: 'all',
+    hubLocations: ['all'],
+    discountPercent: 0,
+    freeBlanketsCount: 0,
+    freeLockIncluded: false,
+    firstMonthFree: false,
+    notes: 'Price is already reflective of what we are offering',
+    description: '2 Weeks standard rate (no promotional bundle)',
+    isPriceFreezeProtected: true,
+    earlyTerminationClawbackEnabled: false,
+  },
+  // 1 Month
+  {
+    id: 'dm-1m-both',
+    name: '1 Month Storage',
+    active: true,
+    minMonths: 1,
+    maxMonths: 1,
+    containerSizes: ['medium_19m3', 'large_25m3'],
+    moveScope: 'all',
+    storagePlacement: 'all',
+    hubLocations: ['all'],
+    discountPercent: 0,
+    freeBlanketsCount: 10,
+    freeLockIncluded: true,
+    firstMonthFree: false,
+    notes: 'Free Blankets, Free Lock',
+    description: 'Complimentary furniture blankets + heavy-duty disc padlock ($60 value)',
+    isPriceFreezeProtected: true,
+    earlyTerminationClawbackEnabled: true,
+  },
+  // 2 Months through 11 Months
+  ...[2, 3, 4, 5, 6, 7, 8, 9, 10, 11].map((mo) => ({
+    id: `dm-${mo}m-both`,
+    name: `${mo} Months Storage`,
+    active: true,
+    minMonths: mo,
+    maxMonths: mo,
+    containerSizes: ['medium_19m3', 'large_25m3'] as ('medium_19m3' | 'large_25m3')[],
+    moveScope: 'all' as const,
+    storagePlacement: 'all' as const,
+    hubLocations: ['all' as const],
+    discountPercent: 0,
+    freeBlanketsCount: 10,
+    freeLockIncluded: true,
+    firstMonthFree: true,
+    notes: 'Free Blankets, Free Lock, 1st Mth Free',
+    description: `1st Month Free + Complimentary blankets & disc lock (${mo}-month commitment)`,
+    isPriceFreezeProtected: true,
+    earlyTerminationClawbackEnabled: true,
+  })),
+  // 12+ Months
+  {
+    id: 'dm-12m-both',
+    name: '12+ Months Storage',
+    active: true,
+    minMonths: 12,
+    maxMonths: undefined,
+    containerSizes: ['medium_19m3', 'large_25m3'],
+    moveScope: 'all',
+    storagePlacement: 'all',
+    hubLocations: ['all'],
+    discountPercent: 0,
+    freeBlanketsCount: 10,
+    freeLockIncluded: true,
+    firstMonthFree: false,
+    milestoneDiscountAmount: 400,
+    milestoneDiscountOption: '400B',
+    notes: 'Free Blankets, Free Lock, 400A ($400 off 12 mth) or 400B ($200 off 6th mth / $200 off 12 mth)',
+    description: 'Free Blankets, Free Lock + Milestone Credit ($400 total credit)',
+    isPriceFreezeProtected: true,
+    earlyTerminationClawbackEnabled: true,
+  },
+  // 7' container (Small) exempt rule
+  {
+    id: 'dm-7ft-exempt',
+    name: "7' Small Container (Exempt)",
+    active: true,
+    minMonths: 0,
+    maxMonths: undefined,
+    containerSizes: ['small_10m3'],
+    moveScope: 'all',
+    storagePlacement: 'all',
+    hubLocations: ['all'],
+    discountPercent: 0,
+    freeBlanketsCount: 0,
+    freeLockIncluded: false,
+    firstMonthFree: false,
+    notes: 'No discounts',
+    description: "7' small containers are exempt from promotional duration discounts",
+    isPriceFreezeProtected: true,
+    earlyTerminationClawbackEnabled: false,
+  },
+];
+
+export interface DiscountMatrixCriteria {
+  months: number;
+  containerSize: ContainerSizeId;
+  serviceType: ServiceType;
+  isInterstate: boolean;
+  storagePlacement: 'my_place' | 'facility';
+  hub: MetroHub;
+  annualOption?: AnnualMilestoneOption;
+  billingCycle?: BillingCycle;
+  baseMonthlyRate: number;
+}
+
+export interface DiscountMatrixEvaluationResult {
+  matchedRule?: DiscountMatrixRule;
+  discountPercent: number;
+  firstMonthFree: boolean;
+  firstMonthSavings: number;
+  freeBlanketsCount: number;
+  freeLockIncluded: boolean;
+  freeSuppliesRetailValue: number;
+  milestoneDiscountAmount: number;
+  milestoneDiscountOption?: AnnualMilestoneOption;
+  reason: string;
+  notes?: string;
+  isPriceFreezeProtected: boolean;
+  earlyTerminationWarning?: string;
+}
+
+export function evaluateDiscountMatrix(
+  criteria: DiscountMatrixCriteria,
+  rules: DiscountMatrixRule[] = DEFAULT_DISCOUNT_MATRIX_RULES
+): DiscountMatrixEvaluationResult {
+  const {
+    months,
+    containerSize,
+    isInterstate,
+    storagePlacement,
+    hub,
+    annualOption = '400B',
+    billingCycle = 'monthly',
+    baseMonthlyRate,
+  } = criteria;
+
+  // 1. 7' Small Container Rule: "7': No discounts"
+  if (containerSize === 'small_10m3') {
+    return {
+      discountPercent: 0,
+      firstMonthFree: false,
+      firstMonthSavings: 0,
+      freeBlanketsCount: 0,
+      freeLockIncluded: false,
+      freeSuppliesRetailValue: 0,
+      milestoneDiscountAmount: 0,
+      reason: "7' containers: Standard rate (exempt from promotional duration discounts)",
+      notes: 'No discounts',
+      isPriceFreezeProtected: true,
+    };
+  }
+
+  // 2. Prepayment percentage stacking:
+  // - Monthly Ongoing: No discount
+  // - 6 months upfront then monthly: 5% off
+  // - 12 months upfront then monthly: 10% off
+  let upfrontPercent = 0;
+  if (billingCycle === '6_months_upfront') {
+    upfrontPercent = 5;
+  } else if (billingCycle === '12_months_upfront') {
+    upfrontPercent = 10;
+  }
+
+  const effectiveRules = rules && rules.length > 0 ? rules : DEFAULT_DISCOUNT_MATRIX_RULES;
+
+  // Filter rules by active status and matching dimensions
+  const matchingRules = effectiveRules.filter((r) => {
+    if (r.active === false) return false;
+
+    // Container size match
+    if (r.containerSizes && r.containerSizes.length > 0) {
+      if (!r.containerSizes.includes(containerSize as any)) {
+        return false;
+      }
+    }
+
+    // Move scope match (local vs interstate)
+    if (r.moveScope && r.moveScope !== 'all') {
+      if (r.moveScope === 'interstate' && !isInterstate) return false;
+      if (r.moveScope === 'local' && isInterstate) return false;
+    }
+
+    // Storage placement match (my_place vs facility)
+    if (r.storagePlacement && r.storagePlacement !== 'all') {
+      if (r.storagePlacement !== storagePlacement) return false;
+    }
+
+    // Hub location match
+    if (r.hubLocations && r.hubLocations.length > 0 && !r.hubLocations.includes('all')) {
+      if (!r.hubLocations.includes(hub)) return false;
+    }
+
+    // Duration match
+    if (r.maxMonths !== undefined) {
+      if (months < r.minMonths || months > r.maxMonths) {
+        return false;
+      }
+    } else {
+      if (months < r.minMonths) {
+        return false;
+      }
+    }
+
+    return true;
+  });
+
+  // Pick best matching rule (prioritizing specific hub/placement rules, then highest minMonths)
+  let matchedRule: DiscountMatrixRule | undefined = undefined;
+  if (matchingRules.length > 0) {
+    matchingRules.sort((a, b) => {
+      const aSpecificHub = a.hubLocations && !a.hubLocations.includes('all') ? 1 : 0;
+      const bSpecificHub = b.hubLocations && !b.hubLocations.includes('all') ? 1 : 0;
+      if (bSpecificHub !== aSpecificHub) return bSpecificHub - aSpecificHub;
+
+      const aSpecificPlace = a.storagePlacement !== 'all' ? 1 : 0;
+      const bSpecificPlace = b.storagePlacement !== 'all' ? 1 : 0;
+      if (bSpecificPlace !== aSpecificPlace) return bSpecificPlace - aSpecificPlace;
+
+      return b.minMonths - a.minMonths;
+    });
+    matchedRule = matchingRules[0];
+  }
+
+  // Extract benefits
+  const firstMonthFree = Boolean(matchedRule?.firstMonthFree);
+  const firstMonthSavings = firstMonthFree ? baseMonthlyRate : 0;
+  const freeBlanketsCount = matchedRule?.freeBlanketsCount || 0;
+  const freeLockIncluded = Boolean(matchedRule?.freeLockIncluded);
+  const freeSuppliesRetailValue = (freeBlanketsCount * 15) + (freeLockIncluded ? 35 : 0);
+
+  let milestoneDiscountAmount = 0;
+  let milestoneDiscountOption: AnnualMilestoneOption | undefined = undefined;
+
+  if (months >= 12 || (matchedRule && matchedRule.minMonths >= 12)) {
+    milestoneDiscountAmount = 400;
+    milestoneDiscountOption = annualOption;
+  }
+
+  const stackedPercent = Math.min(100, (matchedRule?.discountPercent || 0) + upfrontPercent);
+
+  // Build descriptive reason
+  const reasons: string[] = [];
+  if (firstMonthFree) reasons.push('1st Month Free');
+  if (freeBlanketsCount > 0) reasons.push(`${freeBlanketsCount} Free Blankets`);
+  if (freeLockIncluded) reasons.push('Free Disc Padlock');
+  if (milestoneDiscountAmount > 0) {
+    if (milestoneDiscountOption === '400B') {
+      reasons.push('$200 Off Month 6 + $200 Off Month 12 (Option 400B)');
+    } else {
+      reasons.push('$400 Off Month 12 (Option 400A)');
+    }
+  }
+  if (upfrontPercent > 0) {
+    reasons.push(`${upfrontPercent}% Prepayment Upfront Discount`);
+  }
+
+  const reason = reasons.length > 0 ? reasons.join(' · ') : 'Standard rate (no active discounts)';
+  const earlyTerminationWarning = (firstMonthFree || milestoneDiscountAmount > 0 || freeSuppliesRetailValue > 0)
+    ? `Duration discount commitment: Completing your committed duration is required. If storage ends earlier than ${months} month(s), waived promotional amounts will be billed on the final invoice.`
+    : undefined;
+
+  return {
+    matchedRule,
+    discountPercent: stackedPercent,
+    firstMonthFree,
+    firstMonthSavings,
+    freeBlanketsCount,
+    freeLockIncluded,
+    freeSuppliesRetailValue,
+    milestoneDiscountAmount,
+    milestoneDiscountOption,
+    reason,
+    notes: matchedRule?.notes,
+    isPriceFreezeProtected: matchedRule?.isPriceFreezeProtected !== false,
+    earlyTerminationWarning,
+  };
+}
+
+export function calculateEarlyTerminationClawback(params: {
+  committedMonths: number;
+  actualMonthsCompleted: number;
+  monthlyStorageRate: number;
+  firstMonthWasFree?: boolean;
+  freeBlanketsProvided?: number;
+  freeLockProvided?: boolean;
+  milestoneDiscountApplied?: number;
+}): EarlyTerminationResult {
+  const {
+    committedMonths,
+    actualMonthsCompleted,
+    monthlyStorageRate,
+    firstMonthWasFree = false,
+    freeBlanketsProvided = 0,
+    freeLockProvided = false,
+    milestoneDiscountApplied = 0,
+  } = params;
+
+  if (actualMonthsCompleted >= committedMonths) {
+    return {
+      isViolation: false,
+      committedMonths,
+      actualMonthsCompleted,
+      totalClawbackAmount: 0,
+      itemizedClawbacks: [],
+      revisedFinalBalanceDue: 0,
+      customerNotificationText: 'Storage duration requirement fulfilled. All applied discounts and promotional allowances remain intact.',
+    };
+  }
+
+  const itemizedClawbacks: { item: string; waivedValue: number; reason: string }[] = [];
+  let totalClawback = 0;
+
+  // 1. Waived 1st month storage fee
+  if (firstMonthWasFree && committedMonths >= 2) {
+    itemizedClawbacks.push({
+      item: 'Waived 1st Month Storage Fee Reversal',
+      waivedValue: monthlyStorageRate,
+      reason: `Storage concluded at ${actualMonthsCompleted} month(s), terminating before the ${committedMonths}-month commitment.`,
+    });
+    totalClawback += monthlyStorageRate;
+  }
+
+  // 2. Free supplies retail adjustment if vacated under 1 month
+  if (actualMonthsCompleted < 1) {
+    if (freeBlanketsProvided > 0) {
+      const val = freeBlanketsProvided * 15;
+      itemizedClawbacks.push({
+        item: `Complimentary Furniture Blankets (${freeBlanketsProvided} units)`,
+        waivedValue: val,
+        reason: 'Terminated storage prior to minimum 1 month duration.',
+      });
+      totalClawback += val;
+    }
+    if (freeLockProvided) {
+      itemizedClawbacks.push({
+        item: 'Complimentary Heavy-Duty Disc Padlock',
+        waivedValue: 35,
+        reason: 'Terminated storage prior to minimum 1 month duration.',
+      });
+      totalClawback += 35;
+    }
+  }
+
+  // 3. Milestone credit reversal
+  if (milestoneDiscountApplied > 0) {
+    itemizedClawbacks.push({
+      item: 'Annual Milestone Storage Credit Reversal',
+      waivedValue: milestoneDiscountApplied,
+      reason: `Terminated storage at month ${actualMonthsCompleted} before completing the 12-month commitment.`,
+    });
+    totalClawback += milestoneDiscountApplied;
+  }
+
+  const customerNotificationText = `Notice of Duration Discount Reversal: Your original booking received $${totalClawback.toFixed(2)} in promotional incentives under a ${committedMonths}-month commitment. Because storage concluded at month ${actualMonthsCompleted}, the unearned promotional allowance ($${totalClawback.toFixed(2)}) has been added to your final settlement invoice in accordance with Portabox terms.`;
+
+  return {
+    isViolation: true,
+    committedMonths,
+    actualMonthsCompleted,
+    totalClawbackAmount: totalClawback,
+    itemizedClawbacks,
+    revisedFinalBalanceDue: totalClawback,
+    customerNotificationText,
+  };
 }
 
 export const DEFAULT_DURATION_DISCOUNTS: DurationDiscountTier[] = [
@@ -590,6 +975,7 @@ export const DEFAULT_CONFIG: AppConfig = {
     },
   ],
   durationDiscounts: [...DEFAULT_DURATION_DISCOUNTS],
+  discountMatrixRules: [...DEFAULT_DISCOUNT_MATRIX_RULES],
   blockedPostcodes: [
     { postcode: '5222', suburb: 'Kingscote (Kangaroo Island)', reason: 'Ferry required; contact special transport logistics.' },
     { postcode: '2899', suburb: 'Norfolk Island', reason: 'Offshore territory not serviced by road freight.' },
@@ -816,7 +1202,8 @@ export function calculateBlanketRentalPrice(
  */
 export function calculateLockSalesPrice(
   locksCount: number,
-  config?: PackingSuppliesConfig
+  config?: PackingSuppliesConfig,
+  freeLockBonus: boolean = false
 ): {
   totalPrice: number;
   unitPrice: number;
@@ -824,17 +1211,29 @@ export function calculateLockSalesPrice(
   savings: number;
 } {
   const unitPrice = config?.lockPrice ?? 20;
-  const isFreePromo = Boolean(config?.isLockFreePromo);
-  if (locksCount <= 0) {
-    return { totalPrice: 0, unitPrice, isFreePromo, savings: 0 };
-  }
-  if (isFreePromo) {
+  const isGlobalFree = Boolean(config?.isLockFreePromo);
+  if (isGlobalFree) {
+    const count = Math.max(1, locksCount);
     return {
       totalPrice: 0,
       unitPrice,
       isFreePromo: true,
-      savings: locksCount * unitPrice,
+      savings: count * unitPrice,
     };
+  }
+  if (freeLockBonus) {
+    // 1 complimentary disc lock included free
+    const effectiveLocks = Math.max(1, locksCount);
+    const chargeableLocks = Math.max(0, effectiveLocks - 1);
+    return {
+      totalPrice: chargeableLocks * unitPrice,
+      unitPrice,
+      isFreePromo: true,
+      savings: unitPrice,
+    };
+  }
+  if (locksCount <= 0) {
+    return { totalPrice: 0, unitPrice, isFreePromo: false, savings: 0 };
   }
   return {
     totalPrice: locksCount * unitPrice,
@@ -884,6 +1283,68 @@ export function calculateInsuranceMonthlyFee(
   return {
     monthlyFee: monthlyRatePerContainer * count,
     monthlyRatePerContainer,
+    isFreePromo: false,
+    promoSavingsMonthly: 0,
+  };
+}
+
+/**
+ * Container Protection Option (CPO / COO) Plan Calculator:
+ * - CPO: Content Protection Option ($15/mo per container, covers container & contents up to $5,000 max per container). Mandatory for interstate.
+ * - COO: Container Only Option ($10/mo per container, covers container loss/damage only; $0 contents cover). Onsite only.
+ * - None: Declined ($0/mo, customer assumes risk or uses own insurance).
+ */
+export function calculateProtectionPlanFee(
+  plan: 'cpo' | 'coo' | 'none',
+  containerCount: number = 1,
+  config?: ContainerInsuranceConfig
+): {
+  plan: 'cpo' | 'coo' | 'none';
+  planName: string;
+  monthlyFee: number;
+  monthlyRatePerContainer: number;
+  coverageAmount: number;
+  isFreePromo: boolean;
+  promoSavingsMonthly: number;
+} {
+  const count = Math.max(1, containerCount);
+  const isFreePromo = Boolean(config?.isFreePromo);
+  const cpoRate = config?.monthlyPricePerContainer ?? 15;
+  const cooRate = config?.cooMonthlyPricePerContainer ?? 10;
+  const maxCpoCoverage = config?.coverageAmountPerContainer ?? 5000;
+
+  if (plan === 'cpo') {
+    const monthlyRate = isFreePromo ? 0 : cpoRate;
+    return {
+      plan: 'cpo',
+      planName: 'Content Protection Option (CPO)',
+      monthlyFee: monthlyRate * count,
+      monthlyRatePerContainer: cpoRate,
+      coverageAmount: maxCpoCoverage * count,
+      isFreePromo,
+      promoSavingsMonthly: isFreePromo ? cpoRate * count : 0,
+    };
+  }
+
+  if (plan === 'coo') {
+    const monthlyRate = isFreePromo ? 0 : cooRate;
+    return {
+      plan: 'coo',
+      planName: 'Container Only Option (COO)',
+      monthlyFee: monthlyRate * count,
+      monthlyRatePerContainer: cooRate,
+      coverageAmount: 0,
+      isFreePromo,
+      promoSavingsMonthly: isFreePromo ? cooRate * count : 0,
+    };
+  }
+
+  return {
+    plan: 'none',
+    planName: 'No Protection (Declined)',
+    monthlyFee: 0,
+    monthlyRatePerContainer: 0,
+    coverageAmount: 0,
     isFreePromo: false,
     promoSavingsMonthly: 0,
   };
@@ -1035,6 +1496,9 @@ export function loadAppConfig(): AppConfig {
       durationDiscounts: Array.isArray(parsed.durationDiscounts) && parsed.durationDiscounts.length > 0
         ? parsed.durationDiscounts
         : [...DEFAULT_DURATION_DISCOUNTS],
+      discountMatrixRules: Array.isArray(parsed.discountMatrixRules) && parsed.discountMatrixRules.length > 0
+        ? parsed.discountMatrixRules
+        : [...DEFAULT_DISCOUNT_MATRIX_RULES],
       blockedPostcodes: parsed.blockedPostcodes || DEFAULT_CONFIG.blockedPostcodes,
       depotCalendars: parsed.depotCalendars || DEFAULT_DEPOT_CALENDARS,
       enableCallCenterDispatch: parsed.enableCallCenterDispatch !== undefined ? Boolean(parsed.enableCallCenterDispatch) : DEFAULT_CONFIG.enableCallCenterDispatch,
@@ -1329,10 +1793,12 @@ export function calculateQuote(params: {
   blanketsCount?: number;
   locksCount?: number;
   insuranceSelected?: boolean;
+  protectionPlan?: ProtectionPlanType;
   appliedPromoCode?: string;
   includeFuelSurcharge?: boolean;
   originLogisticsMethod?: LogisticsMethod;
   destinationLogisticsMethod?: LogisticsMethod;
+  annualDiscountOption?: AnnualMilestoneOption;
   config?: AppConfig;
 }): QuoteBreakdown {
   const config = params.config || loadAppConfig();
@@ -1753,14 +2219,33 @@ export function calculateQuote(params: {
     },
     config.durationDiscounts
   );
-  const durationFreeBlanketsCount = rawDurationDiscount.freeBlanketsCount || 0;
+
+  const matrixResult = evaluateDiscountMatrix(
+    {
+      months: durationMonths,
+      containerSize,
+      serviceType,
+      isInterstate: Boolean(isInterstate),
+      storagePlacement: isOnsite ? 'my_place' : 'facility',
+      hub: originHub,
+      annualOption: params.annualDiscountOption || '400B',
+      billingCycle,
+      baseMonthlyRate: monthlyContainerRate,
+    },
+    config.discountMatrixRules
+  );
+
+  const durationFreeBlanketsCount = Math.max(
+    rawDurationDiscount.freeBlanketsCount || 0,
+    matrixResult.freeBlanketsCount || 0
+  );
+  const isLockFreeFromMatrix = matrixResult.freeLockIncluded;
 
   // 6. Packing Supplies (Boxes, Blankets with Free Allowance & Lock Sales)
   // Moving cartons feature flag: default off (Portabox does not provide cartons currently)
   const boxesCount = config.enableMovingCartons ? (params.boxesCount || 0) : 0;
   const blanketsCount = params.blanketsCount || 0;
   const locksCount = params.locksCount || 0;
-  const insuranceSelected = params.insuranceSelected !== undefined ? params.insuranceSelected : true; // default to opted in or selected
 
   const boxesPrice = calculateBoxPrice(boxesCount, config.packingSupplies);
   
@@ -1768,8 +2253,8 @@ export function calculateQuote(params: {
   const blanketCalc = calculateBlanketRentalPrice(blanketsCount, containerCount, config.packingSupplies, durationFreeBlanketsCount);
   const blanketsPrice = blanketCalc.totalFee;
 
-  // Heavy-duty lock sales
-  const lockCalc = calculateLockSalesPrice(locksCount, config.packingSupplies);
+  // Heavy-duty lock sales with matrix discount check
+  const lockCalc = calculateLockSalesPrice(locksCount, config.packingSupplies, isLockFreeFromMatrix);
   const locksPrice = lockCalc.totalPrice;
 
   const totalSuppliesPrice = boxesPrice + blanketsPrice + locksPrice;
@@ -1789,16 +2274,27 @@ export function calculateQuote(params: {
     totalSuppliesPrice,
   };
 
-  // 6b. Container Protection Option (CPO / Insurance)
-  const insuranceCalc = calculateInsuranceMonthlyFee(insuranceSelected, containerCount, config.insurance);
+  // 6b. Container Protection Option (CPO / COO / None)
+  // Interstate rule: Mandatory CPO (up to $5,000 cover per container, cannot be deselected)
+  // Onsite rule: COO is only available for onsite storage
+  const isInterstateProtectionMandatory = Boolean(isInterstate);
+  let effectiveProtectionPlan: ProtectionPlanType = params.protectionPlan || (params.insuranceSelected !== false ? 'cpo' : 'none');
+  if (isInterstateProtectionMandatory) {
+    effectiveProtectionPlan = 'cpo';
+  } else if (effectiveProtectionPlan === 'coo' && !isOnsite) {
+    effectiveProtectionPlan = 'cpo'; // COO only available for onsite
+  }
+
+  const protectionCalc = calculateProtectionPlanFee(effectiveProtectionPlan, containerCount, config.insurance);
+  const insuranceSelected = effectiveProtectionPlan !== 'none';
   const insurance: ContainerInsuranceOrder = {
     selected: insuranceSelected,
     containerCount,
-    monthlyPricePerContainer: insuranceCalc.monthlyRatePerContainer,
-    totalMonthlyInsuranceFee: insuranceCalc.monthlyFee,
-    isFreePromo: insuranceCalc.isFreePromo,
-    promoSavingsMonthly: insuranceCalc.promoSavingsMonthly,
-    coverageAmount: config.insurance?.coverageAmountPerContainer || 10000,
+    monthlyPricePerContainer: protectionCalc.monthlyRatePerContainer,
+    totalMonthlyInsuranceFee: protectionCalc.monthlyFee,
+    isFreePromo: protectionCalc.isFreePromo,
+    promoSavingsMonthly: protectionCalc.promoSavingsMonthly,
+    coverageAmount: protectionCalc.coverageAmount,
   };
 
   // 7. Zone A–E & Interstate transport legs (Location & Zone-Based Delivery Fees + optional per-km pricing)
@@ -2190,8 +2686,14 @@ export function calculateQuote(params: {
         waivedReason: 'Self-unloading at Portabox Location',
       });
     }
-  } else {
-    // Direct 'moving' (A to B move without interim storage):
+  } else if (isInterstate) {
+    // Interstate Move (IF) - Rows 2, 3, 4, 5
+    // Where: Our Location (Forced)
+    // Need Interim Storage: N/A (Forced)
+    // - My Home -> My Home: 4 local legs + Line-haul (Row 2, 2 addresses)
+    // - My Home -> Our Location: 2 local legs + Line-haul (Row 3, 1 address)
+    // - Our Location -> My Home: 2 local legs + Line-haul (Row 4, 1 address)
+    // - Our Location -> Our Location: 0 local legs + Line-haul (Row 5, 0 addresses)
     const initialFee = legBaseFee + kmTotalCharge + (isFuelSurchargeIncluded ? fuelSurchargeAmount : 0);
     const leg2Fuel = calculateLegFuelSurcharge({
       zone: deliveryZone,
@@ -2204,8 +2706,9 @@ export function calculateQuote(params: {
     const origin2LegsFee = leg1FullFee + leg2FullFee;
 
     if (!isOriginDepot) {
+      // Leg 1: Portabox Location -> Customer Location (Deliver empty container)
       legs.push({
-        label: `Initial delivery to ${originPostcode.suburb} (empty)`,
+        label: `Portabox Location → Customer Location (Deliver empty container)`,
         description: `Deliver empty container for packing · ${originHub} Zone ${deliveryZone} (${containerCount > 1 ? `$${domesticLegFee}/container × ${containerCount} = $${legBaseFee}` : `$${domesticLegFee} Zone ${deliveryZone} base`}${kmTotalCharge > 0 ? ` + $${kmTotalCharge} per-km fee` : ''}${isFuelSurchargeIncluded && fuelSurchargeAmount > 0 ? ` + $${fuelSurchargeAmount} fuel levy (${initialLegFuel.note})` : ''})`,
         fee: initialFee,
         isPayableNow: true,
@@ -2220,13 +2723,31 @@ export function calculateQuote(params: {
         fuelSurchargeZone: deliveryZone,
         fuelSurchargeDistanceKm: originDistanceKm,
       });
+
+      // Leg 2: Customer Location -> Portabox Location (Pick up loaded container for interstate transit)
+      legs.push({
+        label: `Customer Location → Portabox Location (Transit loaded container to depot)`,
+        description: `Pick up loaded container from ${originPostcode.suburb} and transport to ${originHub} Portabox Location for interstate line-haul freight · Zone ${deliveryZone} (${containerCount > 1 ? `$${domesticLegFee}/container × ${containerCount} = $${legBaseFee}` : `$${domesticLegFee} Zone ${deliveryZone} base`}${kmTotalCharge > 0 ? ` + $${kmTotalCharge} per-km fee` : ''}) · Fuel levy deferred until pickup occurs${leg2Fuel.totalAmount > 0 ? ` (est. $${leg2Fuel.totalAmount})` : ''}`,
+        fee: legBaseFee + kmTotalCharge,
+        isPayableNow: false,
+        feePerContainer: domesticLegFee,
+        containerCount,
+        baseFee: legBaseFee,
+        extraKmCharge: kmTotalCharge > 0 ? kmTotalCharge : undefined,
+        extraKmDistanceKm: kmTotalCharge > 0 ? originDistanceKm : undefined,
+        fuelSurchargeDeferred: true,
+        fuelSurchargeEstimatedAmount: isFuelSurchargeIncluded ? leg2Fuel.totalAmount : 0,
+        fuelSurchargeCalculationNote: `Transit to ${originHub} depot (${originDistanceKm} km · ${leg2Fuel.note}). Fuel levy deferred until pickup occurs.`,
+        fuelSurchargeZone: deliveryZone,
+        fuelSurchargeDistanceKm: originDistanceKm,
+      });
     } else {
-      // Customer loads goods at origin Portabox location: Saves 2 local legs!
+      // Customer self-loads at origin Portabox Location: Saves 2 local legs!
       legsSavedCount += 2;
       legsSavedDollarTotal += origin2LegsFee;
 
       waivedLegs.push({
-        label: `[Waived] Empty container delivery to ${originPostcode.suburb}`,
+        label: `[Waived] Portabox Location → Customer Location (Deliver empty container)`,
         description: `Saved! You will bring your goods directly to the ${originHub} Portabox Location (${originDepot.address}, ${originDepot.suburb}) to load.`,
         fee: 0,
         isPayableNow: false,
@@ -2235,7 +2756,7 @@ export function calculateQuote(params: {
         waivedReason: 'Self-loading at Portabox Location',
       });
       waivedLegs.push({
-        label: `[Waived] Origin local pickup and transit to Portabox Location`,
+        label: `[Waived] Customer Location → Portabox Location (Transit loaded container to depot)`,
         description: `Saved! Container is loaded on-site at the ${originHub} Portabox Location.`,
         fee: 0,
         isPayableNow: false,
@@ -2245,164 +2766,216 @@ export function calculateQuote(params: {
       });
     }
 
-    if (isInterstate) {
-      // Interstate move: direct line-haul freight between depots
-      const destHubName = getMetroHubForPostcode(destinationPostcode!, enableSunshineCoast);
-      const destBaseTotal = destZoneBaseFeePerContainer * containerCount + destKmChargeTotal;
+    // Line-haul freight between depots
+    const destHubName = getMetroHubForPostcode(destinationPostcode!, enableSunshineCoast);
+    legs.push({
+      label: `Interstate transport (${originHub} → ${destHubName})`,
+      description: `${movingDistanceKm ? `${movingDistanceKm} km driving · ` : ''}Direct interstate line-haul freight (${interstateSizeRateDesc})`,
+      fee: interstateFee,
+      isPayableNow: false,
+      feePerContainer: interstateFeePerContainer,
+      containerCount,
+      baseFee: interstateFee,
+    });
 
+    const destSuburb = destinationPostcode?.suburb || 'Destination';
+    const destBaseTotal = destZoneBaseFeePerContainer * containerCount + destKmChargeTotal;
+    const destReturnFuel = calculateLegFuelSurcharge({
+      zone: destDeliveryZone,
+      distanceKm: destDepotDistanceKm,
+      containerCount,
+      config,
+    });
+    const destLegFeeWithFuel = destBaseTotal + (isFuelSurchargeIncluded ? destReturnFuel.totalAmount : 0);
+    const dest2LegsFee = destLegFeeWithFuel * 2;
+
+    if (!isDestDepot) {
+      // Leg 3: Destination Portabox Location -> Destination Customer Home (Deliver loaded container)
       legs.push({
-        label: `Interstate transport (${originHub} → ${destHubName})`,
-        description: `${movingDistanceKm ? `${movingDistanceKm} km driving · ` : ''}Direct interstate line-haul freight (${interstateSizeRateDesc})`,
-        fee: interstateFee,
+        label: `Portabox Location → New Customer Location (Deliver loaded container)`,
+        description: `Deliver container from ${destHubName} Portabox Location to your new address in ${destSuburb} · Zone ${destDeliveryZone} (${containerCount > 1 ? `$${destZoneBaseFeePerContainer}/container × ${containerCount} = $${destBaseTotal}` : `$${destZoneBaseFeePerContainer} Zone ${destDeliveryZone} fee`}${destKmChargeTotal > 0 ? ` + $${destKmChargeTotal} per-km fee` : ''}) · Delivery fuel levy deferred until delivery occurs${destReturnFuel.totalAmount > 0 ? ` (est. $${destReturnFuel.totalAmount})` : ''}`,
+        fee: destBaseTotal,
         isPayableNow: false,
-        feePerContainer: interstateFeePerContainer,
+        feePerContainer: destZoneBaseFeePerContainer,
         containerCount,
-        baseFee: interstateFee,
-      });
-
-      const destReturnFuel = calculateLegFuelSurcharge({
-        zone: destDeliveryZone,
-        distanceKm: destDepotDistanceKm,
-        containerCount,
-        config,
-      });
-      const destLegFeeWithFuel = destBaseTotal + (isFuelSurchargeIncluded ? destReturnFuel.totalAmount : 0);
-      const dest2LegsFee = destLegFeeWithFuel * 2;
-
-      if (!isDestDepot) {
-        legs.push({
-          label: `Final delivery & collection at ${destinationPostcode?.suburb || 'Destination'} (empty)`,
-          description: `${destHubName} Zone ${destDeliveryZone} delivery & final collection (${containerCount > 1 ? `$${destZoneBaseFeePerContainer}/container × ${containerCount} = $${destZoneBaseFeePerContainer * containerCount}` : `$${destZoneBaseFeePerContainer} Zone ${destDeliveryZone} base`}${destKmChargeTotal > 0 ? ` + $${destKmChargeTotal} per-km fee` : ''}) · Container returned to destination ${destHubName} location (${destDepotDistanceKm} km) · Fuel levy deferred until return occurs${destReturnFuel.totalAmount > 0 ? ` (est. $${destReturnFuel.totalAmount})` : ''}`,
-          fee: destBaseTotal,
-          isPayableNow: false,
-          feePerContainer: destZoneBaseFeePerContainer,
-          containerCount,
-          baseFee: destZoneBaseFeePerContainer * containerCount,
-          extraKmCharge: destKmChargeTotal > 0 ? destKmChargeTotal : undefined,
-          fuelSurchargeDeferred: true,
-          fuelSurchargeEstimatedAmount: isFuelSurchargeIncluded ? destReturnFuel.totalAmount : 0,
-          fuelSurchargeCalculationNote: `Container returned to destination Portabox ${destHubName} location (${destDepotDistanceKm} km · ${destReturnFuel.note}). Fuel levy is deferred until container return occurs.`,
-          fuelSurchargeZone: destDeliveryZone,
-          fuelSurchargeDistanceKm: destDepotDistanceKm,
-        });
-      } else {
-        // Customer unloads at destination depot: Saves 2 local legs at destination!
-        legsSavedCount += 2;
-        legsSavedDollarTotal += dest2LegsFee;
-
-        waivedLegs.push({
-          label: `[Waived] Destination delivery to ${destinationPostcode?.suburb || 'Destination'}`,
-          description: `Saved! You will collect and unload directly at the ${destHubName} Portabox Location facility.`,
-          fee: 0,
-          isPayableNow: false,
-          isWaived: true,
-          waivedSavings: destLegFeeWithFuel,
-          waivedReason: 'Self-unloading at Portabox Location',
-        });
-        waivedLegs.push({
-          label: `[Waived] Destination empty container collection`,
-          description: `Saved! Container stays at the ${destHubName} Portabox Location facility.`,
-          fee: 0,
-          isPayableNow: false,
-          isWaived: true,
-          waivedSavings: destLegFeeWithFuel,
-          waivedReason: 'Self-unloading at Portabox Location',
-        });
-      }
-    } else {
-      // Local move
-      const movingRate =
-        movingDeliveryZone === 'A'
-          ? zoneARatePerKm
-          : movingDeliveryZone === 'B'
-          ? zoneBRatePerKm
-          : movingDeliveryZone === 'C'
-          ? zoneCRatePerKm
-          : movingDeliveryZone === 'D'
-          ? zoneDRatePerKm
-          : zoneERatePerKm;
-      const destinationSuburb = destinationPostcode?.suburb || 'Destination';
-      const moveBaseTotal = movingZoneBaseFeePerContainer * containerCount;
-
-      const moveFuel = calculateLegFuelSurcharge({
-        zone: movingDeliveryZone || 'A',
-        distanceKm: movingDistanceKm || 0,
-        containerCount,
-        config,
-      });
-
-      let movingLegDesc = '';
-      if (movingKmCharge > 0 && movingDistanceKm) {
-        movingLegDesc = `Zone ${movingDeliveryZone} (${movingDeliveryZoneRangeLabel}) Base: ${containerCount > 1 ? `$${movingZoneBaseFeePerContainer}/container × ${containerCount} = $${moveBaseTotal}` : `$${movingZoneBaseFeePerContainer}`} + Per-Km (${movingDistanceKm} km driving @ $${movingRate}/km): ${containerCount > 1 ? `$${movingKmRatePerContainer}/container × ${containerCount} = $${movingKmCharge}` : `$${movingKmCharge}`} · Moving day fuel levy deferred until move occurs${moveFuel.totalAmount > 0 ? ` (est. $${moveFuel.totalAmount})` : ''}`;
-      } else {
-        movingLegDesc = `Direct move from ${originPostcode.suburb} to ${destinationSuburb} (${movingDistanceKm} km driving · Zone ${movingDeliveryZone} (${movingDeliveryZoneRangeLabel}) fee $${movingZoneBaseFeePerContainer}${containerCount > 1 ? ` × ${containerCount} = $${moveBaseTotal}` : ''}) · Moving day fuel levy deferred until move occurs${moveFuel.totalAmount > 0 ? ` (est. $${moveFuel.totalAmount})` : ''}`;
-      }
-
-      const totalMoveFee = moveBaseTotal + movingKmCharge;
-      legs.push({
-        label: `Move to ${destinationSuburb} (full)`,
-        description: movingLegDesc,
-        fee: totalMoveFee,
-        isPayableNow: false,
-        feePerContainer: movingZoneBaseFeePerContainer + movingKmRatePerContainer,
-        containerCount,
-        baseFee: moveBaseTotal,
-        extraKmCharge: movingKmCharge > 0 ? movingKmCharge : undefined,
-        extraKmDistanceKm: movingDistanceKm,
+        baseFee: destBaseTotal,
+        extraKmCharge: destKmChargeTotal > 0 ? destKmChargeTotal : undefined,
         fuelSurchargeDeferred: true,
-        fuelSurchargeEstimatedAmount: isFuelSurchargeIncluded ? moveFuel.totalAmount : 0,
-        fuelSurchargeCalculationNote: `Direct move transit (${movingDistanceKm} km · ${moveFuel.note}). Fuel levy is deferred until move occurs.`,
-        fuelSurchargeZone: movingDeliveryZone,
-        fuelSurchargeDistanceKm: movingDistanceKm,
+        fuelSurchargeEstimatedAmount: isFuelSurchargeIncluded ? destReturnFuel.totalAmount : 0,
+        fuelSurchargeCalculationNote: `Delivery from ${destHubName} depot to new location (${destDepotDistanceKm} km · ${destReturnFuel.note}). Fuel levy deferred until delivery occurs.`,
+        fuelSurchargeZone: destDeliveryZone,
+        fuelSurchargeDistanceKm: destDepotDistanceKm,
       });
 
-      const destBaseTotal = destZoneBaseFeePerContainer * containerCount + destKmChargeTotal;
-      const pickupFuel = calculateLegFuelSurcharge({
-        zone: destDeliveryZone,
-        distanceKm: destDepotDistanceKm,
+      // Leg 4: Destination Customer Home -> Destination Portabox Location (Final empty collection)
+      legs.push({
+        label: `New Customer Location → Portabox Location (Final empty collection)`,
+        description: `Collect empty container once unpacked at ${destSuburb} and return to ${destHubName} Portabox Location (${destDepotDistanceKm} km) · Zone ${destDeliveryZone} (${containerCount > 1 ? `$${destZoneBaseFeePerContainer}/container × ${containerCount} = $${destBaseTotal}` : `$${destZoneBaseFeePerContainer} Zone ${destDeliveryZone} fee`}${destKmChargeTotal > 0 ? ` + $${destKmChargeTotal} per-km fee` : ''}) · Final collection fuel levy deferred until collection occurs${destReturnFuel.totalAmount > 0 ? ` (est. $${destReturnFuel.totalAmount})` : ''}`,
+        fee: destBaseTotal,
+        isPayableNow: false,
+        feePerContainer: destZoneBaseFeePerContainer,
         containerCount,
-        config,
+        baseFee: destBaseTotal,
+        extraKmCharge: destKmChargeTotal > 0 ? destKmChargeTotal : undefined,
+        fuelSurchargeDeferred: true,
+        fuelSurchargeEstimatedAmount: isFuelSurchargeIncluded ? destReturnFuel.totalAmount : 0,
+        fuelSurchargeCalculationNote: `Container returned to ${destHubName} depot (${destDepotDistanceKm} km · ${destReturnFuel.note}). Fuel levy deferred until final pickup occurs.`,
+        fuelSurchargeZone: destDeliveryZone,
+        fuelSurchargeDistanceKm: destDepotDistanceKm,
       });
-      const destLegFeeWithFuel = destBaseTotal + (isFuelSurchargeIncluded ? pickupFuel.totalAmount : 0);
-      const dest2LegsFee = destLegFeeWithFuel * 2;
+    } else {
+      // Customer self-unloads at destination Portabox Location: Saves 2 destination legs!
+      legsSavedCount += 2;
+      legsSavedDollarTotal += dest2LegsFee;
 
-      if (!isDestDepot) {
-        legs.push({
-          label: `Final pickup of empty container at ${destinationSuburb}`,
-          description: `Collect container once unpacked at ${destinationSuburb} · Zone ${destDeliveryZone} (${containerCount > 1 ? `$${destZoneBaseFeePerContainer}/container × ${containerCount} = $${destZoneBaseFeePerContainer * containerCount}` : `$${destZoneBaseFeePerContainer} Zone ${destDeliveryZone} fee`}${destKmChargeTotal > 0 ? ` + $${destKmChargeTotal} per-km fee` : ''}) · Container returned to ${originHub} Portabox Location (${destDepotDistanceKm} km) · Final pickup fuel levy deferred until collection occurs${pickupFuel.totalAmount > 0 ? ` (est. $${pickupFuel.totalAmount})` : ''}`,
-          fee: destBaseTotal,
-          isPayableNow: false,
-          feePerContainer: destZoneBaseFeePerContainer,
-          containerCount,
-          baseFee: destZoneBaseFeePerContainer * containerCount,
-          extraKmCharge: destKmChargeTotal > 0 ? destKmChargeTotal : undefined,
-          fuelSurchargeDeferred: true,
-          fuelSurchargeEstimatedAmount: isFuelSurchargeIncluded ? pickupFuel.totalAmount : 0,
-          fuelSurchargeCalculationNote: `Container returned to ${originHub} Portabox Location (${destDepotDistanceKm} km · ${pickupFuel.note}). Fuel levy is deferred until final pickup occurs.`,
-          fuelSurchargeZone: destDeliveryZone,
-          fuelSurchargeDistanceKm: destDepotDistanceKm,
-        });
-      } else {
-        // Customer unloads empty container at destination depot: Saves 2 legs!
-        legsSavedCount += 2;
-        legsSavedDollarTotal += dest2LegsFee;
-
-        waivedLegs.push({
-          label: `[Waived] Destination container delivery & collection at ${destinationSuburb}`,
-          description: `Saved 2 legs! You will unload goods directly at the Portabox Location.`,
-          fee: 0,
-          isPayableNow: false,
-          isWaived: true,
-          waivedSavings: dest2LegsFee,
-          waivedReason: 'Self-unloading at Portabox Location',
-        });
-      }
+      waivedLegs.push({
+        label: `[Waived] Portabox Location → New Customer Location (Deliver loaded container)`,
+        description: `Saved! You will collect and unload directly at the ${destHubName} Portabox Location facility.`,
+        fee: 0,
+        isPayableNow: false,
+        isWaived: true,
+        waivedSavings: destLegFeeWithFuel,
+        waivedReason: 'Self-unloading at Portabox Location',
+      });
+      waivedLegs.push({
+        label: `[Waived] New Customer Location → Portabox Location (Final empty collection)`,
+        description: `Saved! Container stays at the ${destHubName} Portabox Location facility.`,
+        fee: 0,
+        isPayableNow: false,
+        isWaived: true,
+        waivedSavings: destLegFeeWithFuel,
+        waivedReason: 'Self-unloading at Portabox Location',
+      });
     }
+  } else {
+    // Row 1: Direct Local Move (Moving | Local | Interim: No | Initial Loading: N/A | Destination Unloading: N/A)
+    // Strictly 3 legs, 2 addresses:
+    // Leg 1: Portabox Depot -> Origin Home (deliver empty)
+    // Leg 2: Origin Home -> Destination Home (direct move full)
+    // Leg 3: Destination Home -> Portabox Depot (collect empty)
+    const initialFee = legBaseFee + kmTotalCharge + (isFuelSurchargeIncluded ? fuelSurchargeAmount : 0);
+
+    legs.push({
+      label: `Initial delivery to ${originPostcode.suburb} (empty)`,
+      description: `Deliver empty container for packing · ${originHub} Zone ${deliveryZone} (${containerCount > 1 ? `$${domesticLegFee}/container × ${containerCount} = $${legBaseFee}` : `$${domesticLegFee} Zone ${deliveryZone} base`}${kmTotalCharge > 0 ? ` + $${kmTotalCharge} per-km fee` : ''}${isFuelSurchargeIncluded && fuelSurchargeAmount > 0 ? ` + $${fuelSurchargeAmount} fuel levy (${initialLegFuel.note})` : ''})`,
+      fee: initialFee,
+      isPayableNow: true,
+      feePerContainer: domesticLegFee,
+      containerCount,
+      baseFee: legBaseFee,
+      extraKmCharge: kmTotalCharge > 0 ? kmTotalCharge : undefined,
+      extraKmDistanceKm: kmTotalCharge > 0 ? originDistanceKm : undefined,
+      fuelSurcharge: isFuelSurchargeIncluded && fuelSurchargeAmount > 0 ? fuelSurchargeAmount : undefined,
+      fuelSurchargeDeferred: false,
+      fuelSurchargeCalculationNote: initialLegFuel.note,
+      fuelSurchargeZone: deliveryZone,
+      fuelSurchargeDistanceKm: originDistanceKm,
+    });
+
+    const movingRate =
+      movingDeliveryZone === 'A'
+        ? zoneARatePerKm
+        : movingDeliveryZone === 'B'
+        ? zoneBRatePerKm
+        : movingDeliveryZone === 'C'
+        ? zoneCRatePerKm
+        : movingDeliveryZone === 'D'
+        ? zoneDRatePerKm
+        : zoneERatePerKm;
+    const destinationSuburb = destinationPostcode?.suburb || 'Destination';
+    const moveBaseTotal = movingZoneBaseFeePerContainer * containerCount;
+
+    const moveFuel = calculateLegFuelSurcharge({
+      zone: movingDeliveryZone || 'A',
+      distanceKm: movingDistanceKm || 0,
+      containerCount,
+      config,
+    });
+
+    let movingLegDesc = '';
+    if (movingKmCharge > 0 && movingDistanceKm) {
+      movingLegDesc = `Zone ${movingDeliveryZone} (${movingDeliveryZoneRangeLabel}) Base: ${containerCount > 1 ? `$${movingZoneBaseFeePerContainer}/container × ${containerCount} = $${moveBaseTotal}` : `$${movingZoneBaseFeePerContainer}`} + Per-Km (${movingDistanceKm} km driving @ $${movingRate}/km): ${containerCount > 1 ? `$${movingKmRatePerContainer}/container × ${containerCount} = $${movingKmCharge}` : `$${movingKmCharge}`} · Moving day fuel levy deferred until move occurs${moveFuel.totalAmount > 0 ? ` (est. $${moveFuel.totalAmount})` : ''}`;
+    } else {
+      movingLegDesc = `Direct move from ${originPostcode.suburb} to ${destinationSuburb} (${movingDistanceKm} km driving · Zone ${movingDeliveryZone} (${movingDeliveryZoneRangeLabel}) fee $${movingZoneBaseFeePerContainer}${containerCount > 1 ? ` × ${containerCount} = $${moveBaseTotal}` : ''}) · Moving day fuel levy deferred until move occurs${moveFuel.totalAmount > 0 ? ` (est. $${moveFuel.totalAmount})` : ''}`;
+    }
+
+    const totalMoveFee = moveBaseTotal + movingKmCharge;
+    legs.push({
+      label: `Move to ${destinationSuburb} (full)`,
+      description: movingLegDesc,
+      fee: totalMoveFee,
+      isPayableNow: false,
+      feePerContainer: movingZoneBaseFeePerContainer + movingKmRatePerContainer,
+      containerCount,
+      baseFee: moveBaseTotal,
+      extraKmCharge: movingKmCharge > 0 ? movingKmCharge : undefined,
+      extraKmDistanceKm: movingDistanceKm,
+      fuelSurchargeDeferred: true,
+      fuelSurchargeEstimatedAmount: isFuelSurchargeIncluded ? moveFuel.totalAmount : 0,
+      fuelSurchargeCalculationNote: `Direct move transit (${movingDistanceKm} km · ${moveFuel.note}). Fuel levy is deferred until move occurs.`,
+      fuelSurchargeZone: movingDeliveryZone,
+      fuelSurchargeDistanceKm: movingDistanceKm,
+    });
+
+    const destBaseTotal = destZoneBaseFeePerContainer * containerCount + destKmChargeTotal;
+    const pickupFuel = calculateLegFuelSurcharge({
+      zone: destDeliveryZone,
+      distanceKm: destDepotDistanceKm,
+      containerCount,
+      config,
+    });
+
+    legs.push({
+      label: `Final pickup of empty container at ${destinationSuburb}`,
+      description: `Collect container once unpacked at ${destinationSuburb} · Zone ${destDeliveryZone} (${containerCount > 1 ? `$${destZoneBaseFeePerContainer}/container × ${containerCount} = $${destZoneBaseFeePerContainer * containerCount}` : `$${destZoneBaseFeePerContainer} Zone ${destDeliveryZone} fee`}${destKmChargeTotal > 0 ? ` + $${destKmChargeTotal} per-km fee` : ''}) · Container returned to ${originHub} Portabox Location (${destDepotDistanceKm} km) · Final pickup fuel levy deferred until collection occurs${pickupFuel.totalAmount > 0 ? ` (est. $${pickupFuel.totalAmount})` : ''}`,
+      fee: destBaseTotal,
+      isPayableNow: false,
+      feePerContainer: destZoneBaseFeePerContainer,
+      containerCount,
+      baseFee: destZoneBaseFeePerContainer * containerCount,
+      extraKmCharge: destKmChargeTotal > 0 ? destKmChargeTotal : undefined,
+      fuelSurchargeDeferred: true,
+      fuelSurchargeEstimatedAmount: isFuelSurchargeIncluded ? pickupFuel.totalAmount : 0,
+      fuelSurchargeCalculationNote: `Container returned to ${originHub} Portabox Location (${destDepotDistanceKm} km · ${pickupFuel.note}). Fuel levy is deferred until final pickup occurs.`,
+      fuelSurchargeZone: destDeliveryZone,
+      fuelSurchargeDistanceKm: destDepotDistanceKm,
+    });
   }
+
+  // Determine number of required addresses based on the 13 moving/storage logic scenarios:
+  let requiredAddressesCount = 2;
+  if (serviceType === 'storage_at_place') {
+    // Row 9: Storage at Your Home = 1 address
+    requiredAddressesCount = 1;
+  } else if (serviceType === 'storage_facility') {
+    // Rows 10, 11, 12, 13
+    if (isOriginDepot && isDestDepot) {
+      requiredAddressesCount = 0; // Row 13
+    } else {
+      requiredAddressesCount = 1; // Rows 10, 11, 12
+    }
+  } else if (serviceType === 'moving_storage' || isInterstate) {
+    // Rows 2-5 (Interstate) or Rows 6-8 (Local with Interim Storage)
+    if (isOriginDepot && isDestDepot) {
+      requiredAddressesCount = 0; // Rows 5, 8
+    } else if (isOriginDepot || isDestDepot) {
+      requiredAddressesCount = 1; // Rows 3, 4, 6b, 7
+    } else {
+      requiredAddressesCount = 2; // Rows 2, 6a
+    }
+  } else {
+    // Row 1: Direct Local Move = 2 addresses
+    requiredAddressesCount = 2;
+  }
+
+  // Total active local legs (excluding interstate line-haul freight)
+  const totalLegsCount = legs.filter(l => !l.label.includes('Interstate transport')).length;
 
   // 8. Calculate initial charges based on billing cycle (All billing is in advance)
   const payableNowLeg = legs.find((l) => l.isPayableNow);
-  const initialDeliveryFee = payableNowLeg ? payableNowLeg.fee : 0;
+  const initialDeliveryFee = payableNowLeg
+    ? (payableNowLeg.baseFee !== undefined ? payableNowLeg.baseFee + (payableNowLeg.extraKmCharge || 0) : payableNowLeg.fee)
+    : 0;
 
   // Helper to determine customer's current service scope
   const currentServiceScope: PromoServiceScope =
@@ -2543,22 +3116,24 @@ export function calculateQuote(params: {
 
     case '6_months_upfront':
       upfrontMonths = 6;
-      upfrontDiscountPercent = Math.max(durationDiscountPercent, 25);
-      currentPeriodicStorageFee = Math.round(baseMonthlyContainerRate * 6 * (1 - upfrontDiscountPercent / 100));
-      billingCycleLabel = '6 Months Upfront then Monthly';
-      const sixMonthsWeeklyTotal = weeklyContainerRate * 26;
-      const sixMonthsSavings = sixMonthsWeeklyTotal - currentPeriodicStorageFee;
-      billingCycleSavingsText = `${Math.round((sixMonthsSavings / sixMonthsWeeklyTotal) * 100)}% savings`;
+      upfrontDiscountPercent = 5;
+      if (matrixResult.firstMonthFree) {
+        currentPeriodicStorageFee = Math.round(baseMonthlyContainerRate * 5 * 0.95);
+        billingCycleLabel = '6 Months Upfront then Monthly';
+        billingCycleSavingsText = '1st Month Free + 5% Upfront Prepayment Discount';
+      } else {
+        currentPeriodicStorageFee = Math.round(baseMonthlyContainerRate * 6 * 0.95);
+        billingCycleLabel = '6 Months Upfront then Monthly';
+        billingCycleSavingsText = '5% Upfront Prepayment Discount';
+      }
       break;
 
     case '12_months_upfront':
       upfrontMonths = 12;
-      upfrontDiscountPercent = Math.max(durationDiscountPercent, 35);
-      currentPeriodicStorageFee = Math.round(baseMonthlyContainerRate * 12 * (1 - upfrontDiscountPercent / 100));
+      upfrontDiscountPercent = 10;
+      currentPeriodicStorageFee = Math.round(baseMonthlyContainerRate * 12 * 0.90);
       billingCycleLabel = '12 Months Paid Upfront then Monthly';
-      const twelveMonthsWeeklyTotal = weeklyContainerRate * 52;
-      const twelveMonthsSavings = twelveMonthsWeeklyTotal - currentPeriodicStorageFee;
-      billingCycleSavingsText = `${Math.round((twelveMonthsSavings / twelveMonthsWeeklyTotal) * 100)}% savings`;
+      billingCycleSavingsText = '10% Upfront Prepayment Discount';
       break;
   }
 
@@ -2885,8 +3460,12 @@ export function calculateQuote(params: {
   const totalEstimatedFuelSurcharge = fuelSurchargeAmount + deferredFuelSurchargeAmount;
 
   // 10. First Payment Total: Periodic rent + initial delivery + packing supplies + insurance (if selected) - discounts
+  const payableStorageFirstMonth = (matrixResult.firstMonthFree && billingCycle === 'monthly')
+    ? 0
+    : currentPeriodicStorageFee;
+
   let firstPaymentTotal =
-    currentPeriodicStorageFee + initialDeliveryFee + totalSuppliesPrice + (insurance.selected ? insurance.totalMonthlyInsuranceFee : 0) - totalDiscount;
+    payableStorageFirstMonth + initialDeliveryFee + (payableNowLeg?.fuelSurcharge || 0) + totalSuppliesPrice + (insurance.selected ? insurance.totalMonthlyInsuranceFee : 0) - totalDiscount;
   if (firstPaymentTotal < 0) firstPaymentTotal = 0;
 
   const collectionFeeEstimate = legs[legs.length - 1]?.fee || legBaseFee;
@@ -2968,12 +3547,19 @@ export function calculateQuote(params: {
     insurance,
     insuranceMonthlyFee: insurance.totalMonthlyInsuranceFee,
     insuranceSavingsMonthly: insurance.promoSavingsMonthly,
+    protectionPlan: effectiveProtectionPlan,
+    protectionPlanName: protectionCalc.planName,
+    protectionMonthlyFee: protectionCalc.monthlyFee,
+    protectionCoverageAmount: protectionCalc.coverageAmount,
+    isInterstateProtectionMandatory,
     legs,
     waivedLegs,
     originLogisticsMethod,
     destinationLogisticsMethod,
     legsSavedCount,
     legsSavedDollarTotal,
+    totalLegsCount,
+    requiredAddressesCount,
     initialDeliveryFee,
     firstPaymentTotal,
     monthlyStorageFee: effectiveMonthlyContainerRate,
@@ -2987,6 +3573,18 @@ export function calculateQuote(params: {
     durationCompletionBonusDollars: durationCompletionBonusDollars > 0 ? durationCompletionBonusDollars : undefined,
     durationFreeBlanketsCount: durationFreeBlanketsCount > 0 ? durationFreeBlanketsCount : undefined,
     baseMonthlyStorageFee: baseMonthlyContainerRate,
+
+    // Multi-dimensional discount matrix results
+    annualDiscountOption: params.annualDiscountOption || '400B',
+    isFirstMonthFree: matrixResult.firstMonthFree,
+    firstMonthSavingsAmount: matrixResult.firstMonthSavings,
+    freeLockIncluded: matrixResult.freeLockIncluded,
+    freeBlanketsIncluded: matrixResult.freeBlanketsCount > 0,
+    freeSuppliesRetailValue: matrixResult.freeSuppliesRetailValue,
+    milestoneCreditTotal: matrixResult.milestoneDiscountAmount > 0 ? matrixResult.milestoneDiscountAmount : undefined,
+    milestoneCreditOption: matrixResult.milestoneDiscountOption,
+    discountMatrixMatchedRule: matrixResult.matchedRule,
+    earlyTerminationWarning: matrixResult.earlyTerminationWarning,
     appliedPromotions,
     totalDiscount,
     appliedPromoCode: params.appliedPromoCode,

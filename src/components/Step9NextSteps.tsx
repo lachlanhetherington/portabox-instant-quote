@@ -27,6 +27,7 @@ import {
   Compass,
   Layers,
   Home,
+  Warehouse,
 } from 'lucide-react';
 import { QuoteBreakdown, DeliverySlotWindow, DepotCalendarConfig } from '../types/quote';
 import { CustomerLifecycleRoadmap } from './CustomerLifecycleRoadmap';
@@ -256,7 +257,15 @@ export const Step9NextSteps: React.FC<Step9NextStepsProps> = ({
     return `${quote.originPostcode.suburb}, ${quote.originPostcode.state} ${quote.originPostcode.postcode}`;
   };
 
+  const initialDestAddress = () => {
+    if (quote.destinationPostcode) {
+      return `${quote.destinationPostcode.suburb}, ${quote.destinationPostcode.state} ${quote.destinationPostcode.postcode}`;
+    }
+    return '';
+  };
+
   const [deliveryAddress, setDeliveryAddress] = useState<string>(initialAddress);
+  const [destDeliveryAddress, setDestDeliveryAddress] = useState<string>(initialDestAddress);
   const [surfaceType, setSurfaceType] = useState<string>('Concrete Driveway');
   const [doorOrientation, setDoorOrientation] = useState<'house' | 'street' | 'discretion'>('house');
   const [clearanceWidth, setClearanceWidth] = useState<boolean>(true);
@@ -267,6 +276,7 @@ export const Step9NextSteps: React.FC<Step9NextStepsProps> = ({
 
   const handleSavePlacement = (updated?: {
     address?: string;
+    destAddress?: string;
     surface?: string;
     door?: 'house' | 'street' | 'discretion';
     notes?: string;
@@ -464,7 +474,7 @@ export const Step9NextSteps: React.FC<Step9NextStepsProps> = ({
             </div>
             <div className="bg-white/10 backdrop-blur-xs rounded-2xl p-3 border border-white/15">
               <span className="text-[11px] uppercase font-bold text-slate-300 block">Rate Protection</span>
-              <span className="text-sm sm:text-base font-black text-emerald-300">12-Mo Rate Freeze</span>
+              <span className="text-sm sm:text-base font-black text-emerald-300">1-Year Booking Price Guarantee</span>
             </div>
           </div>
         </div>
@@ -747,28 +757,93 @@ export const Step9NextSteps: React.FC<Step9NextStepsProps> = ({
           Provide your exact street delivery address, surface type, and preferred container door orientation so our driver Dave Higgins (#03) places your container in the safest, most accessible spot.
         </p>
 
-        {/* Section A: Street Delivery Address */}
-        <div className="space-y-1.5">
-          <label className="text-xs font-black uppercase tracking-wider text-slate-600 flex items-center gap-1.5">
-            <MapPin className="w-3.5 h-3.5 text-[#00c0f3]" />
-            <span>A. Exact Drop-Off Delivery Address</span>
-          </label>
-          <div className="relative">
-            <input
-              type="text"
-              value={deliveryAddress}
-              onChange={(e) => {
-                setDeliveryAddress(e.target.value);
-                handleSavePlacement({ address: e.target.value });
-              }}
-              placeholder="e.g. 14 Kensington Road, Norwood SA 5067"
-              className="w-full pl-4 pr-10 py-3 rounded-2xl border-2 border-slate-300 focus:border-[#00c0f3] focus:ring-2 focus:ring-[#00c0f3]/20 text-xs sm:text-sm font-bold text-[#15385E] bg-white transition-all shadow-2xs"
-            />
-            <div className="absolute right-3.5 top-1/2 -translate-y-1/2 text-[11px] font-black text-emerald-700 uppercase bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
-              Serviced Depot: {quote.originDepot.name}
+        {/* Section A: Street Delivery Address(es) or Depot Self-Service */}
+        {quote.requiredAddressesCount === 0 ? (
+          <div className="p-4 rounded-2xl bg-sky-50 border border-sky-200">
+            <div className="flex items-start gap-3">
+              <Warehouse className="w-5 h-5 text-[#15385E] shrink-0 mt-0.5" />
+              <div>
+                <h4 className="text-sm font-bold text-[#15385E]">
+                  Self-Service Loading & Unloading at Portabox Location
+                </h4>
+                <p className="text-xs text-slate-600 mt-1">
+                  You have selected self-loading and self-unloading directly at our Portabox Location. No home delivery address is required.
+                </p>
+                <div className="mt-2 text-xs font-semibold text-slate-800">
+                  Portabox Depot: {quote.originDepot.name} · {quote.originDepot.address}, {quote.originDepot.suburb} {quote.originDepot.postcode}
+                </div>
+              </div>
             </div>
           </div>
-        </div>
+        ) : quote.requiredAddressesCount === 2 ? (
+          <div className="space-y-4">
+            <div className="space-y-1.5">
+              <label className="text-xs font-black uppercase tracking-wider text-slate-600 flex items-center gap-1.5">
+                <MapPin className="w-3.5 h-3.5 text-[#00c0f3]" />
+                <span>A1. Origin Loading Address (Initial Container Drop-Off)</span>
+              </label>
+              <div className="relative">
+                <input
+                  type="text"
+                  value={deliveryAddress}
+                  onChange={(e) => {
+                    setDeliveryAddress(e.target.value);
+                    handleSavePlacement({ address: e.target.value });
+                  }}
+                  placeholder="e.g. 14 Kensington Road, Norwood SA 5067"
+                  className="w-full pl-4 pr-10 py-3 rounded-2xl border-2 border-slate-300 focus:border-[#00c0f3] focus:ring-2 focus:ring-[#00c0f3]/20 text-xs sm:text-sm font-bold text-[#15385E] bg-white transition-all shadow-2xs"
+                />
+                <div className="absolute right-3.5 top-1/2 -translate-y-1/2 text-[11px] font-black text-emerald-700 uppercase bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                  Origin Depot: {quote.originDepot.name}
+                </div>
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-xs font-black uppercase tracking-wider text-slate-600 flex items-center gap-1.5">
+                <MapPin className="w-3.5 h-3.5 text-[#15385E]" />
+                <span>A2. Destination Unloading Address (Final Container Delivery)</span>
+              </label>
+              <div className="relative">
+                <input
+                  type="text"
+                  value={destDeliveryAddress}
+                  onChange={(e) => {
+                    setDestDeliveryAddress(e.target.value);
+                    handleSavePlacement({ destAddress: e.target.value });
+                  }}
+                  placeholder="e.g. 88 King William Street, Adelaide SA 5000"
+                  className="w-full pl-4 pr-10 py-3 rounded-2xl border-2 border-slate-300 focus:border-[#15385E] focus:ring-2 focus:ring-[#15385E]/20 text-xs sm:text-sm font-bold text-[#15385E] bg-white transition-all shadow-2xs"
+                />
+                <div className="absolute right-3.5 top-1/2 -translate-y-1/2 text-[11px] font-black text-sky-800 uppercase bg-sky-50 px-2 py-0.5 rounded border border-sky-200">
+                  Destination: {quote.destinationPostcode?.suburb || 'New Address'}
+                </div>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-1.5">
+            <label className="text-xs font-black uppercase tracking-wider text-slate-600 flex items-center gap-1.5">
+              <MapPin className="w-3.5 h-3.5 text-[#00c0f3]" />
+              <span>A. Exact Delivery / Placement Address</span>
+            </label>
+            <div className="relative">
+              <input
+                type="text"
+                value={deliveryAddress}
+                onChange={(e) => {
+                  setDeliveryAddress(e.target.value);
+                  handleSavePlacement({ address: e.target.value });
+                }}
+                placeholder="e.g. 14 Kensington Road, Norwood SA 5067"
+                className="w-full pl-4 pr-10 py-3 rounded-2xl border-2 border-slate-300 focus:border-[#00c0f3] focus:ring-2 focus:ring-[#00c0f3]/20 text-xs sm:text-sm font-bold text-[#15385E] bg-white transition-all shadow-2xs"
+              />
+              <div className="absolute right-3.5 top-1/2 -translate-y-1/2 text-[11px] font-black text-emerald-700 uppercase bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                Serviced Depot: {quote.originDepot.name}
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Section B & C: Surface Type & Door Orientation Grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-5 pt-1">

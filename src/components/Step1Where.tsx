@@ -156,7 +156,7 @@ export const Step1Where: React.FC<Step1WhereProps> = ({
             <Sparkles className="w-5 h-5 text-[#008fbb]" />
           </div>
           <div>
-            <div className="text-xs font-black text-[#15385E] uppercase tracking-wide">30-Day Quote Lock</div>
+            <div className="text-xs font-black text-[#15385E] uppercase tracking-wide">30-Day Quote Price Guarantee</div>
             <div className="text-[11px] text-slate-500 font-semibold">Quoted price frozen for 30 days</div>
           </div>
         </div>
@@ -166,7 +166,7 @@ export const Step1Where: React.FC<Step1WhereProps> = ({
             <Check className="w-5 h-5 text-emerald-600" />
           </div>
           <div>
-            <div className="text-xs font-black text-[#15385E] uppercase tracking-wide">1-Year Rate Freeze</div>
+            <div className="text-xs font-black text-[#15385E] uppercase tracking-wide">1-Year Booking Price Guarantee</div>
             <div className="text-[11px] text-slate-500 font-semibold">Container rate and delivery fees locked for 12 months</div>
           </div>
         </div>

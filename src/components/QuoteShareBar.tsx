@@ -42,7 +42,7 @@ export const QuoteShareBar: React.FC<QuoteShareBarProps> = ({
   const [magicMobileInput, setMagicMobileInput] = useState(customerData?.mobile || '');
   const [magicSentSuccess, setMagicSentSuccess] = useState(false);
 
-  const quoteRef = `PBQ-${(quote.quoteCreatedAt ? new Date(quote.quoteCreatedAt).getTime() : Date.now()).toString().slice(-6)}`;
+  const quoteRef = `Q-${(quote.quoteCreatedAt ? new Date(quote.quoteCreatedAt).getTime() : Date.now()).toString().slice(-6)}`;
   const customerName = customerData?.firstName || 'Valued Customer';
   const customerMobile = customerData?.mobile || '';
   const customerEmail = customerData?.email || '';
@@ -67,7 +67,7 @@ export const QuoteShareBar: React.FC<QuoteShareBarProps> = ({
       ``,
       `--- FINANCIAL BREAKDOWN (AUD, GST INCL) ---`,
       `1. INITIAL MOVE-IN & DELIVERY: $${quote.initialDeliveryFee}`,
-      `2. ONGOING MONTHLY STORAGE: $${quote.monthlyStorageFee}/month (12-Mo Rate Freeze)`,
+      `2. ONGOING MONTHLY STORAGE: $${quote.monthlyStorageFee}/month (1-Year Booking Price Guarantee)`,
     ];
 
     if (quote.packingSupplies?.totalSuppliesPrice > 0) {
@@ -91,7 +91,7 @@ export const QuoteShareBar: React.FC<QuoteShareBarProps> = ({
       `TOTAL PAYABLE UPFRONT: $${quote.firstPaymentTotal}`,
       `ONGOING MONTHLY BILL: $${quote.monthlyStorageFee + (quote.insurance?.selected && !quote.insurance.isFreePromo ? quote.insurance.totalMonthlyInsuranceFee : 0)}/month`,
       ``,
-      `🔒 30-Day Guaranteed Price Lock: Held until ${validityDateStr}`,
+      `🔒 30-Day Quote Price Guarantee: Held until ${validityDateStr}`,
       `📞 Questions or to Book: Call ${phone} or email quotes@portabox.au (www.portabox.au).`
     );
 

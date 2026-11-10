@@ -21,7 +21,13 @@ import {
   searchPostcodes,
 } from '../data/australianPostcodes';
 import { AppConfig, BlockedPostcode, ServiceType } from '../types/quote';
-import { getLocationPricingForHub, getMetroHubForPostcode, isPostcodeBlocked, calculateLegFuelSurcharge } from '../services/pricingEngine';
+import {
+  getLocationPricingForHub,
+  getMetroHubForPostcode,
+  isPostcodeBlocked,
+  calculateLegFuelSurcharge,
+  findClosestDepot,
+} from '../services/pricingEngine';
 
 import { AreYouStuckBanner } from './AreYouStuckBanner';
 
@@ -40,6 +46,7 @@ interface Step2WhatProps {
   onContinue: () => void;
   onBack: () => void;
   config: AppConfig;
+  initialDeliveryFee?: number;
 }
 
 export const Step2What: React.FC<Step2WhatProps> = ({
@@ -57,6 +64,7 @@ export const Step2What: React.FC<Step2WhatProps> = ({
   onContinue,
   onBack,
   config,
+  initialDeliveryFee,
 }) => {
   const isMoving = serviceType === 'moving' || serviceType === 'moving_storage';
 
@@ -148,6 +156,13 @@ export const Step2What: React.FC<Step2WhatProps> = ({
   const interstateKey = destHub ? `${originHub}->${destHub}` : '';
   const interstatePrice = isInterstateMove && config.interstateRates[interstateKey] ? config.interstateRates[interstateKey] : null;
 
+  // Auto-reset interim storage if move is interstate (Interstate moves are N/A for interim storage)
+  useEffect(() => {
+    if (isInterstateMove && serviceType === 'moving_storage') {
+      onSelectServiceType('moving');
+    }
+  }, [isInterstateMove, serviceType, onSelectServiceType]);
+
   // Zone determination based on road driving distance
   const {
     zoneAMaxKm = 25,
@@ -221,6 +236,39 @@ export const Step2What: React.FC<Step2WhatProps> = ({
     onContinue();
   };
 
+  // Initial delivery fee for the first leg (e.g. Hyde Park, SA 5061 - Initial Delivery $179)
+  // Kept on one line; updates dynamically based on onsite vs Portabox location and choices
+  const closestOriginDepot = findClosestDepot(
+    originPostcode.lat,
+    originPostcode.lng,
+    originPostcode.postcode,
+    enableSunshineCoast
+  );
+  const originDepotDist = closestOriginDepot.distanceKm;
+  let originDeliveryZoneBaseFee = originLocConfig.deliveryZones.zoneABaseFee ?? 149;
+  let originKmRate = originLocConfig.deliveryZones.zoneARatePerKm ?? 0;
+
+  if (originDepotDist < (originLocConfig.deliveryZones.zoneAMaxKm ?? 25)) {
+    originDeliveryZoneBaseFee = originLocConfig.deliveryZones.zoneABaseFee ?? 149;
+    originKmRate = originLocConfig.deliveryZones.zoneARatePerKm ?? 0;
+  } else if (originDepotDist < (originLocConfig.deliveryZones.zoneBMaxKm ?? 50)) {
+    originDeliveryZoneBaseFee = originLocConfig.deliveryZones.zoneBBaseFee ?? 179;
+    originKmRate = originLocConfig.deliveryZones.zoneBRatePerKm ?? 0;
+  } else if (originDepotDist < (originLocConfig.deliveryZones.zoneCMaxKm ?? 75)) {
+    originDeliveryZoneBaseFee = originLocConfig.deliveryZones.zoneCBaseFee ?? 219;
+    originKmRate = originLocConfig.deliveryZones.zoneCRatePerKm ?? 0;
+  } else if (originDepotDist <= (originLocConfig.deliveryZones.zoneDMaxKm ?? 100)) {
+    originDeliveryZoneBaseFee = originLocConfig.deliveryZones.zoneDBaseFee ?? 249;
+    originKmRate = originLocConfig.deliveryZones.zoneDRatePerKm ?? 0;
+  } else {
+    originDeliveryZoneBaseFee = originLocConfig.deliveryZones.zoneEBaseFee ?? 249;
+    originKmRate = originLocConfig.deliveryZones.zoneERatePerKm ?? 5.0;
+  }
+
+  const effectiveFirstLegFee = initialDeliveryFee !== undefined
+    ? initialDeliveryFee
+    : (originDeliveryZoneBaseFee * effectiveContainerCount);
+
   return (
     <div className="bg-white rounded-2xl sm:rounded-3xl p-4 sm:p-8 lg:p-10 shadow-xs border-2 border-[#DAD7D1]">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3">
@@ -228,14 +276,31 @@ export const Step2What: React.FC<Step2WhatProps> = ({
           What do you need?
         </h1>
 
-        {/* Selected location pill */}
+        {/* Selected location pill with Initial Delivery Fee kept strictly on ONE line */}
         <button
           onClick={onChangeLocation}
-          className="flex items-center gap-1.5 text-xs font-bold text-[#15385E] bg-sky-50 hover:bg-sky-100 px-3.5 py-1.5 rounded-full transition-colors cursor-pointer self-start sm:self-auto border border-[#5CC1EF]/40"
+          className="flex items-center gap-1.5 text-xs font-bold text-[#15385E] bg-sky-50 hover:bg-sky-100 px-3.5 py-1.5 rounded-full transition-colors cursor-pointer self-start sm:self-auto border border-[#5CC1EF]/40 whitespace-nowrap shrink-0 shadow-2xs"
         >
           <span className="text-[#15385E] font-black">✓</span>
-          <span>{originPostcode.suburb}, {originPostcode.state} {originPostcode.postcode}</span>
+          <span className="whitespace-nowrap">{originPostcode.suburb}, {originPostcode.state} {originPostcode.postcode} - Initial Delivery ${effectiveFirstLegFee}</span>
           <span className="text-[#15385E] ml-1 underline font-black">Change</span>
+        </button>
+      </div>
+
+      {/* 1-Line Route & Initial Delivery Fee Bar */}
+      <div className="mt-1 mb-5 px-3.5 py-2 rounded-xl bg-slate-50 border border-[#DAD7D1] flex items-center justify-between gap-3 text-xs">
+        <div className="flex items-center gap-2 whitespace-nowrap overflow-hidden text-ellipsis">
+          <MapPin className="w-4 h-4 text-[#15385E] shrink-0" />
+          <span className="font-extrabold text-[#15385E] whitespace-nowrap">
+            {originPostcode.suburb}, {originPostcode.state} {originPostcode.postcode} - Initial Delivery ${effectiveFirstLegFee}
+          </span>
+        </div>
+        <button
+          type="button"
+          onClick={onChangeLocation}
+          className="text-xs font-bold text-[#15385E] underline hover:text-[#5CC1EF] transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+        >
+          Change location
         </button>
       </div>
 
@@ -522,42 +587,56 @@ export const Step2What: React.FC<Step2WhatProps> = ({
             </div>
           )}
 
-          {/* Optional Interim Storage Checkbox for Movers */}
-          <div className="mt-5 pt-4 border-t border-sky-200/80">
-            <label className={`flex items-start gap-3 p-4 rounded-2xl border-2 transition-all cursor-pointer select-none ${
-              serviceType === 'moving_storage'
-                ? 'bg-sky-100/70 border-[#5CC1EF] ring-2 ring-[#5CC1EF]/30 shadow-xs'
-                : 'bg-white border-[#DAD7D1] hover:border-slate-300'
-            }`}>
-              <input
-                type="checkbox"
-                checked={serviceType === 'moving_storage'}
-                onChange={(e) => {
-                  onSelectServiceType(e.target.checked ? 'moving_storage' : 'moving');
-                }}
-                className="mt-0.5 w-4 h-4 rounded text-[#15385E] focus:ring-[#5CC1EF] cursor-pointer shrink-0"
-              />
-              <div className="space-y-1">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className="font-extrabold text-sm text-[#15385E]">
-                    Need interim storage between homes?
-                  </span>
-                  {serviceType === 'moving_storage' ? (
-                    <span className="text-[10px] font-black uppercase tracking-wider bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full border border-emerald-300">
-                      ✓ Interim Storage (4-Leg Move)
+          {/* Optional Interim Storage Checkbox for Movers (Local moves only, once destination is entered) */}
+          {destinationPostcode && !isInterstateMove && (
+            <div className="mt-5 pt-4 border-t border-sky-200/80">
+              <label className={`flex items-start gap-3 p-4 rounded-2xl border-2 transition-all cursor-pointer select-none ${
+                serviceType === 'moving_storage'
+                  ? 'bg-sky-100/70 border-[#5CC1EF] ring-2 ring-[#5CC1EF]/30 shadow-xs'
+                  : 'bg-white border-[#DAD7D1] hover:border-slate-300'
+              }`}>
+                <input
+                  type="checkbox"
+                  checked={serviceType === 'moving_storage'}
+                  onChange={(e) => {
+                    onSelectServiceType(e.target.checked ? 'moving_storage' : 'moving');
+                  }}
+                  className="mt-0.5 w-4 h-4 rounded text-[#15385E] focus:ring-[#5CC1EF] cursor-pointer shrink-0"
+                />
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-extrabold text-sm text-[#15385E]">
+                      We will take your container to a portabox location store it for you and deliver your container to your new location when you are ready.
                     </span>
-                  ) : (
-                    <span className="text-[10px] font-bold bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full">
-                      Optional
-                    </span>
-                  )}
+                    {serviceType === 'moving_storage' ? (
+                      <span className="text-[10px] font-black uppercase tracking-wider bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full border border-emerald-300 shrink-0">
+                        ✓ Interim Storage (4-Leg Move)
+                      </span>
+                    ) : (
+                      <span className="text-[10px] font-bold bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full shrink-0">
+                        Optional
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-slate-600 leading-relaxed">
+                    Route: FROM: {originPostcode.suburb}, {originPostcode.state} {originPostcode.postcode} → VIA: Portabox Location → TO: {destinationPostcode.suburb}, {destinationPostcode.state} {destinationPostcode.postcode}. We collect your container, store it securely at our Portabox Location, and deliver it when you are ready.
+                  </p>
                 </div>
-                <p className="text-xs text-slate-600 leading-relaxed">
-                  Interim storage represents a 4-leg move: Portabox Location → Customer Location → Portabox Location (Interim Storage) → New Customer Location → Portabox Location. We collect your container from {originPostcode.suburb}, store it securely at Portabox Location, and deliver it to your new address when you&apos;re ready.
-                </p>
+              </label>
+            </div>
+          )}
+
+          {/* Interstate Move Notice: Interim storage is N/A because interstate freight is already depot-to-depot transit */}
+          {destinationPostcode && isInterstateMove && (
+            <div className="mt-5 pt-4 border-t border-sky-200/80">
+              <div className="p-3.5 rounded-2xl bg-sky-50 border border-sky-200 text-xs text-[#15385E] flex items-center gap-2.5">
+                <Info className="w-4 h-4 text-[#5CC1EF] shrink-0" />
+                <span>
+                  <strong>Interstate Move:</strong> Container automatically transits securely through Portabox Locations ({originHub} → {destHub}). Interim storage is built directly into depot logistics.
+                </span>
               </div>
-            </label>
-          </div>
+            </div>
+          )}
         </div>
       )}
 

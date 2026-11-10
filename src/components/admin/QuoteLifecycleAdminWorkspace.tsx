@@ -285,7 +285,7 @@ export const QuoteLifecycleAdminWorkspace: React.FC<QuoteLifecycleAdminWorkspace
             <Clock className="w-4 h-4 text-[#00c0f3]" />
           </div>
           <h4 className="text-sm font-black text-[#0b2942]">
-            30-Day Guaranteed Price Lock
+            30-Day Quote Price Guarantee
           </h4>
           <p className="text-xs text-slate-600 leading-relaxed">
             Quoted monthly storage rates remain locked for 30 calendar days. Delivery fees reflect current standard booking dispatch rates.
@@ -305,7 +305,7 @@ export const QuoteLifecycleAdminWorkspace: React.FC<QuoteLifecycleAdminWorkspace
             <ShieldCheck className="w-4 h-4 text-emerald-600" />
           </div>
           <h4 className="text-sm font-black text-[#0b2942]">
-            12-Month Mandatory Rate Freeze
+            1-Year Booking Price Guarantee
           </h4>
           <p className="text-xs text-slate-600 leading-relaxed">
             Monthly rental fees and delivery pricing are protected for {freezeMonths} months. Once a delivery leg is booked, its price is fixed (date changes allowed) unless cancelled.

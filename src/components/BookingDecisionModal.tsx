@@ -350,7 +350,7 @@ export const BookingDecisionModal: React.FC<BookingDecisionModalProps> = ({
                   {isConfirmed ? 'Booking Confirmed!' : 'Complete Your Portabox Booking'}
                 </h3>
                 <span className="text-[10px] font-black uppercase tracking-wider bg-emerald-500/20 text-emerald-300 border border-emerald-400/30 px-2 py-0.5 rounded-md">
-                  1-Year Price Freeze
+                  1-Year Booking Price Guarantee
                 </span>
               </div>
               <p className="text-xs text-sky-200">
@@ -1091,10 +1091,10 @@ export const BookingDecisionModal: React.FC<BookingDecisionModalProps> = ({
                     <div className="flex items-center justify-between border-b border-slate-100 pb-3">
                       <span className="text-xs font-black uppercase tracking-wider text-[#15385E] flex items-center gap-1.5">
                         <FileText className="w-4 h-4 text-[#5CC1EF]" />
-                        <span>Order Summary &amp; 1-Year Rate Freeze</span>
+                        <span>Order Summary &amp; 1-Year Booking Price Guarantee</span>
                       </span>
                       <span className="text-[11px] font-bold text-emerald-700 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200">
-                        12-Month Rate Locked
+                        1-Year Booking Price Guarantee Active
                       </span>
                     </div>
 
@@ -1411,7 +1411,7 @@ export const BookingDecisionModal: React.FC<BookingDecisionModalProps> = ({
                   You're all booked in!
                 </h3>
                 <p className="text-xs sm:text-sm text-slate-600 mt-1 max-w-md mx-auto">
-                  Your delivery slot on <strong>{scheduledDate}</strong> is locked in with a <strong>1-Year Rate Freeze Guarantee</strong>. We have sent SMS confirmation to your mobile ({mobile}).
+                  Your delivery slot on <strong>{scheduledDate}</strong> is locked in with a <strong>1-Year Booking Price Guarantee</strong>. We have sent SMS confirmation to your mobile ({mobile}).
                 </p>
               </div>
 
@@ -1456,7 +1456,7 @@ export const BookingDecisionModal: React.FC<BookingDecisionModalProps> = ({
                   </span>
                 </div>
                 <div className="flex justify-between items-center pt-2 border-t border-slate-200">
-                  <span className="text-slate-800 font-black">1-Year Rate Freeze:</span>
+                  <span className="text-slate-800 font-black">1-Year Booking Price Guarantee:</span>
                   <span className="font-mono font-bold text-emerald-700">
                     Active (until {new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toLocaleDateString('en-AU')})
                   </span>

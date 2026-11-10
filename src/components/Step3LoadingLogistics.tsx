@@ -215,7 +215,7 @@ export const Step3LoadingLogistics: React.FC<Step3LoadingLogisticsProps> = ({
                   </div>
                   <div>
                     <h4 className="text-sm sm:text-base font-bold text-slate-900">
-                      Deliver Container to My Location
+                      My Home (Driveway Delivery)
                     </h4>
                     <span className="text-xs text-slate-500">Full-service delivery to {originPostcode.suburb}</span>
                   </div>
@@ -254,7 +254,7 @@ export const Step3LoadingLogistics: React.FC<Step3LoadingLogisticsProps> = ({
                     <div>
                       <div className="flex items-center gap-1.5 flex-wrap">
                         <h4 className="text-sm sm:text-base font-bold text-slate-900">
-                          Load at Portabox Location
+                          Our Location (Load at Portabox Depot)
                         </h4>
                         <span className="bg-sky-100 text-[#15385E] border border-sky-200 text-[10px] font-black px-1.5 py-0.5 rounded">
                           SAVE ${totalOriginSavings}
@@ -313,7 +313,7 @@ export const Step3LoadingLogistics: React.FC<Step3LoadingLogisticsProps> = ({
                     </div>
                     <div>
                       <h4 className="text-sm sm:text-base font-bold text-slate-900">
-                        {isStorageFacility ? 'Deliver Container to My Location' : 'Deliver Container to My New Location'}
+                        {isStorageFacility ? 'My Home (Redelivery to Driveway)' : 'My Home (Delivery to New Address)'}
                       </h4>
                       <span className="text-xs text-slate-500">
                         {isStorageFacility ? `Redelivery to ${originPostcode.suburb}` : `Delivery to ${destSuburbLabel}`}
@@ -355,7 +355,7 @@ export const Step3LoadingLogistics: React.FC<Step3LoadingLogisticsProps> = ({
                     <div>
                       <div className="flex items-center gap-1.5 flex-wrap">
                         <h4 className="text-sm sm:text-base font-bold text-slate-900">
-                          Unload at Portabox Location
+                          Our Location (Unload at Portabox Depot)
                         </h4>
                         <span className="bg-sky-100 text-[#15385E] border border-sky-200 text-[10px] font-black px-1.5 py-0.5 rounded">
                           SAVE ${totalDestSavings}

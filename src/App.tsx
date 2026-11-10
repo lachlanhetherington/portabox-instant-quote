@@ -8,6 +8,7 @@ import { Step3LoadingLogistics } from './components/Step3LoadingLogistics';
 import { Step3Size } from './components/Step3Size';
 import { Step4When } from './components/Step4When';
 import { Step6PackingSuppliesAndInsurance } from './components/Step6PackingSuppliesAndInsurance';
+import { Step7Protection } from './components/Step7Protection';
 import { Step5SendQuote } from './components/Step5SendQuote';
 import { Step5Quote } from './components/Step5Quote';
 import { Step9NextSteps } from './components/Step9NextSteps';
@@ -49,9 +50,11 @@ import {
   CustomerLead,
   DeliverySlotWindow,
   LogisticsMethod,
+  ProtectionPlanType,
   QuoteBreakdown,
   ServiceType,
   StorageDuration,
+  AnnualMilestoneOption,
 } from './types/quote';
 import { applyLanguageToDOM, getSavedLanguage } from './services/translationService';
 import { AdminLoginModal } from './components/auth/AdminLoginModal';
@@ -165,10 +168,12 @@ export default function App() {
   const [storageDuration, setStorageDuration] = useState<StorageDuration>('1_to_3_months');
   const [storageDurationMonths, setStorageDurationMonths] = useState<number>(1);
   const [billingCycle, setBillingCycle] = useState<BillingCycle>('monthly');
+  const [annualDiscountOption, setAnnualDiscountOption] = useState<AnnualMilestoneOption>('400B');
   const [boxesCount, setBoxesCount] = useState<number>(0);
   const [blanketsCount, setBlanketsCount] = useState<number>(10); // default to 10 free blankets
   const [locksCount, setLocksCount] = useState<number>(1); // default recommended 1 lock
   const [insuranceSelected, setInsuranceSelected] = useState<boolean>(true); // default CPO insurance opted-in
+  const [protectionPlan, setProtectionPlan] = useState<ProtectionPlanType>('cpo'); // default CPO protection plan
   
   // Loading & Unloading Logistics Method (depot vs home delivery)
   const [originLogisticsMethod, setOriginLogisticsMethod] = useState<LogisticsMethod>('home_delivery');
@@ -211,9 +216,11 @@ export default function App() {
       boxesCount,
       blanketsCount,
       locksCount,
-      insuranceSelected,
+      insuranceSelected: protectionPlan !== 'none',
+      protectionPlan,
       originLogisticsMethod,
       destinationLogisticsMethod,
+      annualDiscountOption,
       appliedPromoCode,
       config,
     });
@@ -234,11 +241,20 @@ export default function App() {
     blanketsCount,
     locksCount,
     insuranceSelected,
+    protectionPlan,
     originLogisticsMethod,
     destinationLogisticsMethod,
+    annualDiscountOption,
     appliedPromoCode,
     config,
   ]);
+
+  // Enforce mandatory CPO for interstate moves (cannot be deselected)
+  useEffect(() => {
+    if (activeQuote?.isInterstate && protectionPlan !== 'cpo') {
+      setProtectionPlan('cpo');
+    }
+  }, [activeQuote?.isInterstate, protectionPlan]);
 
   // Track user drop-off per page in real-time
   useEffect(() => {
@@ -248,10 +264,11 @@ export default function App() {
       3: 'Page 3: Loading & Unloading Logistics',
       4: 'Page 4: Which size do you need?',
       5: 'Page 5: Duration & Billing',
-      6: 'Page 6: Packing Supplies & Accessories',
-      7: 'Page 7: Where do we send your quote',
-      8: 'Page 8: Final Quote (Detailed quote & savings)',
-      9: 'Page 9: Next Steps After Payment (Booking Confirmation & Lifecycle Roadmap)',
+      6: 'Page 6: Supplies',
+      7: 'Page 7: Container & Content Protection',
+      8: 'Page 8: Where do we send your quote',
+      9: 'Page 9: Instant Quote (Detailed quote & savings)',
+      10: 'Page 10: Next Steps After Payment (Booking Confirmation & Lifecycle Roadmap)',
     };
 
     recordDropOffEvent({
@@ -269,7 +286,7 @@ export default function App() {
       billingCycle,
       customerEmail: customerContact?.email,
       customerPhone: customerContact?.mobile,
-      completed: currentStep >= 8,
+      completed: currentStep >= 9,
     });
   }, [
     sessionId,
@@ -370,10 +387,10 @@ export default function App() {
             });
           }
           setMagicResumeBanner(`Welcome back, ${parsed.customerName || 'Valued Customer'}! Your 30-day locked quote (${parsed.ref || magicQuote}) has been resumed.`);
-          setCurrentStep(config.enableNextStepsFlow ? 9 : 8);
+          setCurrentStep(config.enableNextStepsFlow ? 10 : 9);
         } else {
           setMagicResumeBanner(`Welcome back! Resumed your locked quotation (${magicQuote}).`);
-          setCurrentStep(config.enableNextStepsFlow ? 9 : 8);
+          setCurrentStep(config.enableNextStepsFlow ? 10 : 9);
         }
       }
     } catch {
@@ -492,8 +509,8 @@ export default function App() {
       }
     }
 
-    // Step 8: Show final quote breakdown with detailed quote information
-    setCurrentStep(8);
+    // Step 9: Show final quote breakdown with detailed quote information
+    setCurrentStep(9);
   };
 
   const handleLeadPaymentSuccess = (paymentResult: any) => {
@@ -533,8 +550,8 @@ export default function App() {
       }
     }
 
-    // Advance directly to Step 9: Next Steps Page After Payment
-    setCurrentStep(9);
+    // Advance directly to Step 10: Next Steps Page After Payment
+    setCurrentStep(10);
   };
 
   // Navigation handlers
@@ -542,10 +559,17 @@ export default function App() {
     serviceType === 'storage_at_place' ||
     (serviceType !== 'moving' && serviceType !== 'moving_storage' && storagePlacement === 'my_place');
 
-  // Safety guard: If on-site storage at My Place is selected, ensure Step 3 (depot loading) is bypassed
-  // and logistics are strictly locked to home delivery
+  const isDirectLocalMove =
+    serviceType === 'moving' && !activeQuote?.isInterstate;
+
+  // Step 3 (Depot loading logistics) is N/A and bypassed for:
+  // 1. Storage at Your Home (Row 9 in logic sheet)
+  // 2. Direct Local Move (Row 1 in logic sheet)
+  const isBypassStep3 = isMyPlaceStorage || isDirectLocalMove;
+
+  // Safety guard: If Step 3 is bypassed, ensure logistics are strictly locked to home delivery
   useEffect(() => {
-    if (isMyPlaceStorage) {
+    if (isBypassStep3) {
       if (originLogisticsMethod !== 'home_delivery') {
         setOriginLogisticsMethod('home_delivery');
       }
@@ -556,7 +580,7 @@ export default function App() {
         setCurrentStep(4);
       }
     }
-  }, [currentStep, isMyPlaceStorage, originLogisticsMethod, destinationLogisticsMethod]);
+  }, [currentStep, isBypassStep3, originLogisticsMethod, destinationLogisticsMethod]);
 
       /* Where the arrow goes once there is no previous step: back through
        history if this tab has any, so a visitor who followed the CTA
@@ -568,7 +592,7 @@ export default function App() {
     };
 
   const handleBack = () => {
-    if (currentStep === 4 && isMyPlaceStorage) {
+    if (currentStep === 4 && isBypassStep3) {
       setCurrentStep(2);
     } else if (currentStep > 1) {
       setCurrentStep((prev) => prev - 1);
@@ -578,7 +602,7 @@ export default function App() {
   };
 
   const handleJumpToStep = (step: number) => {
-    if (step === 3 && isMyPlaceStorage) {
+    if (step === 3 && isBypassStep3) {
       setCurrentStep(2);
       return;
     }
@@ -672,6 +696,7 @@ export default function App() {
 
       {/* Main Body */}
       {isCallCenterOpen && config.enableCallCenterDispatch !== false ? (
+        <AdminGate onCancel={() => setIsCallCenterOpen(false)}>
         <main className="flex-1 w-full flex flex-col p-0 m-0 overflow-hidden">
           <CallCenterCalendarPortal
             onClose={() => setIsCallCenterOpen(false)}
@@ -692,6 +717,7 @@ export default function App() {
             }}
           />
         </main>
+      </AdminGate>
       ) : isAdminOpen ? (
         <AdminGate onCancel={() => setIsAdminOpen(false)}>
         <main className="flex-1 w-full flex flex-col p-0 m-0 overflow-hidden">
@@ -728,10 +754,10 @@ export default function App() {
               </div>
             )}
 
-            {/* Steps 1 to 7: 2-Column Responsive Layout | Steps 8 & 9: Full width without sidebar */}
-            <div className={currentStep >= 8 ? "max-w-5xl mx-auto w-full" : "grid grid-cols-1 lg:grid-cols-12 gap-6 lg:gap-8 xl:gap-10 2xl:gap-12 items-start"}>
-              {/* Left Area: Step Form (approx 7-8 cols or full width on Steps 8 & 9) */}
-              <div className={currentStep >= 8 ? "w-full" : "lg:col-span-8 xl:col-span-8 2xl:col-span-8"}>
+            {/* Steps 1 to 8: 2-Column Responsive Layout | Steps 9 & 10: Full width without sidebar */}
+            <div className={currentStep >= 9 ? "max-w-5xl mx-auto w-full" : "grid grid-cols-1 lg:grid-cols-12 gap-6 lg:gap-8 xl:gap-10 2xl:gap-12 items-start"}>
+              {/* Left Area: Step Form (approx 7-8 cols or full width on Steps 9 & 10) */}
+              <div className={currentStep >= 9 ? "w-full" : "lg:col-span-8 xl:col-span-8 2xl:col-span-8"}>
                 {currentStep === 1 && (
                   <Step1Where
                     initialPostcode={originPostcode}
@@ -759,7 +785,7 @@ export default function App() {
                     containerCount={containerCount}
                     onChangeLocation={() => setCurrentStep(1)}
                     onContinue={() => {
-                      if (isMyPlaceStorage) {
+                      if (isBypassStep3) {
                         setOriginLogisticsMethod('home_delivery');
                         setDestinationLogisticsMethod('home_delivery');
                         setCurrentStep(4);
@@ -769,6 +795,7 @@ export default function App() {
                     }}
                     onBack={handleBack}
                     config={config}
+                    initialDeliveryFee={activeQuote?.initialDeliveryFee}
                   />
                 )}
 
@@ -830,6 +857,9 @@ export default function App() {
                     onSelectDurationMonths={(m) => setStorageDurationMonths(m)}
                     billingCycle={billingCycle}
                     onSelectBillingCycle={(cycle) => setBillingCycle(cycle)}
+                    annualDiscountOption={annualDiscountOption}
+                    onSelectAnnualDiscountOption={(opt) => setAnnualDiscountOption(opt)}
+                    activeQuote={activeQuote}
                     config={config}
                     onContinue={() => setCurrentStep(6)}
                     onBack={handleBack}
@@ -857,8 +887,26 @@ export default function App() {
                   />
                 )}
 
-                {/* Step 7: "Where do we send your quote" */}
-                {currentStep === 7 && activeQuote && (
+                {/* Step 7: Dedicated Protection Options Page (CPO, COO, Opt Out) */}
+                {currentStep === 7 && (
+                  <Step7Protection
+                    originPostcode={originPostcode}
+                    destinationPostcode={destinationPostcode}
+                    serviceType={serviceType}
+                    storagePlacement={storagePlacement}
+                    containerCount={containerCount}
+                    containerSize={containerSize}
+                    protectionPlan={protectionPlan}
+                    onChangeProtectionPlan={(plan) => setProtectionPlan(plan)}
+                    isInterstate={activeQuote?.isInterstate}
+                    config={config}
+                    onContinue={() => setCurrentStep(8)}
+                    onBack={handleBack}
+                  />
+                )}
+
+                {/* Step 8: "Where do we send your quote" */}
+                {currentStep === 8 && activeQuote && (
                   <Step5SendQuote
                     quote={activeQuote}
                     onSendQuote={handleSendQuote}
@@ -867,8 +915,8 @@ export default function App() {
                   />
                 )}
 
-                {/* Step 8: Final Quote Page with Detailed Quote Information */}
-                {currentStep === 8 && activeQuote && (
+                {/* Step 9: Final Quote Page with Detailed Quote Information */}
+                {currentStep === 9 && activeQuote && (
                   <Step5Quote
                     quote={activeQuote}
                     customerData={customerContact || undefined}
@@ -879,15 +927,15 @@ export default function App() {
                     onSelectSlot={(slot) => setSelectedSlot(slot)}
                     depotCalendarConfig={config.depotCalendars?.[currentHub]}
                     onPaymentSuccess={handleLeadPaymentSuccess}
-                    onGoToNextSteps={config.enableNextStepsFlow ? () => setCurrentStep(9) : undefined}
+                    onGoToNextSteps={config.enableNextStepsFlow ? () => setCurrentStep(10) : undefined}
                     onOpenBookingModal={() => handleOpenBookingModal(activeQuote)}
                     phone={config.phone}
                     config={config}
                   />
                 )}
 
-                {/* Step 9: Next Steps Page After Payment (with Customer Lifecycle Roadmap) - Feature Flagged */}
-                {currentStep === 9 && activeQuote && (
+                {/* Step 10: Next Steps Page After Payment (with Customer Lifecycle Roadmap) - Feature Flagged */}
+                {currentStep === 10 && activeQuote && (
                   config.enableNextStepsFlow ? (
                     <Step9NextSteps
                       quote={activeQuote}
@@ -895,7 +943,7 @@ export default function App() {
                       paymentResult={lastPaymentResult}
                       onOpenPlacementChecker={() => setIsPlacementCheckerOpen(true)}
                       onOpenCustomerPortal={() => setIsCustomerPortalOpen(true)}
-                      onBackToQuote={() => setCurrentStep(8)}
+                      onBackToQuote={() => setCurrentStep(9)}
                       onResetQuote={handleResetQuote}
                       onSelectSlot={(slot) => setSelectedSlot(slot)}
                       onSelectDate={(date) => setPreferredDate(date)}
@@ -921,14 +969,15 @@ export default function App() {
                 )}
               </div>
 
-              {/* Right Area: "YOUR QUOTE SO FAR" Tracker (hidden on Steps 8 & 9) */}
-              {currentStep < 8 && (
+              {/* Right Area: "YOUR QUOTE SO FAR" Tracker (hidden on Steps 9 & 10) */}
+              {currentStep < 9 && (
                 <div className="lg:col-span-4 xl:col-span-4 2xl:col-span-4 sticky top-24 sm:top-28">
                   <RightSidebar
                     currentStep={currentStep}
                     onJumpToStep={handleJumpToStep}
                     originPostcode={originPostcode}
                     destinationPostcode={destinationPostcode}
+                    isInterstate={activeQuote?.isInterstate}
                     originLogisticsMethod={originLogisticsMethod}
                     destinationLogisticsMethod={destinationLogisticsMethod}
                     legsSavedCount={activeQuote?.legsSavedCount}
@@ -952,11 +1001,20 @@ export default function App() {
                     locksCount={locksCount}
                     insuranceSelected={insuranceSelected}
                     insuranceMonthlyFee={activeQuote?.insuranceMonthlyFee}
+                    protectionPlan={protectionPlan}
+                    protectionMonthlyFee={activeQuote?.protectionMonthlyFee}
                     deliveryFeePerContainer={activeQuote?.domesticLegFeePerContainer}
                     deliveryZone={activeQuote?.deliveryZone}
                     deliveryZoneRangeLabel={activeQuote?.deliveryZoneRangeLabel}
                     interstateFeePerContainer={activeQuote?.interstateFeePerContainer}
                     monthlyStorageFee={activeQuote?.monthlyStorageFee}
+                    initialDeliveryFee={activeQuote?.initialDeliveryFee}
+                    isFirstMonthFree={activeQuote?.isFirstMonthFree}
+                    freeBlanketsIncluded={activeQuote?.freeBlanketsIncluded}
+                    freeLockIncluded={activeQuote?.freeLockIncluded}
+                    milestoneCreditTotal={activeQuote?.milestoneCreditTotal}
+                    milestoneCreditOption={activeQuote?.milestoneCreditOption}
+                    upfrontDiscountPercent={activeQuote?.upfrontDiscountPercent}
                     enableDrivewayFitGuarantee={config.enableDrivewayFitGuarantee}
                     enableGoogleCalendarLink={config.enableGoogleCalendarLink}
                     onOpenPlacementChecker={config.enableDrivewayFitGuarantee ? () => setIsPlacementCheckerOpen(true) : undefined}

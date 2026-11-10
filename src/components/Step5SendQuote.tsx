@@ -265,17 +265,17 @@ export const Step5SendQuote: React.FC<Step5SendQuoteProps> = ({
           </div>
         </div>
 
-        {/* 30-Day Guaranteed Price-Lock & 12-Month Rate Freeze Notice */}
+        {/* 30-Day Quote Price Guarantee & 1-Year Booking Price Guarantee Notice */}
         <div className="mt-4 p-3.5 rounded-2xl bg-sky-50/80 border border-[#5CC1EF]/40 flex items-center justify-between gap-3 text-xs text-[#15385E]">
           <div className="flex items-center gap-2.5">
             <ShieldCheck className="w-5 h-5 text-[#00a9d7] shrink-0" />
             <div>
-              <span className="font-extrabold block text-[#15385E]">30-Day Guaranteed Price Lock Included</span>
-              <span className="text-slate-600 text-[11px]">Storage rates are protected under our 30-day quote lock and 12-month rate freeze upon booking. Delivery fees reflect scheduled rates for your booking.</span>
+              <span className="font-extrabold block text-[#15385E]">30-Day Quote Price Guarantee Included</span>
+              <span className="text-slate-600 text-[11px]">Storage rates are protected under our 30-day quote price guarantee and 1-year booking price guarantee upon booking. Delivery fees reflect scheduled rates for your booking.</span>
             </div>
           </div>
           <span className="text-[10px] font-black uppercase tracking-wider bg-white text-[#15385E] border border-sky-200 px-2.5 py-1 rounded-full shrink-0 shadow-2xs">
-            30 Days Locked
+            30 Days Guaranteed
           </span>
         </div>
 

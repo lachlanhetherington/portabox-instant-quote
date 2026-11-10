@@ -16,6 +16,7 @@ import {
   ShieldCheck,
 } from 'lucide-react';
 import { AdminTabId } from './AdminSidebar';
+import { AgentNotificationBell } from './AgentNotificationBell';
 
 export interface WorkspaceTab {
   id: string;
@@ -42,6 +43,8 @@ interface AdminWorkspaceTabsProps {
   onOpenPhoneIntake?: () => void;
   onLockSession?: () => void;
   onOpenFinancialExport?: () => void;
+  onNavigateToQuote?: (quoteId: string) => void;
+  onOpenSmsModal?: (mobile: string, customerName: string) => void;
 }
 
 export const AdminWorkspaceTabs: React.FC<AdminWorkspaceTabsProps> = ({
@@ -60,6 +63,8 @@ export const AdminWorkspaceTabs: React.FC<AdminWorkspaceTabsProps> = ({
   onOpenPhoneIntake,
   onLockSession,
   onOpenFinancialExport,
+  onNavigateToQuote,
+  onOpenSmsModal,
 }) => {
   return (
     <div className="bg-[#081e30] text-white border-b border-slate-800 flex flex-col shrink-0">
@@ -164,6 +169,14 @@ export const AdminWorkspaceTabs: React.FC<AdminWorkspaceTabsProps> = ({
               <span className="hidden sm:inline">Lock Session</span>
             </button>
           )}
+
+          {/* Agent Notification Center & Overnight Bell */}
+          <div className="bg-slate-800/80 rounded-xl border border-slate-700 p-0.5">
+            <AgentNotificationBell
+              onNavigateToQuote={onNavigateToQuote}
+              onOpenSmsModal={onOpenSmsModal}
+            />
+          </div>
 
           <button
             type="button"

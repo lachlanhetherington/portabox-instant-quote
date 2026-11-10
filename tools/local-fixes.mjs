@@ -100,17 +100,34 @@ fix(
   'routing service: read the Maps key from the environment only',
   'src/services/routingOptimizationService.ts',
   (s) => !/AIza[A-Za-z0-9_-]{20,}/.test(s),
-  (s) => s.replace(
-    /export const GOOGLE_MAPS_API_KEY =\s*\(import\.meta\.env\.VITE_GOOGLE_MAPS_API_KEY as string\) \|\|\s*'AIza[A-Za-z0-9_-]+';/,
-    `/**\n` +
-    ` * Supplied with a live key hardcoded as the fallback. A Maps Platform key\n` +
-    ` * is billable, so a public repository is the last place for one — and it\n` +
-    ` * belonged to the original developer's Google Cloud project rather than\n` +
-    ` * Portabox's. Read from the environment only.\n` +
-    ` */\n` +
-    `export const GOOGLE_MAPS_API_KEY =\n` +
-    `  (import.meta.env.VITE_GOOGLE_MAPS_API_KEY as string) || '';`
-  )
+  (s) => {
+    /* Match the whole declaration rather than its internals. Upstream has
+       rewritten the expression around this key twice — first a plain
+       import.meta.env read, then a typeof-guarded one — and each rewrite
+       left the live billable key in the file while the fix reported itself
+       applied. Anything up to the semicolon goes; what replaces it does not
+       depend on what was there. */
+    const decl = /export const GOOGLE_MAPS_API_KEY\s*=[\s\S]*?;/;
+    if (!decl.test(s)) throw new Error('the GOOGLE_MAPS_API_KEY declaration moved');
+    return s.replace(decl,
+      `/**
+` +
+      ` * Supplied with a live key hardcoded as the fallback. A Maps Platform key
+` +
+      ` * is billable, so a public repository is the last place for one — and it
+` +
+      ` * belonged to the original developer's Google Cloud project rather than
+` +
+      ` * Portabox's. Read from the environment only.
+` +
+      ` */
+` +
+      `export const GOOGLE_MAPS_API_KEY =
+` +
+      `  ((import.meta as unknown as { env?: Record<string, string> }).env
+` +
+      `    ?.VITE_GOOGLE_MAPS_API_KEY) || '';`);
+  }
 );
 
 /* -- 5. googleCalendarService.ts ------------------------------------------
@@ -220,8 +237,11 @@ fix(
   'src/App.tsx',
   (s) => s.includes('VITE_SITE_URL') && /leaveToSite/.test(s),
   (s) => s.replace(
-    /const handleBack = \(\) => \{\s*\n(\s*)if \(currentStep === 4 && isMyPlaceStorage\) \{\s*\n\s*setCurrentStep\(2\);\s*\n\s*\} else if \(currentStep > 1\) \{\s*\n\s*setCurrentStep\(\(prev\) => prev - 1\);\s*\n\s*\}\s*\n\s*\};/,
-    (m, ind) =>
+    /* The step-4 guard names a flag that upstream renames — it was
+       isMyPlaceStorage, now isBypassStep3 — so capture whatever condition is
+       there and put it back untouched. Only the trailing else is ours. */
+    /const handleBack = \(\) => \{\s*\n(\s*)if \((.+?)\) \{\s*\n\s*setCurrentStep\(2\);\s*\n\s*\} else if \(currentStep > 1\) \{\s*\n\s*setCurrentStep\(\(prev\) => prev - 1\);\s*\n\s*\}\s*\n\s*\};/,
+    (m, ind, cond) =>
       `${ind}/* Where the arrow goes once there is no previous step: back through\n` +
       `${ind}   history if this tab has any, so a visitor who followed the CTA\n` +
       `${ind}   lands on the page they left, and the configured site otherwise. */\n` +
@@ -231,7 +251,7 @@ fix(
       `${ind}  else window.location.href = site;\n` +
       `${ind}};\n\n` +
       `${ind.slice(2)}const handleBack = () => {\n` +
-      `${ind}if (currentStep === 4 && isMyPlaceStorage) {\n` +
+      `${ind}if (${cond}) {\n` +
       `${ind}  setCurrentStep(2);\n` +
       `${ind}} else if (currentStep > 1) {\n` +
       `${ind}  setCurrentStep((prev) => prev - 1);\n` +
@@ -415,6 +435,38 @@ fix(
     `  return cachedClient;\n` +
     `}`
   ).replace(/\bclient\.messages\b/g, 'getClient().messages')
+);
+
+/* -- 13. the dispatch console -------------------------------------------
+   The admin portal is gated; the call centre console was not. The RBAC
+   drop added it as its own branch in App.tsx, opening on a boolean exactly
+   as the admin portal used to, with no password anywhere in the path —
+   while the header announces "Staff Mode Active · 2FA Verified" on a
+   browser that has never signed in.
+
+   It carries the dispatch calendar, routing and customer records, so it
+   goes behind the same gate. Wrapped from App.tsx rather than edited
+   inside the component, for the same reason as the admin portal: that file
+   is upstream's and this one is not. */
+fix(
+  'App: put the dispatch console behind the same gate',
+  'src/App.tsx',
+  /* Not `<AdminGate[^>]*>`: the onCancel arrow contains a ">" and the class
+     stops at it, so that pattern never matches what this fix writes. */
+  (s) => /<AdminGate[\s\S]{0,200}?<CallCenterCalendarPortal/.test(s),
+  (s) => {
+    const open = /(\{isCallCenterOpen && config\.enableCallCenterDispatch !== false \? \(\r?\n)(\s*)(<main className="flex-1 w-full flex flex-col p-0 m-0 overflow-hidden">)/;
+    if (!open.test(s)) throw new Error('the isCallCenterOpen branch moved');
+    let out = s.replace(open, (m, head, ind, main) =>
+      `${head}${ind}<AdminGate onCancel={() => setIsCallCenterOpen(false)}>\n${ind}${main}`);
+
+    /* Close it before the branch that follows. The admin branch is the next
+       thing rendered, so its opening line is the reliable boundary. */
+    const close = /(<\/main>\r?\n)(\s*)(\) : isAdminOpen \? \()/;
+    if (!close.test(out)) throw new Error('could not find the end of the dispatch branch');
+    out = out.replace(close, (m, end, ind, tail) => `${end}${ind}</AdminGate>\n${ind}${tail}`);
+    return out;
+  }
 );
 
 /* -- report --------------------------------------------------------------- */
