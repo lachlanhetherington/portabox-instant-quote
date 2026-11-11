@@ -38,20 +38,67 @@ const problems = [];
 const note = (s) => console.log(s);
 const fail = (s) => { problems.push(s); return 'FAIL'; };
 
+/* A preview deployment is normally behind Vercel Deployment Protection, and
+   a protected deployment does not answer 401 — it 302s to vercel.com/sso-api
+   and that page returns 200 with a Vercel login form. So a test that follows
+   redirects sees "200" and a page with no application in it, and reports a
+   broken build. Hence: redirects are not followed blindly, and the protection
+   handshake is recognised for what it is.
+ *
+ * VERCEL_PROTECTION_BYPASS, when set, is sent as the header Vercel accepts
+ * for automation, which makes a protected deployment testable. It is created
+ * in Project Settings -> Deployment Protection -> Protection Bypass for
+ * Automation, and belongs in a repository secret, not in this file. */
+const BYPASS = process.env.VERCEL_PROTECTION_BYPASS || '';
+
+const PROTECTION = /vercel\.com\/sso-api|\/_vercel\/sso|vercel\.com\/login/;
+
 /* Node 18+ has fetch. A timeout matters: a hung deploy should report as a
    failure rather than sit until the job's own limit. */
-async function get(path, { asText = true } = {}) {
-  const url = path.startsWith('http') ? path : BASE + path;
+async function raw(url, redirect) {
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), 30000);
   try {
-    const r = await fetch(url, { signal: ctl.signal, redirect: 'follow' });
-    return { status: r.status, body: asText ? await r.text() : null };
+    const headers = BYPASS ? { 'x-vercel-protection-bypass': BYPASS } : {};
+    const r = await fetch(url, { signal: ctl.signal, redirect, headers });
+    return { status: r.status, location: r.headers.get('location') || '', res: r };
   } catch (e) {
-    return { status: 0, body: '', error: e.message };
+    return { status: 0, location: '', error: e.message };
   } finally {
     clearTimeout(timer);
   }
+}
+
+async function get(path) {
+  const url = path.startsWith('http') ? path : BASE + path;
+
+  const first = await raw(url, 'manual');
+  if (first.error) return { status: 0, body: '', error: first.error };
+
+  if (first.status >= 300 && first.status < 400 && PROTECTION.test(first.location)) {
+    return { status: first.status, body: '', protected: true };
+  }
+  if (first.status === 401 || first.status === 403) {
+    return { status: first.status, body: '', protected: true };
+  }
+
+  /* Not protection — follow it properly (trailing slashes, canonical hosts). */
+  if (first.status >= 300 && first.status < 400) {
+    const followed = await raw(url, 'follow');
+    if (followed.error) return { status: 0, body: '', error: followed.error };
+    const body = await followed.res.text();
+    /* A protected deployment can also end on a 200 login page. */
+    if (/<title>\s*Login\s*[–\-—]\s*Vercel\s*<\/title>/i.test(body)) {
+      return { status: followed.status, body: '', protected: true };
+    }
+    return { status: followed.status, body };
+  }
+
+  const body = await first.res.text();
+  if (/<title>\s*Login\s*[–\-—]\s*Vercel\s*<\/title>/i.test(body)) {
+    return { status: first.status, body: '', protected: true };
+  }
+  return { status: first.status, body };
 }
 
 /* Strings that must never appear on a page loaded by nobody. */
@@ -66,17 +113,27 @@ const STAFF_ONLY = [
   /* 1. the page itself */
   const home = await get('/');
 
-  /* A preview deployment sitting behind Vercel's Deployment Protection
-     answers every request with a login page, so none of this can see it.
-     Worth its own message: it looks like a broken deployment otherwise, and
-     the fix is a project setting rather than anything in the code. */
-  if (home.status === 401 || home.status === 403) {
+  /* Behind Deployment Protection there is nothing to test — every request
+     lands on a Vercel login page. Its own message, because it looks exactly
+     like a broken deployment otherwise, and the fix is a project setting
+     rather than anything in the code. */
+  if (home.protected) {
     note(`  homepage                 ${fail(
-      `this deployment is behind Vercel Deployment Protection (${home.status}), so it cannot be ` +
-      'checked from here. Either turn protection off for preview deployments in ' +
-      'Project Settings -> Deployment Protection, or add a protection bypass token ' +
-      'for automation and pass it to this script'
+      'this deployment is behind Vercel Deployment Protection, so it cannot be ' +
+      'checked from here' + (BYPASS ? ' — and the bypass token that was supplied did not work, so it may have been rotated' : '')
     )}`);
+    note('');
+    note('  The deployment is almost certainly fine. Nothing can see it, which is');
+    note('  not the same thing. Two ways to make it testable:');
+    note('');
+    note('    - Vercel -> Project Settings -> Deployment Protection, and turn');
+    note('      Vercel Authentication off for Preview deployments; or');
+    note('    - the same page -> Protection Bypass for Automation, then put the');
+    note('      token in a repository secret and pass it to this script as');
+    note('      VERCEL_PROTECTION_BYPASS.');
+    note('');
+    note('  You can still open the URL yourself — protection blocks automation,');
+    note('  not a signed-in browser.');
     report();
     return;
   }

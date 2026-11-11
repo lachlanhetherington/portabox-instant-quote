@@ -17,9 +17,10 @@
 # builds a preview for every branch, so the drop's own branch gets deployed
 # and tools/smoke-live.cjs is run against it — a build that is green on a
 # runner can still be broken once served. No preview, or a preview that fails,
-# and the drop is not promoted: production never sees it. The preview URL is
-# discovered from what Vercel records against the commit, so there is nothing
-# to keep in step by hand.
+# and the drop is not promoted: production never sees it. The preview address
+# comes from VERCEL_PROJECT and VERCEL_SCOPE below, because what Vercel
+# records against a commit is a link to its own dashboard rather than to the
+# deployed site.
 #
 # The shared `staging` branch is deliberately not used for this. Each drop is
 # verified on its own branch preview, which gives the same guarantee without
@@ -45,9 +46,20 @@
 # been offered, because otherwise an unresolved drop would rebuild itself and
 # send a failure notification every hour until someone dealt with it.
 #
-# Repo setting this needs: Settings → Actions → General → Workflow
-# permissions → "Allow GitHub Actions to create and approve pull requests".
-# Without it the job does everything else and fails only at the last step.
+# Two things outside this file have to be set up.
+#
+# Settings → Actions → General → Workflow permissions → "Allow GitHub Actions
+# to create and approve pull requests". Without it the job builds and checks a
+# drop but the merge will not go through.
+#
+# Preview deployments are protected by default, and a protected deployment
+# answers automation with a Vercel login page — so the preview check cannot
+# pass and no drop is promoted. That is the safe way round, not a bug: until
+# it is sorted, a drop waits as a draft pull request with a preview URL that
+# a signed-in browser can open perfectly well. To let the robot in, either
+# turn Vercel Authentication off for Preview in Project Settings → Deployment
+# Protection, or create a Protection Bypass for Automation token there and
+# add it as the repository secret VERCEL_PROTECTION_BYPASS.
 
 name: Upstream CRM drop
 
@@ -78,6 +90,24 @@ jobs:
       # Production. Merging to main deploys here, so this is also what the
       # post-deploy smoke test checks.
       LIVE_URL: https://portabox-instant-quote-dun.vercel.app
+
+      # Vercel gives every branch a stable alias, built from the project and
+      # the team slug:
+      #
+      #   <project>-git-<branch, with / and _ as ->-<scope>.vercel.app
+      #
+      # Taken from these rather than discovered, because what Vercel records
+      # against the commit is a link to its own dashboard
+      # (vercel.com/<scope>/<project>/<id>), not to the deployed site — so
+      # there is nothing to read the site URL out of. Verified: the alias for
+      # `main` answers, and the scope here is from that status link.
+      #
+      # If the project or the team is ever renamed, these two change with it,
+      # and until they do no drop will be promoted — the preview check cannot
+      # pass against a host that does not resolve, which is the right way for
+      # this to fail.
+      VERCEL_PROJECT: portabox-instant-quote
+      VERCEL_SCOPE: lhm-edia
 
     steps:
       - name: Check out this repo
@@ -348,42 +378,51 @@ jobs:
       # deployment before production is touched. The URL is discovered rather
       # than configured: Vercel's GitHub integration records it against the
       # commit, so there is nothing to keep in step by hand.
-      - name: Find the drop's preview deployment
+      - name: Wait for the drop's preview deployment
         id: preview
         if: steps.peek.outputs.new == 'yes' && steps.push.outputs.sha != ''
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          SHA: ${{ steps.push.outputs.sha }}
+          BRANCH: ${{ steps.peek.outputs.prbranch }}
         run: |
-          URL=''
+          # Vercel's branch alias slug: / and _ become -, lower case.
+          SLUG=$(printf '%s' "$BRANCH" | tr '/_' '--' | tr '[:upper:]' '[:lower:]')
+          HOST="$VERCEL_PROJECT-git-$SLUG-$VERCEL_SCOPE"
+
+          # A DNS label stops at 63 characters, and past that Vercel truncates
+          # and appends a hash, which this cannot predict. Branch names here
+          # are short and fixed-length so it does not happen, but if it ever
+          # does, guessing would be worse than stopping.
+          if [ "${#HOST}" -gt 63 ]; then
+            echo "url=" >> "$GITHUB_OUTPUT"
+            echo "The preview host would be ${#HOST} characters, over the 63-character"
+            echo "limit, so Vercel will have truncated it to something unpredictable."
+            echo "Not promoting. Shorten the branch name scheme in the peek step."
+            exit 0
+          fi
+
+          URL="https://$HOST.vercel.app"
+          echo "expecting $URL"
+
+          FOUND=''
           for i in $(seq 1 30); do
-            # Current Vercel: a GitHub Deployment carrying environment_url.
-            for id in $(gh api "repos/$GITHUB_REPOSITORY/deployments?sha=$SHA&per_page=20" \
-                          --jq '.[].id' 2>/dev/null || true); do
-              URL=$(gh api "repos/$GITHUB_REPOSITORY/deployments/$id/statuses?per_page=20" \
-                      --jq 'map(select(.state == "success")) | .[0].environment_url // empty' \
-                      2>/dev/null || true)
-              if [ -n "$URL" ]; then break; fi
-            done
-            if [ -n "$URL" ]; then break; fi
-
-            # Older Vercel: a commit status whose target_url is the preview.
-            URL=$(gh api "repos/$GITHUB_REPOSITORY/commits/$SHA/statuses?per_page=30" \
-                    --jq 'map(select(.state == "success") | .target_url)
-                          | map(select(. != null and (contains("vercel.app"))))
-                          | .[0] // empty' 2>/dev/null || true)
-            if [ -n "$URL" ]; then break; fi
-
+            CODE=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 "$URL/" || echo 000)
+            # 404 is Vercel saying no such deployment yet. 000 is no answer.
+            # Anything else means it exists — including 401, which is
+            # Deployment Protection, and which the smoke test reports properly.
+            if [ "$CODE" != "404" ] && [ "$CODE" != "000" ]; then
+              echo "preview answering with $CODE after about $(( i * 20 ))s"
+              FOUND="$URL"
+              break
+            fi
             sleep 20
           done
 
-          echo "url=$URL" >> "$GITHUB_OUTPUT"
-          if [ -n "$URL" ]; then
-            echo "preview deployment: $URL"
-          else
-            echo "No preview deployment URL appeared within about ten minutes."
-            echo "Without one the drop cannot be checked on a real deployment, so it"
-            echo "will not be promoted to production."
+          echo "url=$FOUND" >> "$GITHUB_OUTPUT"
+          if [ -z "$FOUND" ]; then
+            echo "No preview deployment at $URL within about ten minutes."
+            echo "Without one the drop has only been seen on a runner, so it will not"
+            echo "be promoted. Check the Vercel project still builds this branch, and"
+            echo "that VERCEL_PROJECT and VERCEL_SCOPE in this workflow are current."
           fi
 
       - name: Smoke-test the preview, before production sees it
@@ -392,6 +431,11 @@ jobs:
         continue-on-error: true
         env:
           URL: ${{ steps.preview.outputs.url }}
+          # Optional. Preview deployments are protected by default, and a
+          # protected deployment cannot be tested from here — see the note
+          # at the top of this file. Without it the drop is held rather than
+          # promoted, which is the safe way round.
+          VERCEL_PROTECTION_BYPASS: ${{ secrets.VERCEL_PROTECTION_BYPASS }}
         run: |
           set +e
           node tools/smoke-live.cjs "$URL" > "$RUNNER_TEMP/preview-smoke.txt" 2>&1
@@ -501,6 +545,8 @@ jobs:
         continue-on-error: true
         env:
           BEFORE: ${{ steps.before.outputs.bundle }}
+          # Production is not normally protected, so this is usually unused.
+          VERCEL_PROTECTION_BYPASS: ${{ secrets.VERCEL_PROTECTION_BYPASS }}
         run: |
           echo "waiting for Vercel to publish a new bundle (was ${BEFORE:-unknown})"
           LANDED=no
