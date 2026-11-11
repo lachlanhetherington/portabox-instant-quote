@@ -20,6 +20,7 @@ import {
   X,
   Sliders,
   Eye,
+  EyeOff,
   SlidersHorizontal,
   Info,
   Calendar,
@@ -45,6 +46,8 @@ import {
   resetRolePermissionsToDefault,
   hasStaffPermission,
   canManageStaffPermissions,
+  updateStaffPassword,
+  createStaffMember,
   DEFAULT_ROLE_PERMISSIONS,
 } from '../../services/adminAuthService';
 
@@ -80,11 +83,18 @@ export const StaffPermissionsWorkspace: React.FC<StaffPermissionsWorkspaceProps>
   // New staff form state
   const [newStaffName, setNewStaffName] = useState('');
   const [newStaffEmail, setNewStaffEmail] = useState('');
+  const [newStaffUsername, setNewStaffUsername] = useState('');
+  const [newStaffPassword, setNewStaffPassword] = useState('Portabox2026!');
+  const [showNewStaffPassword, setShowNewStaffPassword] = useState(false);
   const [newStaffRole, setNewStaffRole] = useState<StaffRole>('call_center');
   const [newStaffTitle, setNewStaffTitle] = useState('');
   const [newStaffMobile, setNewStaffMobile] = useState('');
   const [newStaffDepot, setNewStaffDepot] = useState('Adelaide Depot');
   const [newStaff2FaMethod, setNewStaff2FaMethod] = useState<'sms' | 'authenticator'>('sms');
+
+  // Password reset modal state
+  const [resetPasswordStaff, setResetPasswordStaff] = useState<StaffMember | null>(null);
+  const [newResetPasswordValue, setNewResetPasswordValue] = useState('Portabox2026!');
 
   useEffect(() => {
     setStaffMembers(loadStaffMembers());
@@ -239,20 +249,35 @@ export const StaffPermissionsWorkspace: React.FC<StaffPermissionsWorkspaceProps>
     onRefreshPermissions?.();
   };
 
+  const generateRandomPassword = () => {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789!@#$%';
+    let pass = 'Pbx!';
+    for (let i = 0; i < 8; i++) {
+      pass += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    return pass;
+  };
+
   const handleAddNewStaff = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newStaffName.trim() || !newStaffEmail.trim()) return;
 
+    const emailTrimmed = newStaffEmail.trim().toLowerCase();
+    const username = newStaffUsername.trim() || emailTrimmed.split('@')[0];
+    const password = newStaffPassword.trim() || 'Portabox2026!';
+
     const newMember: StaffMember = {
       id: `staff-${Date.now()}`,
       name: newStaffName.trim(),
-      email: newStaffEmail.trim().toLowerCase(),
+      email: emailTrimmed,
+      username,
+      password,
       role: newStaffRole,
       title: newStaffTitle.trim() || `${newStaffRole.toUpperCase()} Officer`,
       mobile: newStaffMobile.trim() || '0400 000 000',
       depotLocation: newStaffDepot,
       twoFactorEnabled: true,
-      twoFactorMethod: newStaff2FaMethod,
+      twoFactorMethod: 'sms',
       status: 'active',
       createdAt: new Date().toISOString().split('T')[0],
       lastLogin: 'Never',
@@ -262,14 +287,44 @@ export const StaffPermissionsWorkspace: React.FC<StaffPermissionsWorkspaceProps>
     setStaffMembers(updated);
     saveStaffMembers(updated);
 
-    addAuditLog(`${currentSession?.user.name || 'Executive'} added new staff member: ${newMember.name} (${newMember.role}) with mandatory 2FA`);
+    addAuditLog(
+      `${currentSession?.user.name || 'CEO'} provisioned new staff account: ${newMember.name} (${newMember.role}) with username "${username}" and ClickSend SMS 2FA`
+    );
+
+    setSaveBanner(`Staff member ${newMember.name} created successfully with password.`);
+    setTimeout(() => setSaveBanner(null), 3500);
 
     // Reset form
     setNewStaffName('');
     setNewStaffEmail('');
+    setNewStaffUsername('');
+    setNewStaffPassword('Portabox2026!');
     setNewStaffTitle('');
     setNewStaffMobile('');
     setIsAddStaffModalOpen(false);
+    onRefreshPermissions?.();
+  };
+
+  const handleOpenResetPasswordModal = (staff: StaffMember) => {
+    setResetPasswordStaff(staff);
+    setNewResetPasswordValue('Portabox2026!');
+  };
+
+  const handleSaveResetPassword = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!resetPasswordStaff || !newResetPasswordValue.trim()) return;
+
+    updateStaffPassword(resetPasswordStaff.id, newResetPasswordValue.trim());
+    setStaffMembers(loadStaffMembers());
+
+    addAuditLog(
+      `${currentSession?.user.name || 'CEO'} reset password credentials for staff member ${resetPasswordStaff.name}`
+    );
+
+    setSaveBanner(`Password updated for ${resetPasswordStaff.name}`);
+    setTimeout(() => setSaveBanner(null), 3500);
+
+    setResetPasswordStaff(null);
     onRefreshPermissions?.();
   };
 
@@ -711,8 +766,50 @@ export const StaffPermissionsWorkspace: React.FC<StaffPermissionsWorkspaceProps>
                         className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-lg text-xs font-bold transition-colors cursor-pointer flex items-center gap-1.5"
                       >
                         <Sliders className="w-3.5 h-3.5 text-[#15385E]" />
-                        <span>Configure Overrides</span>
+                        <span>Overrides</span>
                       </button>
+
+                      <button
+                        onClick={() => handleOpenResetPasswordModal(staff)}
+                        className="px-2.5 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 rounded-lg text-xs font-bold transition-colors cursor-pointer flex items-center gap-1"
+                        title="CEO: Reset staff login password"
+                      >
+                        <Key className="w-3.5 h-3.5 text-amber-600" />
+                        <span>Password</span>
+                      </button>
+
+                      {/* CEO Quick Toggle for Top Announcement Banner Access */}
+                      {staff.role !== 'ceo' && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const isCurrentlyAllowed = hasStaffPermission(staff, 'view_announcement_banner');
+                            const updatedCustom = {
+                              ...(staff.customPermissions || {}),
+                              view_announcement_banner: !isCurrentlyAllowed,
+                            };
+                            const updatedMembers = staffMembers.map((s) =>
+                              s.id === staff.id ? { ...s, customPermissions: updatedCustom } : s
+                            );
+                            setStaffMembers(updatedMembers);
+                            saveStaffMembers(updatedMembers);
+                            addAuditLog(
+                              `CEO updated Top Announcement Banner access for ${staff.name} to ${!isCurrentlyAllowed ? 'GRANTED' : 'REVOKED'}.`
+                            );
+                            setSaveBanner(`Top Announcement Banner access for ${staff.name} set to ${!isCurrentlyAllowed ? 'GRANTED' : 'REVOKED'}`);
+                            setTimeout(() => setSaveBanner(null), 2500);
+                          }}
+                          className={`px-2.5 py-1.5 rounded-lg text-xs font-bold border transition-colors cursor-pointer flex items-center gap-1.5 ${
+                            hasStaffPermission(staff, 'view_announcement_banner')
+                              ? 'bg-amber-100 hover:bg-amber-200 text-amber-900 border-amber-300'
+                              : 'bg-slate-50 hover:bg-slate-100 text-slate-500 border-slate-200'
+                          }`}
+                          title={`CEO: Toggle Top Announcement Banner access for ${staff.name}`}
+                        >
+                          <Sparkles className="w-3.5 h-3.5 text-amber-600" />
+                          <span>Banner: {hasStaffPermission(staff, 'view_announcement_banner') ? 'Granted' : 'Hidden'}</span>
+                        </button>
+                      )}
 
                       {staff.role !== 'ceo' && (
                         <>
@@ -945,6 +1042,51 @@ export const StaffPermissionsWorkspace: React.FC<StaffPermissionsWorkspaceProps>
                 </div>
               </div>
 
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                    Staff Username / Login ID
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="e.g. liam.ops (defaults to email prefix)"
+                    value={newStaffUsername}
+                    onChange={(e) => setNewStaffUsername(e.target.value)}
+                    className="w-full px-3.5 py-2 bg-slate-50 border border-slate-300 rounded-xl text-sm font-mono focus:bg-white focus:border-[#15385E] outline-none"
+                  />
+                </div>
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-xs font-bold text-slate-700 uppercase tracking-wider">
+                      Initial Password *
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => setNewStaffPassword(generateRandomPassword())}
+                      className="text-[10px] text-[#00c0f3] hover:text-[#0b2942] font-bold cursor-pointer"
+                    >
+                      Generate
+                    </button>
+                  </div>
+                  <div className="relative">
+                    <input
+                      type={showNewStaffPassword ? 'text' : 'password'}
+                      required
+                      value={newStaffPassword}
+                      onChange={(e) => setNewStaffPassword(e.target.value)}
+                      className="w-full px-3.5 pr-9 py-2 bg-slate-50 border border-slate-300 rounded-xl text-sm font-mono focus:bg-white focus:border-[#15385E] outline-none"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowNewStaffPassword(!showNewStaffPassword)}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer"
+                    >
+                      {showNewStaffPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+                </div>
+              </div>
+
               <div>
                 <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
                   Depot / Operational Base
@@ -965,9 +1107,9 @@ export const StaffPermissionsWorkspace: React.FC<StaffPermissionsWorkspaceProps>
               <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-900 flex items-start gap-2.5">
                 <ShieldCheck className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" />
                 <div>
-                  <div className="font-bold">Mandatory 2FA Enrollment</div>
+                  <div className="font-bold">Mandatory ClickSend SMS 2FA Enrollment</div>
                   <div className="text-[11px] text-slate-600 mt-0.5">
-                    Upon creation, this staff member will be required to authenticate via 2FA verification before accessing any Portabox operational modules.
+                    Upon creation, this staff member can log in using their email/username and this password, followed by an SMS verification code sent to their mobile.
                   </div>
                 </div>
               </div>
@@ -985,6 +1127,76 @@ export const StaffPermissionsWorkspace: React.FC<StaffPermissionsWorkspaceProps>
                   className="px-5 py-2.5 rounded-xl bg-[#15385E] hover:bg-[#112F4F] text-white text-xs font-black shadow-md cursor-pointer"
                 >
                   Save & Enroll Employee
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 3: CEO RESET STAFF PASSWORD */}
+      {resetPasswordStaff && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/70 backdrop-blur-xs animate-fade-in">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden border border-slate-200 flex flex-col">
+            <div className="bg-[#15385E] px-6 py-4 text-white flex items-center justify-between border-b-4 border-[#F7D347]">
+              <div className="flex items-center gap-2">
+                <Key className="w-5 h-5 text-[#F7D347]" />
+                <h3 className="text-base font-black text-white">Reset Staff Login Password</h3>
+              </div>
+              <button
+                onClick={() => setResetPasswordStaff(null)}
+                className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 text-slate-200 hover:text-white flex items-center justify-center transition-colors cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveResetPassword} className="p-6 space-y-4 text-xs">
+              <div className="p-3 bg-slate-50 rounded-xl border border-slate-200">
+                <span className="text-slate-500 text-[11px] block">Staff Member:</span>
+                <span className="font-extrabold text-slate-900 text-sm block">{resetPasswordStaff.name}</span>
+                <span className="font-mono text-slate-600 text-xs">{resetPasswordStaff.email} · {resetPasswordStaff.mobile}</span>
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-xs font-bold text-slate-700 uppercase tracking-wider">
+                    New Password *
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setNewResetPasswordValue(generateRandomPassword())}
+                    className="text-[10px] text-[#00c0f3] hover:text-[#0b2942] font-bold cursor-pointer"
+                  >
+                    Generate Random
+                  </button>
+                </div>
+                <input
+                  type="text"
+                  required
+                  value={newResetPasswordValue}
+                  onChange={(e) => setNewResetPasswordValue(e.target.value)}
+                  className="w-full px-3.5 py-2 bg-slate-50 border border-slate-300 rounded-xl text-sm font-mono focus:bg-white focus:border-[#15385E] outline-none"
+                />
+              </div>
+
+              <p className="text-[11px] text-slate-500">
+                The employee will enter their username or email and this new password, followed by a 6-digit SMS OTP to their mobile.
+              </p>
+
+              <div className="flex items-center justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setResetPasswordStaff(null)}
+                  className="px-4 py-2 rounded-xl border border-slate-300 text-xs font-bold text-slate-700 hover:bg-slate-50 cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 rounded-xl bg-[#15385E] hover:bg-[#112F4F] text-white text-xs font-black shadow-md cursor-pointer"
+                >
+                  Update Password
                 </button>
               </div>
             </form>

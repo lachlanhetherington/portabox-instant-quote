@@ -17,7 +17,8 @@ export type StaffPermissionKey =
   | 'customer_crm'
   | 'yard_inventory'
   | 'ai_copilot'
-  | 'manage_permissions';
+  | 'manage_permissions'
+  | 'view_announcement_banner';
 
 export interface PermissionDefinition {
   key: StaffPermissionKey;
@@ -29,10 +30,17 @@ export interface PermissionDefinition {
 
 export const PERMISSION_DEFINITIONS: PermissionDefinition[] = [
   {
+    key: 'view_announcement_banner',
+    label: 'Top Announcement Banner (Customer Header Strip)',
+    shortLabel: 'Announcement Banner',
+    description: 'Gold marketing announcement strip on the top header. Restricted to CEO and CEO-authorized staff only.',
+    category: 'Commercial',
+  },
+  {
     key: 'daily_operations',
-    label: 'Daily Operations Suite (Customers, Leads & Yard)',
+    label: 'Daily Operations Suite (Tariff Simulator, Customers & Yard)',
     shortLabel: 'Daily Operations',
-    description: 'Access customer accounts, quote inquiries, Smartsheet yard dispatch, fleet calendar, and drop-off analytics. Restricted to CEO by default.',
+    description: 'Access Tariff Matrix & Live Simulator, customer accounts, quote inquiries, Smartsheet yard dispatch, fleet calendar, and drop-off analytics. Restricted to CEO by default.',
     category: 'Logistics',
   },
   {
@@ -111,6 +119,8 @@ export interface StaffMember {
   id: string;
   name: string;
   email: string;
+  username?: string;
+  password?: string;
   role: StaffRole;
   title: string;
   mobile: string;
@@ -135,3 +145,20 @@ export interface StaffSession {
 export interface RolePermissionMatrix {
   [role: string]: Record<StaffPermissionKey, boolean>;
 }
+
+export interface MfaAuditLogEntry {
+  id: string;
+  timestamp: string;
+  staffId: string;
+  staffName: string;
+  staffEmail: string;
+  staffRole: StaffRole;
+  maskedMobile: string;
+  method: 'sms' | 'passkey';
+  status: 'success' | 'failed' | 'dispatched';
+  failureReason?: string;
+  messageId?: string;
+  carrierRoute?: string;
+  ipAddress?: string;
+}
+

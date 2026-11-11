@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { Header } from './components/Header';
 import { AdminGate } from './components/AdminGate';
+import { StaffOnly } from './components/StaffOnly';
 import { RightSidebar } from './components/RightSidebar';
 import { Step1Where } from './components/Step1Where';
 import { Step2What } from './components/Step2What';
@@ -398,6 +399,19 @@ export default function App() {
     }
   }, [config.enableNextStepsFlow]);
 
+  // Synchronize live quote calculation when admin updates pricing
+  useEffect(() => {
+    const handlePricingEvent = (e: any) => {
+      if (e.detail) {
+        setConfig(e.detail);
+      } else {
+        setConfig(loadAppConfig());
+      }
+    };
+    window.addEventListener('portabox:pricing-updated', handlePricingEvent);
+    return () => window.removeEventListener('portabox:pricing-updated', handlePricingEvent);
+  }, []);
+
   // Admin config save handler
   const handleSaveConfig = (newConfig: AppConfig) => {
     setConfig(newConfig);
@@ -648,9 +662,9 @@ export default function App() {
           setIsAdminOpen(!isAdminOpen);
           if (!isAdminOpen) setIsCallCenterOpen(false);
         }}
-        isCallCenterOpen={config.enableCallCenterDispatch !== false ? isCallCenterOpen : false}
+        isCallCenterOpen={config.enableCallCenterDispatch ? isCallCenterOpen : false}
         onToggleCallCenter={
-          config.enableCallCenterDispatch !== false
+          config.enableCallCenterDispatch
             ? () => {
                 if (!staffSession) {
                   handleOpenStaffLogin('dispatch');
@@ -662,6 +676,8 @@ export default function App() {
             : undefined
         }
         onOpenCustomerPortal={() => setIsCustomerPortalOpen(true)}
+        enableCustomerPortal={Boolean(config.enableCustomerPortal)}
+        enableHeaderCallButton={Boolean(config.enableHeaderCallButton)}
         onOpenDriverPortal={() => {
           if (!staffSession) {
             handleOpenStaffLogin('driver');
@@ -672,27 +688,41 @@ export default function App() {
         onOpenSpaceCalculator={() => setIsSpaceCalculatorOpen(true)}
         onOpenPlacementChecker={config.enableDrivewayFitGuarantee ? () => setIsPlacementCheckerOpen(true) : undefined}
         onOpenCoverageMap={() => setIsCoverageMapModalOpen(true)}
-        onOpenTelephony={() => {
-          if (!staffSession) {
-            handleOpenStaffLogin('telephony');
-            return;
-          }
-          setAdminInitialTab('telephony');
-          setIsAdminOpen(true);
-          setIsCallCenterOpen(false);
-        }}
+        onOpenTelephony={
+          config.enableSoftphone
+            ? () => {
+                if (!staffSession) {
+                  handleOpenStaffLogin('telephony');
+                  return;
+                }
+                setAdminInitialTab('telephony');
+                setIsAdminOpen(true);
+                setIsCallCenterOpen(false);
+              }
+            : undefined
+        }
         phone={config.phone}
         promoBannerSlogan={config.promoBannerSlogan}
-        showPromoBanner={config.enablePromoBanner !== false}
+        showPromoBanner={
+          Boolean(config.enablePromoBanner) &&
+          Boolean(staffSession && hasStaffPermission(staffSession.user, 'view_announcement_banner'))
+        }
         lockBannerOnScroll={config.lockTopBannerOnScroll !== false}
       />
 
       {/* Driver Login, Daily Calendar Jobs & Route Portal Modal */}
-      <DriverPortalModal
-        isOpen={isDriverPortalOpen}
-        onClose={() => setIsDriverPortalOpen(false)}
-        enableContainerInventory={config.enableContainerInventory !== false}
-      />
+      {/* driver portal gated */}
+      {isDriverPortalOpen && (
+        <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/75 backdrop-blur-xs flex items-start justify-center">
+          <AdminGate onCancel={() => setIsDriverPortalOpen(false)}>
+            <DriverPortalModal
+              isOpen
+              onClose={() => setIsDriverPortalOpen(false)}
+              enableContainerInventory={config.enableContainerInventory !== false}
+            />
+          </AdminGate>
+        </div>
+      )}
 
       {/* Main Body */}
       {isCallCenterOpen && config.enableCallCenterDispatch !== false ? (
@@ -1059,18 +1089,20 @@ export default function App() {
               >
                 Customer Portal
               </button>
-              <button
-                onClick={() => {
+              <a
+                href="#staff-signin"
+                onClick={(e) => {
+                  e.preventDefault();
                   if (staffSession) {
                     setIsAdminOpen(true);
                   } else {
                     handleOpenStaffLogin('admin');
                   }
                 }}
-                className="text-slate-600 hover:text-slate-900 font-semibold cursor-pointer"
+                className="text-slate-500 hover:text-slate-800 text-xs font-normal underline-offset-4 hover:underline transition-colors cursor-pointer"
               >
-                {staffSession ? `Staff Portal (${staffSession.user.name.split(' ')[0]})` : 'Staff & Admin Login (2FA)'}
-              </button>
+                {staffSession ? `Staff Portal (${staffSession.user.name.split(' ')[0]})` : 'Staff Sign In'}
+              </a>
             </div>
           </div>
         </footer>
@@ -1141,20 +1173,22 @@ export default function App() {
         />
       )}
 
-      {/* Floating Twilio Softphone Dialer & Inbound Alert Bar (Only Rendered for 2FA-Authenticated Staff with Telephony Permission) */}
-      {staffSession && hasStaffPermission(staffSession.user, 'softphone_telephony') && (
-        <TwilioSoftphoneBar
-          onOpenScreenPop={(cust: CustomerAccount | null, call: TelephonyCall | null) => {
-            setScreenPopCustomer(cust);
-            setActiveTelephonyCall(call);
-            setIsCustomer360Open(true);
-          }}
-          onOpenTelephonyHub={() => {
-            setAdminInitialTab('telephony');
-            setIsAdminOpen(true);
-            setIsCallCenterOpen(false);
-          }}
-        />
+      {/* Floating Twilio Softphone Dialer & Inbound Alert Bar (Strictly Governed by Feature Flag 1, Off by Default) */}
+      {Boolean(config.enableSoftphone) && staffSession && hasStaffPermission(staffSession.user, 'softphone_telephony') && (
+        <StaffOnly>
+          <TwilioSoftphoneBar
+            onOpenScreenPop={(cust: CustomerAccount | null, call: TelephonyCall | null) => {
+              setScreenPopCustomer(cust);
+              setActiveTelephonyCall(call);
+              setIsCustomer360Open(true);
+            }}
+            onOpenTelephonyHub={() => {
+              setAdminInitialTab('telephony');
+              setIsAdminOpen(true);
+              setIsCallCenterOpen(false);
+            }}
+          />
+        </StaffOnly>
       )}
 
       {/* Slide-over Customer 360 Screen-Pop Workspace */}

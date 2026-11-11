@@ -4,11 +4,13 @@ import {
   StaffPermissionKey,
   StaffSession,
   RolePermissionMatrix,
+  MfaAuditLogEntry,
 } from '../types/adminAuth';
 
 const STAFF_STORAGE_KEY = 'portabox_staff_members_v1';
 const ROLE_PERMISSIONS_STORAGE_KEY = 'portabox_role_permissions_v1';
 const STAFF_SESSION_STORAGE_KEY = 'portabox_staff_active_session_v1';
+const MFA_AUDIT_STORAGE_KEY = 'portabox_mfa_audit_logs_v1';
 
 export const DEFAULT_ROLE_PERMISSIONS: RolePermissionMatrix = {
   ceo: {
@@ -23,6 +25,7 @@ export const DEFAULT_ROLE_PERMISSIONS: RolePermissionMatrix = {
     yard_inventory: true,
     ai_copilot: true,
     manage_permissions: true,
+    view_announcement_banner: true,
   },
   manager: {
     daily_operations: false,
@@ -36,6 +39,7 @@ export const DEFAULT_ROLE_PERMISSIONS: RolePermissionMatrix = {
     yard_inventory: true,
     ai_copilot: false,
     manage_permissions: false,
+    view_announcement_banner: false,
   },
   call_center: {
     daily_operations: false,
@@ -49,6 +53,7 @@ export const DEFAULT_ROLE_PERMISSIONS: RolePermissionMatrix = {
     yard_inventory: false,
     ai_copilot: false,
     manage_permissions: false,
+    view_announcement_banner: false,
   },
   driver: {
     daily_operations: false,
@@ -62,6 +67,7 @@ export const DEFAULT_ROLE_PERMISSIONS: RolePermissionMatrix = {
     yard_inventory: false,
     ai_copilot: false,
     manage_permissions: false,
+    view_announcement_banner: false,
   },
   admin_pricing: {
     daily_operations: false,
@@ -75,6 +81,7 @@ export const DEFAULT_ROLE_PERMISSIONS: RolePermissionMatrix = {
     yard_inventory: false,
     ai_copilot: false,
     manage_permissions: false,
+    view_announcement_banner: false,
   },
   warehouse: {
     daily_operations: false,
@@ -88,6 +95,7 @@ export const DEFAULT_ROLE_PERMISSIONS: RolePermissionMatrix = {
     yard_inventory: true,
     ai_copilot: false,
     manage_permissions: false,
+    view_announcement_banner: false,
   },
 };
 
@@ -96,6 +104,8 @@ export const INITIAL_STAFF_MEMBERS: StaffMember[] = [
     id: 'staff-ceo-01',
     name: 'Dan Harrington',
     email: 'dan.ceo@portabox.com.au',
+    username: 'dan.ceo',
+    password: 'Portabox2026!',
     role: 'ceo',
     title: 'CEO & Managing Director',
     mobile: '0488 123 456',
@@ -110,12 +120,14 @@ export const INITIAL_STAFF_MEMBERS: StaffMember[] = [
     id: 'staff-mgr-02',
     name: 'Sarah Collins',
     email: 'sarah.ops@portabox.com.au',
+    username: 'sarah.ops',
+    password: 'Portabox2026!',
     role: 'manager',
     title: 'National Operations & Fleet Manager',
     mobile: '0412 889 001',
     depotLocation: 'Melbourne Hub & Interstate',
     twoFactorEnabled: true,
-    twoFactorMethod: 'authenticator',
+    twoFactorMethod: 'sms',
     status: 'active',
     lastLogin: 'Today, 09:15 AM',
     createdAt: '2025-02-14',
@@ -124,6 +136,8 @@ export const INITIAL_STAFF_MEMBERS: StaffMember[] = [
     id: 'staff-cc-03',
     name: 'Chloe Davis',
     email: 'chloe.agent@portabox.com.au',
+    username: 'chloe.agent',
+    password: 'Portabox2026!',
     role: 'call_center',
     title: 'Customer Care & Dispatch Lead',
     mobile: '0433 555 782',
@@ -138,6 +152,8 @@ export const INITIAL_STAFF_MEMBERS: StaffMember[] = [
     id: 'staff-drv-04',
     name: 'Dave Miller',
     email: 'dave.driver@portabox.com.au',
+    username: 'dave.driver',
+    password: 'Portabox2026!',
     role: 'driver',
     title: 'Senior Fleet Driver (Tilt Tray & Crane)',
     mobile: '0421 999 334',
@@ -152,12 +168,14 @@ export const INITIAL_STAFF_MEMBERS: StaffMember[] = [
     id: 'staff-adm-05',
     name: 'Marcus Webb',
     email: 'marcus.admin@portabox.com.au',
+    username: 'marcus.admin',
+    password: 'Portabox2026!',
     role: 'admin_pricing',
     title: 'Commercial Analyst & Billing Admin',
     mobile: '0409 666 123',
     depotLocation: 'Finance & Systems (Sydney HQ)',
     twoFactorEnabled: true,
-    twoFactorMethod: 'authenticator',
+    twoFactorMethod: 'sms',
     status: 'active',
     lastLogin: '2 days ago',
     createdAt: '2025-05-02',
@@ -166,6 +184,8 @@ export const INITIAL_STAFF_MEMBERS: StaffMember[] = [
     id: 'staff-wh-06',
     name: 'Jason Wong',
     email: 'jason.yard@portabox.com.au',
+    username: 'jason.yard',
+    password: 'Portabox2026!',
     role: 'warehouse',
     title: 'Yard Logistics & Forklift Supervisor',
     mobile: '0414 777 221',
@@ -186,7 +206,20 @@ export function loadStaffMembers(): StaffMember[] {
       return INITIAL_STAFF_MEMBERS;
     }
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) && parsed.length > 0 ? parsed : INITIAL_STAFF_MEMBERS;
+    if (Array.isArray(parsed) && parsed.length > 0) {
+      // Ensure all staff have default username and password if loaded from older localStorage
+      const enriched = parsed.map((staff: StaffMember) => {
+        const username = staff.username || staff.email.split('@')[0];
+        const password = staff.password || 'Portabox2026!';
+        return {
+          ...staff,
+          username,
+          password,
+        };
+      });
+      return enriched;
+    }
+    return INITIAL_STAFF_MEMBERS;
   } catch (err) {
     console.error('Failed to load staff members from localStorage:', err);
     return INITIAL_STAFF_MEMBERS;
@@ -276,22 +309,40 @@ export function canManageStaffPermissions(member: StaffMember | null | undefined
 }
 
 /**
+ * Checks if a staff member is authorized by the CEO to view the top announcement banner.
+ * Restricted to CEO Dan Harrington and staff members explicitly granted permission.
+ */
+export function isStaffAuthorizedForBanner(member: StaffMember | null | undefined): boolean {
+  return hasStaffPermission(member, 'view_announcement_banner');
+}
+
+/**
+ * Grants or revokes top announcement banner visibility for a specific staff member
+ */
+export function setStaffBannerPermission(staffId: string, allowed: boolean): StaffMember[] {
+  const staff = loadStaffMembers();
+  const idx = staff.findIndex((s) => s.id === staffId);
+  if (idx !== -1) {
+    staff[idx].customPermissions = {
+      ...(staff[idx].customPermissions || {}),
+      view_announcement_banner: allowed,
+    };
+    saveStaffMembers(staff);
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('portabox:staff-updated', { detail: staff[idx] }));
+    }
+  }
+  return staff;
+}
+
+/**
  * Active Staff Session Management
  */
 export function getStaffSession(): StaffSession | null {
   try {
     const raw = localStorage.getItem(STAFF_SESSION_STORAGE_KEY);
     if (!raw) {
-      // Initialize default session as CEO Dan Harrington for immediate executive access
-      const staff = loadStaffMembers();
-      const ceo = staff.find((s) => s.role === 'ceo') || INITIAL_STAFF_MEMBERS[0];
-      return {
-        user: ceo,
-        token: `pbox_ceo_initial_${Date.now()}`,
-        verifiedVia: '2fa_sms',
-        loginTime: '08:30 AM',
-        expiresAt: Date.now() + 12 * 60 * 60 * 1000,
-      };
+      return null;
     }
     const session: StaffSession = JSON.parse(raw);
     if (session.expiresAt && Date.now() > session.expiresAt) {
@@ -362,3 +413,338 @@ export function verifyStaff2FACode(inputCode: string, expectedCode?: string): bo
   }
   return expectedCode ? clean === expectedCode.trim() : false;
 }
+
+/**
+ * Validates username/email and password credentials
+ */
+export function verifyStaffCredentials(
+  identifier: string,
+  passwordInput: string
+): { success: boolean; staff?: StaffMember; error?: string } {
+  const cleanId = identifier.trim().toLowerCase();
+  const cleanPass = passwordInput.trim();
+
+  if (!cleanId) {
+    return { success: false, error: 'Please enter your staff username or email address.' };
+  }
+  if (!cleanPass) {
+    return { success: false, error: 'Please enter your password.' };
+  }
+
+  const staffList = loadStaffMembers();
+  const matched = staffList.find(
+    (s) =>
+      s.email.toLowerCase() === cleanId ||
+      (s.username && s.username.toLowerCase() === cleanId)
+  );
+
+  if (!matched) {
+    return {
+      success: false,
+      error: 'Staff account not found. Please verify your username/email with the CEO.',
+    };
+  }
+
+  if (matched.status !== 'active') {
+    return {
+      success: false,
+      error: 'This staff account has been suspended. Please contact the CEO for access.',
+    };
+  }
+
+  const expectedPassword = matched.password || 'Portabox2026!';
+  if (cleanPass !== expectedPassword) {
+    return {
+      success: false,
+      error: 'Incorrect password. Please verify your credentials or ask the CEO to reset it.',
+    };
+  }
+
+  return { success: true, staff: matched };
+}
+
+/**
+ * CEO function to update or reset a staff member's password
+ */
+export function updateStaffPassword(staffId: string, newPassword: string): boolean {
+  const staffList = loadStaffMembers();
+  const idx = staffList.findIndex((s) => s.id === staffId);
+  if (idx === -1) return false;
+
+  staffList[idx].password = newPassword.trim();
+  saveStaffMembers(staffList);
+
+  // If the updated user is currently logged in, sync active session
+  const currentSession = getStaffSession();
+  if (currentSession && currentSession.user.id === staffId) {
+    currentSession.user.password = newPassword.trim();
+    localStorage.setItem(STAFF_SESSION_STORAGE_KEY, JSON.stringify(currentSession));
+  }
+
+  return true;
+}
+
+/**
+ * CEO function to provision a new staff member with credentials
+ */
+export function createStaffMember(
+  data: Omit<StaffMember, 'id' | 'createdAt'>
+): StaffMember {
+  const staffList = loadStaffMembers();
+  const newStaff: StaffMember = {
+    ...data,
+    id: `staff-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+    username: data.username || data.email.split('@')[0],
+    password: data.password || 'Portabox2026!',
+    twoFactorEnabled: true,
+    twoFactorMethod: 'sms',
+    status: data.status || 'active',
+    createdAt: new Date().toISOString().split('T')[0],
+  };
+
+  const updated = [newStaff, ...staffList];
+  saveStaffMembers(updated);
+  return newStaff;
+}
+
+/**
+ * Privacy helper: masks Australian mobile numbers (e.g. "0488 123 456" -> "0488 ••• 456")
+ */
+export function maskAustralianMobile(mobile: string): string {
+  if (!mobile) return '04•• ••• •••';
+  // Remove non-digit characters except leading plus
+  const digits = mobile.replace(/[^\d+]/g, '');
+
+  // If standard 10-digit Australian number: 04XX XXX XXX
+  if (digits.startsWith('04') && digits.length >= 10) {
+    const prefix = digits.slice(0, 4);
+    const suffix = digits.slice(-3);
+    return `${prefix} ••• ${suffix}`;
+  }
+
+  // If international format +61 4XX XXX XXX
+  if (digits.startsWith('+61') && digits.length >= 12) {
+    const prefix = '+61 4' + digits.slice(4, 6);
+    const suffix = digits.slice(-3);
+    return `${prefix} ••• ${suffix}`;
+  }
+
+  // Generic fallback if unexpected length
+  if (digits.length >= 7) {
+    const start = digits.slice(0, 4);
+    const end = digits.slice(-3);
+    return `${start} ••• ${end}`;
+  }
+
+  return '04•• ••• •••';
+}
+
+export const INITIAL_MFA_AUDIT_LOGS: MfaAuditLogEntry[] = [
+  {
+    id: 'mfa-log-101',
+    timestamp: new Date(Date.now() - 14 * 60 * 1000).toISOString(),
+    staffId: 'staff-ceo-01',
+    staffName: 'Dan Harrington',
+    staffEmail: 'dan.ceo@portabox.com.au',
+    staffRole: 'ceo',
+    maskedMobile: '0488 ••• 456',
+    method: 'sms',
+    status: 'success',
+    messageId: 'CS-MSG-98102',
+    carrierRoute: 'Telstra Direct Mobile Gateway (SMPP AU-01)',
+    ipAddress: '124.168.92.14 (Adelaide HQ)',
+  },
+  {
+    id: 'mfa-log-102',
+    timestamp: new Date(Date.now() - 32 * 60 * 1000).toISOString(),
+    staffId: 'staff-mgr-02',
+    staffName: 'Sarah Collins',
+    staffEmail: 'sarah.ops@portabox.com.au',
+    staffRole: 'manager',
+    maskedMobile: '0412 ••• 001',
+    method: 'sms',
+    status: 'success',
+    messageId: 'CS-MSG-98044',
+    carrierRoute: 'Optus Australia High-Priority Gateway',
+    ipAddress: '203.217.44.88 (Melbourne Fleet Depot)',
+  },
+  {
+    id: 'mfa-log-103',
+    timestamp: new Date(Date.now() - 55 * 60 * 1000).toISOString(),
+    staffId: 'staff-drv-04',
+    staffName: 'Dave Miller',
+    staffEmail: 'dave.driver@portabox.com.au',
+    staffRole: 'driver',
+    maskedMobile: '0421 ••• 334',
+    method: 'sms',
+    status: 'failed',
+    failureReason: 'Invalid 6-digit OTP entered (Attempt 1 of 3)',
+    messageId: 'CS-MSG-97992',
+    carrierRoute: 'Vodafone AU Cellular Network',
+    ipAddress: '49.198.112.5 (Adelaide Depot Fleet Cab 04)',
+  },
+  {
+    id: 'mfa-log-104',
+    timestamp: new Date(Date.now() - 53 * 60 * 1000).toISOString(),
+    staffId: 'staff-drv-04',
+    staffName: 'Dave Miller',
+    staffEmail: 'dave.driver@portabox.com.au',
+    staffRole: 'driver',
+    maskedMobile: '0421 ••• 334',
+    method: 'sms',
+    status: 'success',
+    messageId: 'CS-MSG-97998',
+    carrierRoute: 'Vodafone AU Cellular Network',
+    ipAddress: '49.198.112.5 (Adelaide Depot Fleet Cab 04)',
+  },
+  {
+    id: 'mfa-log-105',
+    timestamp: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
+    staffId: 'staff-cc-03',
+    staffName: 'Chloe Davis',
+    staffEmail: 'chloe.agent@portabox.com.au',
+    staffRole: 'call_center',
+    maskedMobile: '0433 ••• 782',
+    method: 'sms',
+    status: 'success',
+    messageId: 'CS-MSG-97815',
+    carrierRoute: 'Telstra Direct Mobile Gateway (SMPP AU-01)',
+    ipAddress: '124.168.92.19 (Adelaide Call Center Hub)',
+  },
+  {
+    id: 'mfa-log-106',
+    timestamp: new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString(),
+    staffId: 'unknown',
+    staffName: 'Unknown Identifier',
+    staffEmail: 'robert.hack@external-unknown.com',
+    staffRole: 'driver',
+    maskedMobile: '04•• ••• •••',
+    method: 'sms',
+    status: 'failed',
+    failureReason: 'Staff account not found or invalid password credentials',
+    carrierRoute: 'Rejected at Pre-Auth Barrier',
+    ipAddress: '185.220.101.5 (External Unrecognized IP)',
+  },
+  {
+    id: 'mfa-log-107',
+    timestamp: new Date(Date.now() - 5 * 60 * 60 * 1000).toISOString(),
+    staffId: 'staff-adm-05',
+    staffName: 'Marcus Webb',
+    staffEmail: 'marcus.admin@portabox.com.au',
+    staffRole: 'admin_pricing',
+    maskedMobile: '0409 ••• 123',
+    method: 'sms',
+    status: 'success',
+    messageId: 'CS-MSG-97420',
+    carrierRoute: 'Optus Australia High-Priority Gateway',
+    ipAddress: '139.130.4.5 (Sydney Commercial Office)',
+  },
+];
+
+export function loadMfaAuditLogs(): MfaAuditLogEntry[] {
+  try {
+    const raw = localStorage.getItem(MFA_AUDIT_STORAGE_KEY);
+    if (!raw) {
+      localStorage.setItem(MFA_AUDIT_STORAGE_KEY, JSON.stringify(INITIAL_MFA_AUDIT_LOGS));
+      return INITIAL_MFA_AUDIT_LOGS;
+    }
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed) && parsed.length > 0) {
+      return parsed;
+    }
+    return INITIAL_MFA_AUDIT_LOGS;
+  } catch (err) {
+    console.error('Failed to load MFA audit logs from localStorage:', err);
+    return INITIAL_MFA_AUDIT_LOGS;
+  }
+}
+
+export function saveMfaAuditLogs(logs: MfaAuditLogEntry[]): void {
+  try {
+    // Keep up to 200 most recent logs
+    const trimmed = logs.slice(0, 200);
+    localStorage.setItem(MFA_AUDIT_STORAGE_KEY, JSON.stringify(trimmed));
+  } catch (err) {
+    console.error('Failed to save MFA audit logs:', err);
+  }
+}
+
+export function recordMfaAuditLog(
+  entry: Omit<MfaAuditLogEntry, 'id' | 'timestamp'>
+): MfaAuditLogEntry {
+  const currentLogs = loadMfaAuditLogs();
+  const newEntry: MfaAuditLogEntry = {
+    ...entry,
+    id: `mfa-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+    timestamp: new Date().toISOString(),
+  };
+
+  const updatedLogs = [newEntry, ...currentLogs];
+  saveMfaAuditLogs(updatedLogs);
+
+  // Dispatch browser event so any open CEO audit workspace updates instantly
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('portabox:mfa-audit-updated', { detail: newEntry }));
+  }
+
+  return newEntry;
+}
+
+export function clearMfaAuditLogs(): void {
+  try {
+    localStorage.setItem(MFA_AUDIT_STORAGE_KEY, JSON.stringify([]));
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('portabox:mfa-audit-updated', { detail: null }));
+    }
+  } catch (err) {
+    console.error('Failed to clear MFA audit logs:', err);
+  }
+}
+
+export function simulateTestMfaAuditLog(status: 'success' | 'failed' | 'dispatched'): MfaAuditLogEntry {
+  const staffMembers = loadStaffMembers();
+  const randomStaff = staffMembers[Math.floor(Math.random() * staffMembers.length)];
+
+  if (status === 'success') {
+    return recordMfaAuditLog({
+      staffId: randomStaff.id,
+      staffName: randomStaff.name,
+      staffEmail: randomStaff.email,
+      staffRole: randomStaff.role,
+      maskedMobile: maskAustralianMobile(randomStaff.mobile),
+      method: 'sms',
+      status: 'success',
+      messageId: `CS-MSG-${Math.floor(10000 + Math.random() * 90000)}`,
+      carrierRoute: 'Telstra Direct Mobile Gateway (SMPP AU-01)',
+      ipAddress: '124.168.92.14 (Verified Adelaide Gateway)',
+    });
+  } else if (status === 'dispatched') {
+    return recordMfaAuditLog({
+      staffId: randomStaff.id,
+      staffName: randomStaff.name,
+      staffEmail: randomStaff.email,
+      staffRole: randomStaff.role,
+      maskedMobile: maskAustralianMobile(randomStaff.mobile),
+      method: 'sms',
+      status: 'dispatched',
+      messageId: `CS-MSG-${Math.floor(10000 + Math.random() * 90000)}`,
+      carrierRoute: 'ClickSend SMPP In-Flight Dispatch',
+      ipAddress: '124.168.92.14 (Verified Adelaide Gateway)',
+    });
+  } else {
+    return recordMfaAuditLog({
+      staffId: randomStaff.id,
+      staffName: randomStaff.name,
+      staffEmail: randomStaff.email,
+      staffRole: randomStaff.role,
+      maskedMobile: maskAustralianMobile(randomStaff.mobile),
+      method: 'sms',
+      status: 'failed',
+      failureReason: 'Invalid 6-digit OTP entered or expired challenge window',
+      messageId: `CS-MSG-${Math.floor(10000 + Math.random() * 90000)}`,
+      carrierRoute: 'Optus Direct Gateway',
+      ipAddress: '203.217.44.88 (Unusual IP range flagged)',
+    });
+  }
+}
+

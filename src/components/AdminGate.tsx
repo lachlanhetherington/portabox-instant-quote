@@ -8,20 +8,12 @@
  * The password goes to /api/admin/login and is compared there, against
  * ADMIN_PASSWORD, which stays on the server. What comes back is a short
  * HMAC-signed token kept in sessionStorage, so closing the tab ends the
- * session.
+ * session. The token itself lives in adminToken.ts, which StaffOnly reads
+ * too.
  */
 import React, { useEffect, useState } from 'react';
 import { Lock } from 'lucide-react';
-
-const TOKEN_KEY = 'portabox.admin.token';
-
-const read = (): string | null => {
-  try {
-    return sessionStorage.getItem(TOKEN_KEY);
-  } catch {
-    return null;
-  }
-};
+import { readToken, storeToken, verifyToken } from './adminToken';
 
 export function AdminGate({
   children,
@@ -39,20 +31,15 @@ export function AdminGate({
   /* A token in storage is not taken on trust — the server re-checks the
      signature, so editing the value by hand gets you nowhere. */
   useEffect(() => {
-    const token = read();
-    if (!token) {
+    if (!readToken()) {
       setChecking(false);
       return;
     }
-    fetch('/api/admin/verify', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ token }),
-    })
-      .then((r) => r.json())
-      .then((d) => setUnlocked(Boolean(d?.valid)))
-      .catch(() => setUnlocked(false))
-      .finally(() => setChecking(false));
+    let live = true;
+    verifyToken()
+      .then((ok) => { if (live) setUnlocked(ok); })
+      .finally(() => { if (live) setChecking(false); });
+    return () => { live = false; };
   }, []);
 
   const submit = async (e: React.FormEvent) => {
@@ -70,12 +57,7 @@ export function AdminGate({
         setError(d?.error || 'Could not sign in.');
         return;
       }
-      try {
-        sessionStorage.setItem(TOKEN_KEY, d.token);
-      } catch {
-        /* Private browsing refuses storage; the session still works, it just
-           will not survive a reload. Not worth blocking on. */
-      }
+      storeToken(d.token);
       setUnlocked(true);
     } catch {
       setError('Could not reach the server.');

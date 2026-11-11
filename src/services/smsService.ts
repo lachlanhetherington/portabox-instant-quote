@@ -1,6 +1,20 @@
 import twilio from 'twilio';
 import { db } from './firebaseService';
 import { collection, addDoc } from 'firebase/firestore';
+import { formatAustralianMobile } from './clicksendService';
+
+const getClickSendConfig = () => {
+  const username = process.env.CLICKSEND_USERNAME;
+  const apiKey = process.env.CLICKSEND_API_KEY;
+  const senderId = process.env.CLICKSEND_FROM || 'Portabox';
+
+  return {
+    username,
+    apiKey,
+    senderId,
+    isConfigured: Boolean(username && apiKey),
+  };
+};
 
 const getTwilioConfig = () => {
   const accountSid = process.env.TWILIO_ACCOUNT_SID;
@@ -16,47 +30,85 @@ const getTwilioConfig = () => {
 };
 
 export const sendSms = async (contactId: string, to: string, message: string): Promise<string> => {
-  const { accountSid, authToken, twilioPhoneNumber, isConfigured } = getTwilioConfig();
+  const clicksend = getClickSendConfig();
+  const twilioCfg = getTwilioConfig();
+  const formattedTo = formatAustralianMobile(to);
 
-  let messageSid = `SM_SIM_${Date.now()}`;
+  let messageSid = `SM_${Date.now()}`;
+  let providerUsed: 'clicksend' | 'twilio' | 'simulated' = 'simulated';
 
   try {
-    if (isConfigured && accountSid && authToken) {
-      let cachedClient: ReturnType<typeof twilio> | null = null;
-function getClient() {
-  if (!accountSid || !authToken) {
-    throw new Error('Twilio is not configured on this deployment.');
-  }
-  if (!cachedClient) cachedClient = twilio(accountSid, authToken);
-  return cachedClient;
-}
-      const response = await getClient().messages.create({
-        body: message,
-        from: twilioPhoneNumber,
-        to,
-      });
-      messageSid = response.sid;
-      console.log(`[Twilio SMS Sent] To: ${to} (SID: ${messageSid})`);
-    } else {
-      console.log(`[Twilio SMS Simulated] To: ${to} | Message: "${message}" (SID: ${messageSid})`);
+    // 1. Try ClickSend first (Preferred Australian Gateway)
+    if (clicksend.isConfigured && clicksend.username && clicksend.apiKey) {
+      try {
+        const authHeader = 'Basic ' + Buffer.from(`${clicksend.username}:${clicksend.apiKey}`).toString('base64');
+        const csRes = await fetch('https://rest.clicksend.com/v3/sms/send', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': authHeader,
+          },
+          body: JSON.stringify({
+            messages: [
+              {
+                source: 'portabox-system',
+                from: clicksend.senderId,
+                to: formattedTo,
+                body: message,
+                custom_string: contactId,
+              },
+            ],
+          }),
+        });
+        const csData: any = await csRes.json().catch(() => null);
+        if (csRes.ok && csData?.response_code === 'SUCCESS') {
+          messageSid = csData.data?.messages?.[0]?.message_id || `CS_${Date.now()}`;
+          providerUsed = 'clicksend';
+          console.log(`[ClickSend SMS Dispatched] To: ${formattedTo} (ID: ${messageSid})`);
+        } else {
+          console.warn('[ClickSend Gateway Warning]', csData?.response_msg || 'API returned warning');
+        }
+      } catch (csErr: any) {
+        console.warn('[ClickSend network dispatch skipped, trying fallback]', csErr.message);
+      }
     }
 
-    // Log outbound message to Firestore (non-blocking so Firestore connection never delays SMS return)
+    // 2. If ClickSend didn't handle it, try Twilio
+    if (providerUsed === 'simulated' && twilioCfg.isConfigured && twilioCfg.accountSid && twilioCfg.authToken) {
+      const client = twilio(twilioCfg.accountSid, twilioCfg.authToken);
+      const response = await client.messages.create({
+        body: message,
+        from: twilioCfg.twilioPhoneNumber,
+        to: formattedTo,
+      });
+      messageSid = response.sid;
+      providerUsed = 'twilio';
+      console.log(`[Twilio SMS Sent] To: ${formattedTo} (SID: ${messageSid})`);
+    }
+
+    // 3. Fallback to realistic simulation if no active live keys
+    if (providerUsed === 'simulated') {
+      messageSid = `SM_SIM_${Date.now()}`;
+      console.log(`[SMS Gateway Simulated] To: ${formattedTo} | Message: "${message}" (ID: ${messageSid})`);
+    }
+
+    // Log outbound message to Firestore (non-blocking)
     if (contactId && contactId !== 'unknown') {
       try {
         addDoc(collection(db, 'contacts', contactId, 'messages'), {
-          from: twilioPhoneNumber,
-          to,
+          from: providerUsed === 'clicksend' ? clicksend.senderId : twilioCfg.twilioPhoneNumber,
+          to: formattedTo,
           body: message,
           timestamp: new Date().toISOString(),
           contactId,
           direction: 'outbound',
           sid: messageSid,
-          isSimulated: !isConfigured,
+          provider: providerUsed,
+          isSimulated: providerUsed === 'simulated',
         }).catch((firestoreErr) => {
           console.warn('Firestore logging for outbound SMS deferred:', firestoreErr);
         });
-      } catch (err) {
+      } catch {
         // Ignore synchronous Firestore setup errors
       }
     }
@@ -64,8 +116,7 @@ function getClient() {
     return messageSid;
   } catch (error) {
     console.error('Error sending SMS:', error);
-    // If Twilio error occurred, fallback to simulated message rather than failing the user flow
-    console.warn(`Falling back to simulated SMS dispatch for ${to}`);
+    console.warn(`Falling back to simulated SMS dispatch for ${formattedTo}`);
     return `SM_FALLBACK_${Date.now()}`;
   }
 };

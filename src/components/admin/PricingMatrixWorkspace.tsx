@@ -11,6 +11,9 @@ import {
   Layers,
   FileSpreadsheet,
   Zap,
+  Check,
+  Clock,
+  ShieldCheck,
 } from 'lucide-react';
 import {
   AppConfig,
@@ -20,7 +23,7 @@ import {
   MetroHub,
 } from '../../types/quote';
 import { LiveQuoteSimulator } from './LiveQuoteSimulator';
-import { getLocationPricingForHub } from '../../services/pricingEngine';
+import { getLocationPricingForHub, saveAppConfig } from '../../services/pricingEngine';
 
 interface PricingMatrixWorkspaceProps {
   config: AppConfig;
@@ -39,6 +42,10 @@ export const PricingMatrixWorkspace: React.FC<PricingMatrixWorkspaceProps> = ({
   const [storageCategory, setStorageCategory] = useState<'facility' | 'onsite'>('facility');
   const [bulkAdjustmentAmount, setBulkAdjustmentAmount] = useState<number>(10);
   const [matrixFeedback, setMatrixFeedback] = useState<string | null>(null);
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'saved'>('idle');
+  const [lastSavedTime, setLastSavedTime] = useState<string>(() =>
+    new Date().toLocaleTimeString('en-AU', { hour: '2-digit', minute: '2-digit' })
+  );
 
   const HUBS: MetroHub[] = [
     'Adelaide',
@@ -47,7 +54,7 @@ export const PricingMatrixWorkspace: React.FC<PricingMatrixWorkspaceProps> = ({
     'Brisbane',
   ];
 
-  // Helper to update container storage prices
+  // Helper to update container storage prices with guaranteed immediate persistence
   const handleUpdatePrice = (
     hub: MetroHub,
     size: 'small_10m3' | 'medium_19m3' | 'large_25m3',
@@ -93,9 +100,22 @@ export const PricingMatrixWorkspace: React.FC<PricingMatrixWorkspaceProps> = ({
         : {}),
     };
 
+    // 1. Immediately persist to localStorage
+    saveAppConfig(newConfig);
+    // 2. Update React parent states
     onUpdateConfig(newConfig);
-    setMatrixFeedback(`Updated ${hub} ${storageCategory === 'onsite' ? 'Onsite' : 'Facility'} ${size} ${field} to $${numericVal}`);
-    setTimeout(() => setMatrixFeedback(null), 2500);
+    onSave();
+    // 3. Broadcast real-time update event
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('portabox:pricing-updated', { detail: newConfig }));
+    }
+    const nowTime = new Date().toLocaleTimeString('en-AU', { hour: '2-digit', minute: '2-digit' });
+    setLastSavedTime(nowTime);
+    setSaveStatus('saved');
+    setMatrixFeedback(`Saved: ${hub} ${storageCategory === 'onsite' ? 'Onsite' : 'Facility'} ${size} ${field} updated to $${numericVal} (Persisted)`);
+    setTimeout(() => {
+      setMatrixFeedback(null);
+    }, 3500);
   };
 
   // Helper to update Zone A-E fee parameters
@@ -129,9 +149,20 @@ export const PricingMatrixWorkspace: React.FC<PricingMatrixWorkspaceProps> = ({
         : {}),
     };
 
+    // 1. Immediately persist to localStorage
+    saveAppConfig(newConfig);
+    // 2. Update React parent states
     onUpdateConfig(newConfig);
-    setMatrixFeedback(`Updated Zone settings for ${hub}`);
-    setTimeout(() => setMatrixFeedback(null), 2500);
+    onSave();
+    // 3. Broadcast real-time update event
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('portabox:pricing-updated', { detail: newConfig }));
+    }
+    const nowTime = new Date().toLocaleTimeString('en-AU', { hour: '2-digit', minute: '2-digit' });
+    setLastSavedTime(nowTime);
+    setSaveStatus('saved');
+    setMatrixFeedback(`Saved: ${hub} delivery zones updated (Persisted)`);
+    setTimeout(() => setMatrixFeedback(null), 3000);
   };
 
   // Bulk Apply Adjustment (+/- $X across all sizes in selected hub)
@@ -163,9 +194,36 @@ export const PricingMatrixWorkspace: React.FC<PricingMatrixWorkspaceProps> = ({
       } as Record<MetroHub, LocationPricingConfig>,
     };
 
+    // 1. Immediately persist to localStorage
+    saveAppConfig(newConfig);
+    // 2. Update React parent states
     onUpdateConfig(newConfig);
-    setMatrixFeedback(`Applied ${delta >= 0 ? `+$${delta}` : `-$${Math.abs(delta)}`} across all ${selectedHub} container sizes.`);
+    onSave();
+    // 3. Broadcast real-time update event
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('portabox:pricing-updated', { detail: newConfig }));
+    }
+    const nowTime = new Date().toLocaleTimeString('en-AU', { hour: '2-digit', minute: '2-digit' });
+    setLastSavedTime(nowTime);
+    setSaveStatus('saved');
+    setMatrixFeedback(`Saved: Applied ${delta >= 0 ? `+$${delta}` : `-$${Math.abs(delta)}`} across all ${selectedHub} container sizes.`);
     setTimeout(() => setMatrixFeedback(null), 3000);
+  };
+
+  const handleManualSave = () => {
+    saveAppConfig(config);
+    onSave();
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('portabox:pricing-updated', { detail: config }));
+    }
+    const nowTime = new Date().toLocaleTimeString('en-AU', { hour: '2-digit', minute: '2-digit' });
+    setLastSavedTime(nowTime);
+    setSaveStatus('saved');
+    setMatrixFeedback('✓ All Tariff Matrix rates & zone parameters saved to persistent storage.');
+    setTimeout(() => {
+      setSaveStatus('idle');
+      setMatrixFeedback(null);
+    }, 4000);
   };
 
   const currentLoc = getLocationPricingForHub(config, selectedHub);
@@ -194,15 +252,36 @@ export const PricingMatrixWorkspace: React.FC<PricingMatrixWorkspaceProps> = ({
               </span>
             </div>
             <p className="text-xs text-slate-500">
-              Live container rental and transport leg rates by Metro Depot. Edits preview in real time on the right.
+              Live container rental and transport leg rates by Metro Depot. Edits auto-save immediately to storage and preview on the right.
             </p>
           </div>
 
-          {matrixFeedback && (
-            <span className="text-xs font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-3 py-1 rounded-xl animate-in fade-in">
-              {matrixFeedback}
-            </span>
-          )}
+          <div className="flex items-center gap-2 flex-wrap">
+            {matrixFeedback && (
+              <span className="text-xs font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-3 py-1.5 rounded-xl animate-in fade-in flex items-center gap-1.5 shadow-2xs">
+                <Check className="w-3.5 h-3.5 text-emerald-600" />
+                <span>{matrixFeedback}</span>
+              </span>
+            )}
+
+            <button
+              type="button"
+              onClick={handleManualSave}
+              className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-[#00c0f3] hover:bg-[#00a8d6] text-white font-black text-xs shadow-sm transition-all cursor-pointer hover:scale-[1.02] active:scale-95"
+            >
+              {saveStatus === 'saved' ? (
+                <>
+                  <CheckCircle className="w-4 h-4 text-white" />
+                  <span>Saved to App Storage!</span>
+                </>
+              ) : (
+                <>
+                  <Save className="w-4 h-4 text-white" />
+                  <span>Save Pricing Matrix</span>
+                </>
+              )}
+            </button>
+          </div>
         </div>
 
         {/* 1. Metro Depot Switcher & Container Rates Matrix */}
@@ -453,9 +532,15 @@ export const PricingMatrixWorkspace: React.FC<PricingMatrixWorkspaceProps> = ({
                   value={config.twoWeeksStorageRate ?? 199}
                   onChange={(e) => {
                     const val = Math.max(0, Number(e.target.value));
-                    onUpdateConfig({ ...config, twoWeeksStorageRate: val });
-                    setMatrixFeedback(`Updated 2-week standard storage rate to $${val}`);
-                    setTimeout(() => setMatrixFeedback(null), 2500);
+                    const updated = { ...config, twoWeeksStorageRate: val };
+                    saveAppConfig(updated);
+                    onUpdateConfig(updated);
+                    onSave();
+                    if (typeof window !== 'undefined') {
+                      window.dispatchEvent(new CustomEvent('portabox:pricing-updated', { detail: updated }));
+                    }
+                    setMatrixFeedback(`Saved: 2-week standard storage rate updated to $${val} (Persisted)`);
+                    setTimeout(() => setMatrixFeedback(null), 3000);
                   }}
                   className="w-20 px-2 py-1 rounded-lg bg-slate-50 border border-slate-200 text-xs font-black text-[#0b2942] focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#00c0f3]"
                 />
@@ -470,9 +555,15 @@ export const PricingMatrixWorkspace: React.FC<PricingMatrixWorkspaceProps> = ({
                 type="checkbox"
                 checked={Boolean(config.enableSelectWeeks)}
                 onChange={(e) => {
-                  onUpdateConfig({ ...config, enableSelectWeeks: e.target.checked });
-                  setMatrixFeedback(`Select Weeks duration option: ${e.target.checked ? 'Enabled' : 'Disabled (Off)'}`);
-                  setTimeout(() => setMatrixFeedback(null), 2500);
+                  const updated = { ...config, enableSelectWeeks: e.target.checked };
+                  saveAppConfig(updated);
+                  onUpdateConfig(updated);
+                  onSave();
+                  if (typeof window !== 'undefined') {
+                    window.dispatchEvent(new CustomEvent('portabox:pricing-updated', { detail: updated }));
+                  }
+                  setMatrixFeedback(`Saved: Select Weeks duration option ${e.target.checked ? 'Enabled' : 'Disabled'} (Persisted)`);
+                  setTimeout(() => setMatrixFeedback(null), 3000);
                 }}
                 className="w-4 h-4 rounded text-[#00c0f3] accent-[#00c0f3]"
               />

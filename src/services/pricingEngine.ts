@@ -770,7 +770,7 @@ export function getInterstateRatesForRoute(
 
 export const DEFAULT_CONFIG: AppConfig = {
   phone: '1800 467 637',
-  enablePromoBanner: true,
+  enablePromoBanner: false, // 10. Top Announcement Banner (Staff Only / CEO Selected) - Feature flag (Off by default)
   lockTopBannerOnScroll: true,
   promoBannerSlogan: 'UP TO 50% MORE SPACE · GUARANTEED LOWER COST · PRICE MATCH GUARANTEE',
   quoteValidityDays: 30,
@@ -982,7 +982,16 @@ export const DEFAULT_CONFIG: AppConfig = {
     { postcode: '7151', suburb: 'Southport TAS', reason: 'Tasmania service pending depot launch.' },
   ],
   depotCalendars: DEFAULT_DEPOT_CALENDARS,
-  enableCallCenterDispatch: true,
+  // 9 Staged Features (Off by default, CEO controlled)
+  enableSoftphone: false,
+  enableCustomerPortal: false,
+  enableHeaderCallButton: false, // Call button on top panel inactive - only show number
+  enablePhoneCallIntake: false,
+  enableCustomersLedger: false,
+  enableSmartsheetYardDispatch: false,
+  enableCallCenterDispatch: false,
+  enableDropOffFunnelAnalytics: false,
+  enableFieldAssetsLogistics: false,
   enableContainerInventory: true,
   enableSelectWeeks: false, // Feature flag: off by default; admin can activate in Admin Portal
   twoWeeksStorageRate: 199, // Standard rate for 2 weeks storage across Small, Med, Large
@@ -1501,7 +1510,17 @@ export function loadAppConfig(): AppConfig {
         : [...DEFAULT_DISCOUNT_MATRIX_RULES],
       blockedPostcodes: parsed.blockedPostcodes || DEFAULT_CONFIG.blockedPostcodes,
       depotCalendars: parsed.depotCalendars || DEFAULT_DEPOT_CALENDARS,
-      enableCallCenterDispatch: parsed.enableCallCenterDispatch !== undefined ? Boolean(parsed.enableCallCenterDispatch) : DEFAULT_CONFIG.enableCallCenterDispatch,
+      // 9 Staged Features (Off by default, CEO controlled)
+      enableSoftphone: Boolean(parsed.enableSoftphone),
+      enableCustomerPortal: Boolean(parsed.enableCustomerPortal),
+      enableHeaderCallButton: Boolean(parsed.enableHeaderCallButton),
+      enablePhoneCallIntake: Boolean(parsed.enablePhoneCallIntake),
+      enableCustomersLedger: Boolean(parsed.enableCustomersLedger),
+      enableSmartsheetYardDispatch: Boolean(parsed.enableSmartsheetYardDispatch),
+      enableCallCenterDispatch: Boolean(parsed.enableCallCenterDispatch),
+      enableDropOffFunnelAnalytics: Boolean(parsed.enableDropOffFunnelAnalytics),
+      enableFieldAssetsLogistics: Boolean(parsed.enableFieldAssetsLogistics),
+      enablePromoBanner: Boolean(parsed.enablePromoBanner), // 10. Top Announcement Banner (Staff Only / CEO Selected)
       enableContainerInventory: parsed.enableContainerInventory !== undefined ? Boolean(parsed.enableContainerInventory) : DEFAULT_CONFIG.enableContainerInventory,
       enableSelectWeeks: false,
       twoWeeksStorageRate: parsed.twoWeeksStorageRate !== undefined ? Number(parsed.twoWeeksStorageRate) : 199,

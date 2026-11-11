@@ -41,6 +41,8 @@ interface AdminWorkspaceTabsProps {
   viewMode?: 'crm' | 'smartsheet';
   onToggleViewMode?: (mode: 'crm' | 'smartsheet') => void;
   onOpenPhoneIntake?: () => void;
+  enablePhoneCallIntake?: boolean;
+  enableSmartsheetYardDispatch?: boolean;
   onLockSession?: () => void;
   onOpenFinancialExport?: () => void;
   onNavigateToQuote?: (quoteId: string) => void;
@@ -61,6 +63,8 @@ export const AdminWorkspaceTabs: React.FC<AdminWorkspaceTabsProps> = ({
   viewMode = 'crm',
   onToggleViewMode,
   onOpenPhoneIntake,
+  enablePhoneCallIntake = false,
+  enableSmartsheetYardDispatch = false,
   onLockSession,
   onOpenFinancialExport,
   onNavigateToQuote,
@@ -84,8 +88,8 @@ export const AdminWorkspaceTabs: React.FC<AdminWorkspaceTabsProps> = ({
           />
         </div>
 
-        {/* View Mode Switcher: Lead Management vs Classic Smartsheet Grid */}
-        {onToggleViewMode && (
+        {/* View Mode Switcher: Lead Management vs Classic Smartsheet Grid (Behind feature flag, off by default) */}
+        {onToggleViewMode && enableSmartsheetYardDispatch && (
           <div className="flex items-center bg-slate-900/90 rounded-xl p-0.5 border border-slate-700/80 shadow-xs">
             <button
               type="button"
@@ -118,7 +122,7 @@ export const AdminWorkspaceTabs: React.FC<AdminWorkspaceTabsProps> = ({
 
         {/* Global Action buttons */}
         <div className="flex items-center gap-2">
-          {onOpenPhoneIntake && (
+          {onOpenPhoneIntake && enablePhoneCallIntake && (
             <button
               type="button"
               onClick={onOpenPhoneIntake}

@@ -411,30 +411,34 @@ fix(
 );
 
 /* -- 12. smsService.ts ----------------------------------------------------
-   The third instance of the same pattern: a client built at module scope
-   from environment variables that may not be set. twilio(undefined,
-   undefined) is evaluated the moment anything imports this file, and
-   server.ts imports it through apiRoutes — so on a deployment without
-   Twilio credentials the entire API function can fail at import rather than
-   the one route that needs SMS.
+   This used to be a patch. The file built a Twilio client at module scope
+   from environment variables that may not be set, so twilio(undefined,
+   undefined) was evaluated the moment anything imported it — and server.ts
+   imports it through apiRoutes, so on a deployment without Twilio
+   credentials the whole API function failed at import rather than the one
+   route that needed SMS.
 
-   Built on first use instead. Nothing else changes: sendSms still throws
-   when it is called unconfigured, which is the honest place for it. */
+   The ClickSend drop rewrote this file and upstream now does it correctly
+   themselves: getTwilioConfig() reads the environment when called, and the
+   client is constructed inside sendSms behind an isConfigured guard. There
+   is nothing left to patch.
+
+   Kept as a check rather than deleted, because the property still matters
+   and nothing else in the repo asserts it. If a later drop moves the
+   construction back to module scope, this fails here and names the file,
+   instead of the deployment failing at import with nothing to point at. */
 fix(
-  'sms service: build the Twilio client on first use, not at import',
+  'sms service: Twilio client is built on call, not at import',
   'src/services/smsService.ts',
-  (s) => s.includes('function getClient()'),
-  (s) => s.replace(
-    /const client = twilio\(accountSid, authToken\);/,
-    `let cachedClient: ReturnType<typeof twilio> | null = null;\n` +
-    `function getClient() {\n` +
-    `  if (!accountSid || !authToken) {\n` +
-    `    throw new Error('Twilio is not configured on this deployment.');\n` +
-    `  }\n` +
-    `  if (!cachedClient) cachedClient = twilio(accountSid, authToken);\n` +
-    `  return cachedClient;\n` +
-    `}`
-  ).replace(/\bclient\.messages\b/g, 'getClient().messages')
+  (s) => !/^(?:const|let|var)\s+\w+\s*=\s*twilio\(/m.test(s)
+      && /^\s+const client = twilio\(/m.test(s),
+  () => {
+    throw new Error(
+      'upstream no longer builds the Twilio client lazily inside sendSms — ' +
+      'either it is back at module scope (make it lazy again, as it was ' +
+      'before the ClickSend drop) or the call moved and this check needs ' +
+      're-anchoring');
+  }
 );
 
 /* -- 13. the dispatch console -------------------------------------------
@@ -466,6 +470,115 @@ fix(
     if (!close.test(out)) throw new Error('could not find the end of the dispatch branch');
     out = out.replace(close, (m, end, ind, tail) => `${end}${ind}</AdminGate>\n${ind}${tail}`);
     return out;
+  }
+);
+
+/* -- 14. the driver portal ----------------------------------------------
+   The third staff surface, and the last one that was still open.
+
+   This drop is an improvement on what came before: the header's driver
+   button now calls handleOpenStaffLogin('driver') when there is no staff
+   session, so the portal is no longer reachable in one click from a cold
+   browser. But the login it opens is decided in the browser. Six staff
+   records in src/services/adminAuthService.ts carry the password
+   'Portabox2026!' in the shipped bundle, and verifyStaffMfaCode returns
+   true for '123456', '849201' and '000000' regardless of who is signing
+   in. Inside the portal the driver PIN check also accepts '0000', and the
+   failure message prints the fallback on screen: "Try quick 1-click driver
+   login below or PIN 1234."
+
+   So the staff session is a UI state, not a credential — anyone who reads
+   the public JavaScript can mint one. The portal holds the day's job list
+   with customer names and delivery addresses, so it goes behind the same
+   server-checked gate as the admin portal and the dispatch console. The
+   gate's own copy has said "admin, dispatch and driver tools" since it was
+   written; this is the part that makes that true.
+
+   Rendered as an overlay rather than inline, because unlike the other two
+   this is a modal that sits beside the quote flow rather than replacing
+   it: gating it in place would push the sign-in form into the page above
+   the quote. The wrapper mirrors the modal's own backdrop so a locked
+   portal looks like the portal, not like a broken page. */
+fix(
+  'App: put the driver portal behind the same gate',
+  'src/App.tsx',
+  (s) => /<AdminGate[\s\S]{0,200}?<DriverPortalModal/.test(s),
+  (s) => {
+    /* Match the whole element, self-closing, however many props upstream
+       gives it — they change between drops and all of them carry through
+       untouched. */
+    const el = /^([ \t]*)<DriverPortalModal\b[\s\S]*?\/>\r?\n/m;
+    const m = s.match(el);
+    if (!m) throw new Error('the DriverPortalModal element moved');
+
+    const ind = m[1];
+    /* Two levels deeper inside the wrapper. isOpen becomes implied, since
+       the condition it read now guards the whole block. */
+    const inner = m[0]
+      .replace(/\r?\n$/, '')
+      .replace(/isOpen=\{isDriverPortalOpen\}/, 'isOpen')
+      .split(/\r?\n/)
+      .map((l) => '      ' + l)
+      .join('\n');
+
+    return s.replace(
+      el,
+      `${ind}{/* driver portal gated */}\n` +
+      `${ind}{isDriverPortalOpen && (\n` +
+      `${ind}  <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/75 backdrop-blur-xs flex items-start justify-center">\n` +
+      `${ind}    <AdminGate onCancel={() => setIsDriverPortalOpen(false)}>\n` +
+      inner + '\n' +
+      `${ind}    </AdminGate>\n` +
+      `${ind}  </div>\n` +
+      `${ind})}\n`
+    );
+  }
+);
+
+/* -- 15. the softphone bar ----------------------------------------------
+   The fourth staff surface, and the one that can spend money.
+
+   This drop put the bar behind a feature flag and a permission check:
+   config.enableSoftphone && staffSession && hasStaffPermission(user,
+   'softphone_telephony'). The flag ships off, so nothing renders on the
+   live deployment today. But staffSession is browser state — see fix 14 —
+   so the day the CEO screen turns the flag on, anyone who read the bundle
+   can mint a session and get a live dialler on the business's Twilio
+   account. Outbound calls are billed to the client.
+
+   Not AdminGate: the bar is pinned beside the quote flow rather than
+   replacing it, so a sign-in form here would be a password box floating
+   over a customer's screen. StaffOnly renders nothing at all until the
+   server has confirmed the password, which is the right behaviour for a
+   permanent fixture.
+
+   The flag and the permission check are upstream's and both stay — this
+   only adds the question neither of them asks. */
+fix(
+  'App: the softphone bar needs the server-checked password too',
+  'src/App.tsx',
+  (s) => /<StaffOnly>[\s\S]{0,400}?<TwilioSoftphoneBar/.test(s),
+  (s) => {
+    const el = /^([ \t]*)<TwilioSoftphoneBar\b[\s\S]*?\/>\r?\n/m;
+    const m = s.match(el);
+    if (!m) throw new Error('the TwilioSoftphoneBar element moved');
+
+    const ind = m[1];
+    const inner = m[0]
+      .replace(/\r?\n$/, '')
+      .split(/\r?\n/)
+      .map((l) => '  ' + l)
+      .join('\n');
+
+    let out = s.replace(
+      el,
+      `${ind}<StaffOnly>\n` + inner + '\n' + `${ind}</StaffOnly>\n`
+    );
+
+    /* Next to the AdminGate import, which fix 11 has already put in. */
+    const anchor = /^(import \{ AdminGate \} from '\.\/components\/AdminGate';)$/m;
+    if (!anchor.test(out)) throw new Error('the AdminGate import is not there to anchor to');
+    return out.replace(anchor, `$1\nimport { StaffOnly } from './components/StaffOnly';`);
   }
 );
 

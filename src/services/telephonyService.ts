@@ -1,4 +1,5 @@
 import { CustomerAccount, ContainerOrder, CustomerTransaction, loadCustomerAccounts, saveCustomerAccounts } from './customerPortalService';
+import { sendClickSendSms } from './clicksendService';
 
 export interface DamageReport {
   id: string;
@@ -976,13 +977,26 @@ export async function sendSmsMessage(params: {
 
   await saveSmsConversations(convs);
 
+  // Dispatch live through ClickSend gateway in background
+  sendClickSendSms({
+    to: cleanedPhone,
+    message: params.text,
+    contactId: conv.customerId,
+  }).then((res) => {
+    if (res.success && res.messageId) {
+      newMsg.id = res.messageId;
+    }
+  }).catch((err) => {
+    console.warn('[Background ClickSend send skipped]', err);
+  });
+
   // If in an active call, add to log
   const active = getActiveCall();
   if (active && active.callerPhone.replace(/\s+/g, '') === cleanedPhone.replace(/\s+/g, '')) {
     active.actionLog.push({
       timestamp: new Date().toLocaleTimeString('en-AU'),
       action: 'SMS Sent',
-      details: `Sent SMS to customer: "${params.text.slice(0, 60)}${params.text.length > 60 ? '...' : ''}"`,
+      details: `Sent SMS via ClickSend to customer: "${params.text.slice(0, 60)}${params.text.length > 60 ? '...' : ''}"`,
     });
     setActiveCall(active);
   }

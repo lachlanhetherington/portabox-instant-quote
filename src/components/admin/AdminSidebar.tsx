@@ -28,6 +28,8 @@ import {
   X,
   User,
   Shield,
+  Smartphone,
+  Activity,
 } from 'lucide-react';
 import { AppConfig } from '../../types/quote';
 import { StaffSession, StaffMember, StaffPermissionKey } from '../../types/adminAuth';
@@ -41,6 +43,7 @@ import {
 export type AdminTabId =
   | 'admin_copilot'
   | 'staff_permissions'
+  | 'staff_mfa_audit'
   | 'pricing_matrix'
   | 'pricing'
   | 'competitor_pricing'
@@ -133,13 +136,25 @@ export const AdminSidebar: React.FC<AdminSidebarProps> = ({
       permissionKey: 'daily_operations',
       items: [
         {
-          id: 'customers',
-          label: 'Customers & Ledger',
-          shortLabel: 'Customers',
-          icon: UserCheck,
-          badge: counts.customers,
-          permissionKey: 'customer_crm',
+          id: 'pricing_matrix',
+          label: 'Tariff Matrix & Simulator',
+          shortLabel: 'Simulator',
+          icon: Calculator,
+          highlight: true,
+          permissionKey: 'daily_operations',
         },
+        ...(config.enableCustomersLedger
+          ? [
+              {
+                id: 'customers' as AdminTabId,
+                label: 'Customers & Ledger',
+                shortLabel: 'Customers',
+                icon: UserCheck,
+                badge: counts.customers,
+                permissionKey: 'customer_crm' as StaffPermissionKey,
+              },
+            ]
+          : []),
         {
           id: 'leads',
           label: 'Quote Inquiries & Leads',
@@ -149,31 +164,41 @@ export const AdminSidebar: React.FC<AdminSidebarProps> = ({
           badgeColor: 'bg-[#FF9900] text-[#0b2942]',
           permissionKey: 'customer_crm',
         },
-        {
-          id: 'smartsheet',
-          label: 'Smartsheet Yard Dispatch',
-          shortLabel: 'Yard',
-          icon: Layers,
-          badge: counts.smartsheet,
-          permissionKey: 'yard_inventory',
-        },
-        {
-          id: 'call_center_routing',
-          label: 'Call Center Fleet Calendar',
-          shortLabel: 'Fleet',
-          icon: Calendar,
-          badge: config.enableCallCenterDispatch === false ? 'Off' : undefined,
-          badgeColor: 'bg-rose-100 text-rose-700',
-          permissionKey: 'dispatch_calendar',
-        },
-        {
-          id: 'dropoffs',
-          label: 'Drop-Off Funnel Analytics',
-          shortLabel: 'Dropoffs',
-          icon: TrendingDown,
-          badge: counts.dropoffs,
-          permissionKey: 'customer_crm',
-        },
+        ...(config.enableSmartsheetYardDispatch
+          ? [
+              {
+                id: 'smartsheet' as AdminTabId,
+                label: 'Smartsheet Yard Dispatch',
+                shortLabel: 'Yard',
+                icon: Layers,
+                badge: counts.smartsheet,
+                permissionKey: 'yard_inventory' as StaffPermissionKey,
+              },
+            ]
+          : []),
+        ...(config.enableCallCenterDispatch
+          ? [
+              {
+                id: 'call_center_routing' as AdminTabId,
+                label: 'Call Center Fleet Calendar',
+                shortLabel: 'Fleet',
+                icon: Calendar,
+                permissionKey: 'dispatch_calendar' as StaffPermissionKey,
+              },
+            ]
+          : []),
+        ...(config.enableDropOffFunnelAnalytics
+          ? [
+              {
+                id: 'dropoffs' as AdminTabId,
+                label: 'Drop-Off Funnel Analytics',
+                shortLabel: 'Dropoffs',
+                icon: TrendingDown,
+                badge: counts.dropoffs,
+                permissionKey: 'customer_crm' as StaffPermissionKey,
+              },
+            ]
+          : []),
       ],
     },
     {
@@ -188,6 +213,16 @@ export const AdminSidebar: React.FC<AdminSidebarProps> = ({
           highlight: true,
           badge: 'CEO / Ops',
           badgeColor: 'bg-[#F7D347] text-[#1A1A1A]',
+          permissionKey: 'manage_permissions',
+        },
+        {
+          id: 'staff_mfa_audit',
+          label: 'Staff MFA Verification Audit',
+          shortLabel: 'MFA Audit',
+          icon: Smartphone,
+          highlight: true,
+          badge: 'CEO Only',
+          badgeColor: 'bg-rose-500 text-white font-extrabold',
           permissionKey: 'manage_permissions',
         },
       ],
@@ -213,20 +248,11 @@ export const AdminSidebar: React.FC<AdminSidebarProps> = ({
       permissionKey: 'pricing_and_rates',
       items: [
         {
-          id: 'pricing_matrix',
-          label: 'Tariff Matrix & Simulator',
-          shortLabel: 'Matrix',
-          icon: Calculator,
-          highlight: true,
-          permissionKey: 'pricing_and_rates',
-        },
-        {
           id: 'competitor_pricing',
           label: 'Competitor Rates & Benchmarks',
           shortLabel: 'Competitors',
           icon: TrendingDown,
           highlight: true,
-          permissionKey: 'pricing_and_rates',
         },
         {
           id: 'duration_discounts',
@@ -276,59 +302,67 @@ export const AdminSidebar: React.FC<AdminSidebarProps> = ({
         },
       ],
     },
-    {
-      title: 'FIELD ASSETS & LOGISTICS',
-      permissionKey: 'field_logistics',
-      items: [
-        ...(config.enableContainerInventory !== false
-          ? [
+    ...(config.enableFieldAssetsLogistics
+      ? [
+          {
+            title: 'FIELD ASSETS & LOGISTICS',
+            permissionKey: 'field_logistics' as StaffPermissionKey,
+            items: [
+              ...(config.enableContainerInventory !== false
+                ? [
+                    {
+                      id: 'inventory' as AdminTabId,
+                      label: 'Container Assets & QR',
+                      shortLabel: 'Containers',
+                      icon: QrCode,
+                      badge: counts.inventory,
+                      permissionKey: 'yard_inventory' as StaffPermissionKey,
+                    },
+                  ]
+                : []),
               {
-                id: 'inventory' as AdminTabId,
-                label: 'Container Assets & QR',
-                shortLabel: 'Containers',
-                icon: QrCode,
-                badge: counts.inventory,
-                permissionKey: 'yard_inventory' as StaffPermissionKey,
+                id: 'postcode_tiers' as AdminTabId,
+                label: 'Postcode Coverage Areas',
+                shortLabel: 'Coverage',
+                icon: Compass,
+                highlight: true,
+                permissionKey: 'field_logistics' as StaffPermissionKey,
               },
-            ]
-          : []),
-        {
-          id: 'postcode_tiers',
-          label: 'Postcode Coverage Areas',
-          shortLabel: 'Coverage',
-          icon: Compass,
-          highlight: true,
-          permissionKey: 'field_logistics',
-        },
-        {
-          id: 'depots',
-          label: 'Depot Metro Hubs',
-          shortLabel: 'Depots',
-          icon: MapPin,
-          permissionKey: 'field_logistics',
-        },
-        {
-          id: 'blocked',
-          label: 'Blocked Postcodes',
-          shortLabel: 'Blocked',
-          icon: ShieldBan,
-          badge: counts.blocked,
-          permissionKey: 'field_logistics',
-        },
-      ],
-    },
+              {
+                id: 'depots' as AdminTabId,
+                label: 'Depot Metro Hubs',
+                shortLabel: 'Depots',
+                icon: MapPin,
+                permissionKey: 'field_logistics' as StaffPermissionKey,
+              },
+              {
+                id: 'blocked' as AdminTabId,
+                label: 'Blocked Postcodes',
+                shortLabel: 'Blocked',
+                icon: ShieldBan,
+                badge: counts.blocked,
+                permissionKey: 'field_logistics' as StaffPermissionKey,
+              },
+            ],
+          },
+        ]
+      : []),
     {
       title: 'COMMUNICATIONS & CONFIG',
       permissionKey: 'communications_config',
       items: [
-        {
-          id: 'telephony',
-          label: 'Twilio Telephony & Screen-Pop',
-          shortLabel: 'Telephony',
-          icon: PhoneCall,
-          highlight: true,
-          permissionKey: 'softphone_telephony',
-        },
+        ...(config.enableSoftphone
+          ? [
+              {
+                id: 'telephony' as AdminTabId,
+                label: 'Twilio Telephony & Screen-Pop',
+                shortLabel: 'Telephony',
+                icon: PhoneCall,
+                highlight: true,
+                permissionKey: 'softphone_telephony' as StaffPermissionKey,
+              },
+            ]
+          : []),
         {
           id: 'business_hours',
           label: 'Business Hours & SMS',
@@ -456,8 +490,8 @@ export const AdminSidebar: React.FC<AdminSidebarProps> = ({
         )}
       </div>
 
-      {/* Quick Action: Phone Intake */}
-      {onOpenPhoneIntake && (
+      {/* Quick Action: Phone Intake (Behind feature flag, off by default) */}
+      {onOpenPhoneIntake && config.enablePhoneCallIntake && (
         <div className="p-2 border-b border-slate-800/80 bg-slate-900/30">
           {!isCollapsed ? (
             <button

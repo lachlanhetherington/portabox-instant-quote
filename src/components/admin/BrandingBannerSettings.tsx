@@ -139,7 +139,7 @@ export const BrandingBannerSettings: React.FC<BrandingBannerSettingsProps> = ({
                 Top Header Promo Banner &amp; Slogan
               </h3>
               <p className="text-xs text-slate-500 mt-0.5">
-                Customize the high-visibility top gold banner displayed above the navbar across all quote steps.
+                Customize the high-visibility top gold banner displayed above the navbar.
               </p>
             </div>
           </div>
@@ -186,6 +186,26 @@ export const BrandingBannerSettings: React.FC<BrandingBannerSettingsProps> = ({
             <Save className="w-3.5 h-3.5" />
             <span>Save &amp; Publish</span>
           </button>
+        </div>
+      </div>
+
+      {/* CEO Governance & Visibility Policy Notice */}
+      <div className="p-4 rounded-2xl bg-amber-50/80 border border-amber-200 text-[#0b2942] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div className="flex items-start gap-3">
+          <div className="p-2 rounded-xl bg-amber-200/60 text-amber-900 shrink-0">
+            <ShieldCheck className="w-4 h-4" />
+          </div>
+          <div>
+            <h4 className="text-xs font-black text-[#0b2942] uppercase tracking-wider flex items-center gap-1.5">
+              <span>Restricted CEO-Selected Staff Feature</span>
+              <span className="bg-amber-200 text-amber-900 text-[10px] px-2 py-0.5 rounded-full font-bold">
+                Feature Flag #10
+              </span>
+            </h4>
+            <p className="text-xs text-slate-600 mt-0.5 leading-relaxed">
+              This top announcement banner is governed by <strong>Feature Flag #10</strong>. When active, it is strictly visible to admin staff members selected by the CEO. Public customers and non-selected staff never see it.
+            </p>
+          </div>
         </div>
       </div>
 

@@ -259,7 +259,16 @@ export interface AppConfig {
   braintreeTokenizationKey?: string;
   braintreeEnvironment?: 'sandbox' | 'production';
   googlePayEnabled?: boolean;
-  enableCallCenterDispatch?: boolean;
+  // 9 Staged Feature Flags (CEO Governed, Off by Default)
+  enableSoftphone?: boolean; // 1. Soft phone (Twilio call center softphone dialer)
+  enableCustomerPortal?: boolean; // 2. Customer portal (Public customer self-service login)
+  enableHeaderCallButton?: boolean; // 3. Call button on top panel (When false: inactive, only show number)
+  enablePhoneCallIntake?: boolean; // 4. Phone call intake (Live customer quote/booking drawer)
+  enableCustomersLedger?: boolean; // 5. Customers and ledger (Customer accounts & financial ledger)
+  enableSmartsheetYardDispatch?: boolean; // 6. Smartsheet yard dispatch (Smartsheet logistics grid & two-way sync)
+  enableCallCenterDispatch?: boolean; // 7. Call center fleet calendar (Google Calendar & fleet dispatch)
+  enableDropOffFunnelAnalytics?: boolean; // 8. Drop off funnel analytics (Drop-off funnel & lead conversion tracking)
+  enableFieldAssetsLogistics?: boolean; // 9. Field assets and logistics (Container assets, depot hubs, postcode tiers, blocked postcodes)
   enableContainerInventory?: boolean;
   enableSelectWeeks?: boolean;
   twoWeeksStorageRate?: number; // Standard rate for 2 weeks storage option across Small, Medium, Large (default: 199)
@@ -269,7 +278,7 @@ export interface AppConfig {
   phone: string;
   logoUrl?: string;
   promoBannerSlogan?: string;
-  enablePromoBanner?: boolean;
+  enablePromoBanner?: boolean; // 10. Top Announcement Banner (Staff Only / CEO Selected) - Feature flag (Off by default)
   lockTopBannerOnScroll?: boolean; // When enabled (default: true), keeps top announcement banner & header locked on scrolling
   enableDrivewayFitGuarantee?: boolean; // Feature flag: 100% Driveway Fit Guarantee & assessment process
   enableGoogleCalendarLink?: boolean; // Feature flag: Google Calendar availability & slot integrations in customer flow (default off)

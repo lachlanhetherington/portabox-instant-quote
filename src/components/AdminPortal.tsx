@@ -59,6 +59,7 @@ import {
   KeyRound,
   Smartphone,
   Key,
+  PhoneCall,
 } from 'lucide-react';
 import {
   authenticateWithPasskey,
@@ -72,7 +73,7 @@ import {
 } from '../services/authSecurityService';
 import { AppConfig, BlockedPostcode, ContainerPriceConfig, CustomerLead, DeliveryZoneSettings, LocationPricingConfig, MetroHub, PromotionRule, PromoLocationScope, PromoServiceScope, PromoContainerSizeScope, QuoteDropOffRecord, FuelSurchargeModel, FuelSurchargeZoneRates } from '../types/quote';
 import { PORTABOX_DEPOTS } from '../data/australianPostcodes';
-import { DEFAULT_DELIVERY_ZONES, DEFAULT_LOCATION_PRICING, DEFAULT_FUEL_SURCHARGE_ZONE_RATES, getLocationPricingForHub, loadDropOffRecords } from '../services/pricingEngine';
+import { DEFAULT_DELIVERY_ZONES, DEFAULT_LOCATION_PRICING, DEFAULT_FUEL_SURCHARGE_ZONE_RATES, getLocationPricingForHub, loadDropOffRecords, saveAppConfig } from '../services/pricingEngine';
 import {
   ZeptoEftInstruction,
   loadZeptoEftRecords,
@@ -148,11 +149,13 @@ import { AdminCopilotChat } from './admin/AdminCopilotChat';
 import { FinancialDataExportModal } from './admin/FinancialDataExportModal';
 import { CompetitorPricingWorkspace } from './admin/CompetitorPricingWorkspace';
 import { StaffPermissionsWorkspace } from './admin/StaffPermissionsWorkspace';
+import { StaffMfaAuditLogWorkspace } from './admin/StaffMfaAuditLogWorkspace';
 import {
   getStaffSession,
   setStaffSession,
   hasStaffPermission,
   loadStaffMembers,
+  setStaffBannerPermission,
   INITIAL_STAFF_MEMBERS,
 } from '../services/adminAuthService';
 import { StaffSession, StaffPermissionKey } from '../types/adminAuth';
@@ -198,6 +201,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
 
   const getRequiredPermissionForTab = (tab: AdminTabId): StaffPermissionKey | null => {
     switch (tab) {
+      case 'pricing_matrix':
       case 'customers':
       case 'leads':
       case 'smartsheet':
@@ -214,7 +218,6 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
       case 'branding':
       case 'features':
         return 'communications_config';
-      case 'pricing_matrix':
       case 'pricing':
       case 'competitor_pricing':
       case 'duration_discounts':
@@ -225,6 +228,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
       case 'promotions':
         return 'pricing_and_rates';
       case 'staff_permissions':
+      case 'staff_mfa_audit':
         return 'manage_permissions';
       case 'admin_copilot':
         return 'ai_copilot';
@@ -235,6 +239,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
 
   const getTabDisplayName = (tab: AdminTabId): string => {
     switch (tab) {
+      case 'pricing_matrix': return 'Tariff Matrix & Simulator (Daily Operations)';
       case 'customers': return 'Customers & Accounts (Daily Operations)';
       case 'leads': return 'Quote Leads & CRM (Daily Operations)';
       case 'smartsheet': return 'Yard Dispatch & Smartsheet (Daily Operations)';
@@ -248,8 +253,8 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
       case 'business_hours': return 'Business Hours & SMS (Communications & Config)';
       case 'branding': return 'Branding & Slogan (Communications & Config)';
       case 'features': return 'Feature Toggles (Communications & Config)';
-      case 'pricing_matrix': return 'Tariff Matrix & Simulator';
       case 'staff_permissions': return 'Staff Roles & 2FA Governance';
+      case 'staff_mfa_audit': return 'Staff MFA Verification Audit (CEO Security Oversight)';
       case 'admin_copilot': return 'Admin AI Copilot';
       default: return tab;
     }
@@ -338,9 +343,9 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
   const [isFinancialExportOpen, setIsFinancialExportOpen] = useState(false);
   const [workspaceTabs, setWorkspaceTabs] = useState<WorkspaceTab[]>([
     { id: 'tab-pricing', tabKey: 'pricing_matrix', title: 'Tariff Matrix & Simulator', isClosable: false },
-    { id: 'tab-customers', tabKey: 'customers', title: 'Customers & Ledger' },
+    ...(config.enableCustomersLedger ? [{ id: 'tab-customers', tabKey: 'customers' as AdminTabId, title: 'Customers & Ledger' }] : []),
     { id: 'tab-leads', tabKey: 'leads', title: 'Quote Leads' },
-    { id: 'tab-smartsheet', tabKey: 'smartsheet', title: 'Yard Dispatch' },
+    ...(config.enableSmartsheetYardDispatch ? [{ id: 'tab-smartsheet', tabKey: 'smartsheet' as AdminTabId, title: 'Yard Dispatch' }] : []),
   ]);
   const [activeWorkspaceTabId, setActiveWorkspaceTabId] = useState('tab-pricing');
   const [drawerState, setDrawerState] = useState<DrawerState>({
@@ -567,12 +572,20 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
       ...(currentConfig.locationPricing || DEFAULT_LOCATION_PRICING),
       [hub]: updatedLoc,
     };
-    setCurrentConfig({
+    const nextConfig: AppConfig = {
       ...currentConfig,
       locationPricing: nextLocationPricing,
       // Also keep top-level baseline synced if Adelaide or fallback
       containerPrices: hub === 'Adelaide' ? updatedLoc.containerPrices : currentConfig.containerPrices,
-    });
+    };
+    setCurrentConfig(nextConfig);
+    saveAppConfig(nextConfig);
+    onSaveConfig(nextConfig);
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('portabox:pricing-updated', { detail: nextConfig }));
+    }
+    setSaveSuccess(true);
+    setTimeout(() => setSaveSuccess(false), 2500);
   };
 
   const handleApplyContainerPricesToAllLocations = (sourceHub: MetroHub) => {
@@ -589,11 +602,17 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
         },
       };
     });
-    setCurrentConfig({
+    const nextConfig: AppConfig = {
       ...currentConfig,
       containerPrices: { ...sourceLoc.containerPrices },
       locationPricing: nextLocationPricing,
-    });
+    };
+    setCurrentConfig(nextConfig);
+    saveAppConfig(nextConfig);
+    onSaveConfig(nextConfig);
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('portabox:pricing-updated', { detail: nextConfig }));
+    }
     setSaveSuccess(true);
     setTimeout(() => setSaveSuccess(false), 2500);
   };
@@ -615,7 +634,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
       ...(currentConfig.locationPricing || DEFAULT_LOCATION_PRICING),
       [hub]: updatedLoc,
     };
-    setCurrentConfig({
+    const nextConfig: AppConfig = {
       ...currentConfig,
       locationPricing: nextLocationPricing,
       deliveryZones: hub === 'Adelaide' ? updatedZones : currentConfig.deliveryZones,
@@ -623,7 +642,15 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
         hub === 'Adelaide' && updates.zoneABaseFee !== undefined
           ? updates.zoneABaseFee
           : currentConfig.domesticLegFee,
-    });
+    };
+    setCurrentConfig(nextConfig);
+    saveAppConfig(nextConfig);
+    onSaveConfig(nextConfig);
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('portabox:pricing-updated', { detail: nextConfig }));
+    }
+    setSaveSuccess(true);
+    setTimeout(() => setSaveSuccess(false), 2500);
   };
 
   const handleApplyDeliveryZonesToAllLocations = (sourceHub: MetroHub) => {
@@ -636,12 +663,18 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
         deliveryZones: { ...sourceLoc.deliveryZones },
       };
     });
-    setCurrentConfig({
+    const nextConfig: AppConfig = {
       ...currentConfig,
       deliveryZones: { ...sourceLoc.deliveryZones },
       domesticLegFee: sourceLoc.deliveryZones.zoneABaseFee,
       locationPricing: nextLocationPricing,
-    });
+    };
+    setCurrentConfig(nextConfig);
+    saveAppConfig(nextConfig);
+    onSaveConfig(nextConfig);
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('portabox:pricing-updated', { detail: nextConfig }));
+    }
     setSaveSuccess(true);
     setTimeout(() => setSaveSuccess(false), 2500);
   };
@@ -951,7 +984,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
   };
 
   const handleToggleFeatureFlag = (
-    flagKey: 'enableContainerInventory' | 'enableSelectWeeks' | 'enableEcoEfficiencyIncentive' | 'enableSunshineCoastLocation',
+    flagKey: keyof AppConfig,
     enabled: boolean
   ) => {
     const updated: AppConfig = {
@@ -959,11 +992,68 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
       [flagKey]: enabled,
     };
     setCurrentConfig(updated);
+    saveAppConfig(updated);
     onSaveConfig(updated);
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('portabox:pricing-updated', { detail: updated }));
+    }
     setSaveSuccess(true);
     setTimeout(() => setSaveSuccess(false), 2500);
-    if (flagKey === 'enableContainerInventory' && !enabled && activeTab === 'inventory') {
-      setActiveTab('customers');
+
+    // If active tab was disabled, fallback to pricing_matrix
+    if (!enabled) {
+      if (flagKey === 'enableContainerInventory' && activeTab === 'inventory') {
+        setActiveTab('pricing_matrix');
+      } else if (flagKey === 'enableCustomersLedger' && activeTab === 'customers') {
+        setActiveTab('pricing_matrix');
+      } else if (flagKey === 'enableSmartsheetYardDispatch' && (activeTab === 'smartsheet' || adminViewMode === 'smartsheet')) {
+        setAdminViewMode('crm');
+        setActiveTab('pricing_matrix');
+      } else if (flagKey === 'enableCallCenterDispatch' && activeTab === 'call_center_routing') {
+        setActiveTab('pricing_matrix');
+      } else if (flagKey === 'enableDropOffFunnelAnalytics' && activeTab === 'dropoffs') {
+        setActiveTab('pricing_matrix');
+      } else if (flagKey === 'enableSoftphone' && activeTab === 'telephony') {
+        setActiveTab('pricing_matrix');
+      } else if (
+        flagKey === 'enableFieldAssetsLogistics' &&
+        ['inventory', 'postcode_tiers', 'depots', 'blocked'].includes(activeTab)
+      ) {
+        setActiveTab('pricing_matrix');
+      }
+    }
+  };
+
+  const handleBulkToggleStagedFeatures = (enableAll: boolean) => {
+    const updated: AppConfig = {
+      ...currentConfig,
+      enableSoftphone: enableAll,
+      enableCustomerPortal: enableAll,
+      enableHeaderCallButton: enableAll,
+      enablePhoneCallIntake: enableAll,
+      enableCustomersLedger: enableAll,
+      enableSmartsheetYardDispatch: enableAll,
+      enableCallCenterDispatch: enableAll,
+      enableDropOffFunnelAnalytics: enableAll,
+      enableFieldAssetsLogistics: enableAll,
+      enablePromoBanner: enableAll,
+    };
+    setCurrentConfig(updated);
+    saveAppConfig(updated);
+    onSaveConfig(updated);
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('portabox:pricing-updated', { detail: updated }));
+    }
+    setSaveSuccess(true);
+    setTimeout(() => setSaveSuccess(false), 2500);
+
+    if (!enableAll) {
+      setAdminViewMode('crm');
+      if (
+        ['customers', 'smartsheet', 'call_center_routing', 'dropoffs', 'inventory', 'postcode_tiers', 'depots', 'blocked', 'telephony'].includes(activeTab)
+      ) {
+        setActiveTab('pricing_matrix');
+      }
     }
   };
 
@@ -1204,6 +1294,8 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
           ? 'Frozen Pricing & Revenue Impact'
           : tabId === 'staff_permissions'
           ? 'Staff Roles & 2FA Governance'
+          : tabId === 'staff_mfa_audit'
+          ? 'Staff MFA Audit'
           : 'Tab');
       const newTab: WorkspaceTab = {
         id: `tab-${tabId}-${Date.now()}`,
@@ -1262,6 +1354,8 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
         viewMode={adminViewMode}
         onToggleViewMode={setAdminViewMode}
         onOpenPhoneIntake={() => setIsPhoneIntakeOpen(true)}
+        enablePhoneCallIntake={Boolean(currentConfig.enablePhoneCallIntake)}
+        enableSmartsheetYardDispatch={Boolean(currentConfig.enableSmartsheetYardDispatch)}
         onOpenFinancialExport={() => setIsFinancialExportOpen(true)}
         onNavigateToQuote={(qid) => {
           setAdminViewMode('smartsheet');
@@ -1453,11 +1547,25 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
             />
           )}
 
+          {/* ================= TAB: STAFF MFA VERIFICATION AUDIT (CEO ONLY) ================= */}
+          {activeTab === 'staff_mfa_audit' && (
+            <StaffMfaAuditLogWorkspace
+              currentSession={staffSession || getStaffSession()}
+              onSwitchToCeo={handleSwitchToCeoSession}
+            />
+          )}
+
           {/* ================= TAB 0: PRICING MATRIX & LIVE SIMULATOR (PRIMARY WORKSPACE) ================= */}
           {activeTab === 'pricing_matrix' && (
             <PricingMatrixWorkspace
               config={currentConfig}
-              onUpdateConfig={(newCfg) => setCurrentConfig(newCfg)}
+              onUpdateConfig={(newCfg) => {
+                setCurrentConfig(newCfg);
+                saveAppConfig(newCfg);
+                onSaveConfig(newCfg);
+                setSaveSuccess(true);
+                setTimeout(() => setSaveSuccess(false), 2500);
+              }}
               onSave={handleSave}
               onCreateLeadFromQuote={() => {
                 handleSelectNavTab('leads', 'Quote Leads');
@@ -4037,13 +4145,23 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                   Set different container storage fees (monthly & weekly) and base delivery fees for each Portabox depot location.
                 </p>
               </div>
-              <button
-                type="button"
-                onClick={() => handleApplyContainerPricesToAllLocations(selectedPricingHub)}
-                className="px-3.5 py-2 rounded-xl bg-[#FF9900] hover:bg-[#e68a00] text-[#0b2942] border border-[#FEBD69] text-xs font-extrabold cursor-pointer transition-colors shadow-2xs shrink-0"
-              >
-                Copy {selectedPricingHub} Storage Rates to All Locations
-              </button>
+              <div className="flex items-center gap-2 shrink-0 flex-wrap">
+                <button
+                  type="button"
+                  onClick={handleSave}
+                  className="px-4 py-2 rounded-xl bg-[#00c0f3] hover:bg-[#00a8d6] text-white text-xs font-black cursor-pointer transition-all shadow-xs flex items-center gap-1.5 hover:scale-[1.02]"
+                >
+                  <Save className="w-3.5 h-3.5" />
+                  <span>Save Storage Rates</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleApplyContainerPricesToAllLocations(selectedPricingHub)}
+                  className="px-3.5 py-2 rounded-xl bg-[#FF9900] hover:bg-[#e68a00] text-[#0b2942] border border-[#FEBD69] text-xs font-extrabold cursor-pointer transition-colors shadow-2xs shrink-0"
+                >
+                  Copy {selectedPricingHub} Storage Rates to All Locations
+                </button>
+              </div>
             </div>
 
             {/* Depot Location Selector Pills */}
@@ -6933,468 +7051,807 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
         {/* ================= TAB 8: FEATURE FLAGS & APPLICATION MODULES ================= */}
         {activeTab === 'features' && (
           <div className="space-y-6 max-w-4xl">
+            {/* Header */}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-100">
               <div>
-                <h3 className="text-lg font-extrabold text-[#0b2942]">Feature Flags & App Modules</h3>
-                <p className="text-xs text-slate-500">
-                  Select or deselect operational modules and customer-facing features across the Portabox app.
+                <div className="flex items-center gap-2">
+                  <h3 className="text-lg font-extrabold text-[#0b2942]">Feature Flags &amp; Application Modules</h3>
+                  <span className="bg-[#F7D347] text-[#0b2942] text-[10px] font-black uppercase px-2 py-0.5 rounded tracking-wider">
+                    CEO Governed
+                  </span>
+                </div>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Activate or deactivate core modules and customer-facing features. Staged features are turned <strong>OFF by default</strong> for future use.
                 </p>
               </div>
               {saveSuccess && (
-                <span className="text-xs font-bold text-emerald-600 bg-emerald-50 px-3 py-1.5 rounded-xl border border-emerald-200">
-                  ✓ Feature settings saved!
+                <span className="text-xs font-bold text-emerald-600 bg-emerald-50 px-3 py-1.5 rounded-xl border border-emerald-200 animate-pulse">
+                  ✓ Feature settings saved &amp; live!
                 </span>
               )}
             </div>
 
-            {/* Feature 1: Call Center Dispatch & Fleet Logistics */}
-            <div className={`p-6 rounded-2xl border transition-all ${
-              currentConfig.enableCallCenterDispatch !== false
-                ? 'bg-white border-slate-200 shadow-xs'
-                : 'bg-amber-50/50 border-amber-200'
-            }`}>
-              <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
-                <div className="flex items-start gap-4">
-                  <div className={`p-3 rounded-2xl text-white shrink-0 ${
-                    currentConfig.enableCallCenterDispatch !== false ? 'bg-indigo-600 shadow-xs' : 'bg-slate-400'
-                  }`}>
-                    <Calendar className="w-6 h-6" />
+            {/* CEO Executive Control Banner for the 9 Staged Features */}
+            <div className="p-5 rounded-3xl bg-gradient-to-r from-[#0b2942] via-[#15385E] to-[#0b2942] text-white border-2 border-slate-700 shadow-md space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-2xl bg-[#00c0f3]/20 border border-[#00c0f3]/40 flex items-center justify-center text-[#00c0f3] shrink-0">
+                    <SlidersHorizontal className="w-5 h-5" />
                   </div>
                   <div>
-                    <div className="flex items-center gap-2.5 flex-wrap">
-                      <h4 className="text-base font-extrabold text-[#0b2942]">
-                        Call Center Dispatch & Logistics Routing
-                      </h4>
-                      <span className={`text-[10px] font-black uppercase px-2.5 py-0.5 rounded-full ${
-                        currentConfig.enableCallCenterDispatch !== false
-                          ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
-                          : 'bg-rose-100 text-rose-800 border border-rose-200'
-                      }`}>
-                        {currentConfig.enableCallCenterDispatch !== false ? 'Feature Selected (Enabled)' : 'Feature Deselected (Disabled)'}
+                    <h4 className="text-sm font-black text-white flex items-center gap-2">
+                      <span>10 Staged Features Suite (Off by Default, CEO Governed)</span>
+                      <span className="bg-white/10 text-slate-200 text-[10px] font-mono px-2 py-0.5 rounded">
+                        {
+                          [
+                            currentConfig.enableSoftphone,
+                            currentConfig.enableCustomerPortal,
+                            currentConfig.enableHeaderCallButton,
+                            currentConfig.enablePhoneCallIntake,
+                            currentConfig.enableCustomersLedger,
+                            currentConfig.enableSmartsheetYardDispatch,
+                            currentConfig.enableCallCenterDispatch,
+                            currentConfig.enableDropOffFunnelAnalytics,
+                            currentConfig.enableFieldAssetsLogistics,
+                            currentConfig.enablePromoBanner,
+                          ].filter(Boolean).length
+                        } of 10 Active
                       </span>
-                    </div>
-                    <p className="text-xs text-slate-600 mt-1 max-w-2xl leading-relaxed">
-                      Controls whether the Call Center Dispatch booking portal, Google Calendar scheduling, fleet route optimization engine, and driver routing sheets are available in the application.
+                    </h4>
+                    <p className="text-xs text-slate-300">
+                      The CEO can activate individual features anytime or toggle them in bulk for staging/testing.
                     </p>
-
-                    <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs text-slate-600">
-                      <div className="flex items-center gap-2 p-2 rounded-lg bg-slate-50 border border-slate-100">
-                        <CheckCircle2 className={`w-4 h-4 shrink-0 ${currentConfig.enableCallCenterDispatch !== false ? 'text-emerald-600' : 'text-slate-400'}`} />
-                        <span>Call Center Dispatch button in header</span>
-                      </div>
-                      <div className="flex items-center gap-2 p-2 rounded-lg bg-slate-50 border border-slate-100">
-                        <CheckCircle2 className={`w-4 h-4 shrink-0 ${currentConfig.enableCallCenterDispatch !== false ? 'text-emerald-600' : 'text-slate-400'}`} />
-                        <span>Google Calendar container schedule</span>
-                      </div>
-                      <div className="flex items-center gap-2 p-2 rounded-lg bg-slate-50 border border-slate-100">
-                        <CheckCircle2 className={`w-4 h-4 shrink-0 ${currentConfig.enableCallCenterDispatch !== false ? 'text-emerald-600' : 'text-slate-400'}`} />
-                        <span>Fleet routing optimizer & 48-hr suggestions</span>
-                      </div>
-                      <div className="flex items-center gap-2 p-2 rounded-lg bg-slate-50 border border-slate-100">
-                        <CheckCircle2 className={`w-4 h-4 shrink-0 ${currentConfig.enableCallCenterDispatch !== false ? 'text-emerald-600' : 'text-slate-400'}`} />
-                        <span>Trailer capacity allocation & driver sheets</span>
-                      </div>
-                    </div>
                   </div>
                 </div>
 
-                <div className="flex sm:flex-col items-end gap-2 shrink-0">
+                <div className="flex items-center gap-2 flex-wrap shrink-0">
                   <button
                     type="button"
-                    onClick={() => handleToggleCallCenterDispatch(currentConfig.enableCallCenterDispatch === false)}
-                    className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer shadow-xs ${
-                      currentConfig.enableCallCenterDispatch !== false
-                        ? 'bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200'
-                        : 'bg-emerald-600 hover:bg-emerald-700 text-white'
-                    }`}
+                    onClick={() => handleBulkToggleStagedFeatures(true)}
+                    className="px-3.5 py-2 bg-[#00c0f3] hover:bg-[#00a7d4] text-[#0b2942] rounded-xl text-xs font-black shadow-xs transition-all cursor-pointer hover:scale-105 active:scale-95"
                   >
-                    {currentConfig.enableCallCenterDispatch !== false ? 'Deselect Feature' : 'Select Feature (Enable)'}
+                    Turn ON All 10 Features
                   </button>
-                  <span className="text-[11px] text-slate-400">
-                    {currentConfig.enableCallCenterDispatch !== false ? 'Click to deselect from app' : 'Click to restore feature'}
-                  </span>
+                  <button
+                    type="button"
+                    onClick={() => handleBulkToggleStagedFeatures(false)}
+                    className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-bold border border-slate-600 transition-all cursor-pointer hover:scale-105 active:scale-95"
+                  >
+                    Turn OFF All 10 (Default)
+                  </button>
                 </div>
               </div>
             </div>
 
-            {/* Feature 1B: Container Inventory System & Driver QR Scanner */}
-            <div className={`p-6 rounded-2xl border transition-all ${
+            {/* ================= THE 10 STAGED FEATURES LIST ================= */}
+            <div className="space-y-3.5">
+              {/* 1. Soft Phone */}
+              <div className={`p-5 rounded-2xl border transition-all ${
+                Boolean(currentConfig.enableSoftphone)
+                  ? 'bg-white border-emerald-300 ring-2 ring-emerald-100 shadow-sm'
+                  : 'bg-slate-50/80 border-slate-200 opacity-95'
+              }`}>
+                <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
+                  <div className="flex items-start gap-3.5">
+                    <div className={`p-2.5 rounded-xl text-white shrink-0 ${
+                      Boolean(currentConfig.enableSoftphone) ? 'bg-[#00c0f3] text-[#0b2942]' : 'bg-slate-400'
+                    }`}>
+                      <PhoneCall className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-mono text-xs font-black text-slate-400">01</span>
+                        <h4 className="text-sm font-extrabold text-[#0b2942]">Soft Phone (Twilio Softphone Dialer)</h4>
+                        <span className={`text-[10px] font-black uppercase px-2 py-0.5 rounded-full ${
+                          Boolean(currentConfig.enableSoftphone)
+                            ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                            : 'bg-slate-200 text-slate-700 border border-slate-300'
+                        }`}>
+                          {Boolean(currentConfig.enableSoftphone) ? 'Active (ON)' : 'Off by Default (Disabled)'}
+                        </span>
+                      </div>
+                      <p className="text-xs text-slate-600 mt-1 max-w-2xl leading-relaxed">
+                        Controls the Twilio WebRTC softphone dialer, call intake audio bar, and screen-pop CRM drawers in Admin. When off (default), softphone navigation is hidden.
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleToggleFeatureFlag('enableSoftphone', !Boolean(currentConfig.enableSoftphone))}
+                    className={`px-4 py-2 rounded-xl text-xs font-bold transition-all shrink-0 cursor-pointer ${
+                      Boolean(currentConfig.enableSoftphone)
+                        ? 'bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200'
+                        : 'bg-[#0b2942] hover:bg-[#15385E] text-white shadow-xs'
+                    }`}
+                  >
+                    {Boolean(currentConfig.enableSoftphone) ? 'Turn OFF Feature' : 'Turn ON Feature'}
+                  </button>
+                </div>
+              </div>
+
+              {/* 2. Customer Portal */}
+              <div className={`p-5 rounded-2xl border transition-all ${
+                Boolean(currentConfig.enableCustomerPortal)
+                  ? 'bg-white border-emerald-300 ring-2 ring-emerald-100 shadow-sm'
+                  : 'bg-slate-50/80 border-slate-200 opacity-95'
+              }`}>
+                <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
+                  <div className="flex items-start gap-3.5">
+                    <div className={`p-2.5 rounded-xl text-white shrink-0 ${
+                      Boolean(currentConfig.enableCustomerPortal) ? 'bg-indigo-600' : 'bg-slate-400'
+                    }`}>
+                      <User className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-mono text-xs font-black text-slate-400">02</span>
+                        <h4 className="text-sm font-extrabold text-[#0b2942]">Customer Portal (Public Customer Login)</h4>
+                        <span className={`text-[10px] font-black uppercase px-2 py-0.5 rounded-full ${
+                          Boolean(currentConfig.enableCustomerPortal)
+                            ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                            : 'bg-slate-200 text-slate-700 border border-slate-300'
+                        }`}>
+                          {Boolean(currentConfig.enableCustomerPortal) ? 'Active (ON)' : 'Off by Default (Disabled)'}
+                        </span>
+                      </div>
+                      <p className="text-xs text-slate-600 mt-1 max-w-2xl leading-relaxed">
+                        Controls the public &ldquo;Customer Portal&rdquo; button in the top header. When off (default), client portal access is hidden from public view.
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleToggleFeatureFlag('enableCustomerPortal', !Boolean(currentConfig.enableCustomerPortal))}
+                    className={`px-4 py-2 rounded-xl text-xs font-bold transition-all shrink-0 cursor-pointer ${
+                      Boolean(currentConfig.enableCustomerPortal)
+                        ? 'bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200'
+                        : 'bg-[#0b2942] hover:bg-[#15385E] text-white shadow-xs'
+                    }`}
+                  >
+                    {Boolean(currentConfig.enableCustomerPortal) ? 'Turn OFF Feature' : 'Turn ON Feature'}
+                  </button>
+                </div>
+              </div>
+
+              {/* 3. Call button on top panel inactive - only show number */}
+              <div className={`p-5 rounded-2xl border transition-all ${
+                Boolean(currentConfig.enableHeaderCallButton)
+                  ? 'bg-white border-emerald-300 ring-2 ring-emerald-100 shadow-sm'
+                  : 'bg-slate-50/80 border-slate-200 opacity-95'
+              }`}>
+                <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
+                  <div className="flex items-start gap-3.5">
+                    <div className={`p-2.5 rounded-xl text-white shrink-0 ${
+                      Boolean(currentConfig.enableHeaderCallButton) ? 'bg-[#15385E]' : 'bg-slate-400'
+                    }`}>
+                      <Phone className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-mono text-xs font-black text-slate-400">03</span>
+                        <h4 className="text-sm font-extrabold text-[#0b2942]">Call Button on Top Panel Inactive (Show Number Only)</h4>
+                        <span className={`text-[10px] font-black uppercase px-2 py-0.5 rounded-full ${
+                          !Boolean(currentConfig.enableHeaderCallButton)
+                            ? 'bg-amber-100 text-amber-900 border border-amber-300 font-extrabold'
+                            : 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                        }`}>
+                          {!Boolean(currentConfig.enableHeaderCallButton) ? 'Inactive by Default (Shows Number Only)' : 'Active (Direct Dial Link)'}
+                        </span>
+                      </div>
+                      <p className="text-xs text-slate-600 mt-1 max-w-2xl leading-relaxed">
+                        When inactive (default), the top navbar displays the phone number as non-clickable styled text (<code className="bg-slate-200 px-1 py-0.5 rounded font-mono font-bold text-[11px] text-slate-800">{currentConfig.phone}</code>) without initiating calls. CEO can toggle this to enable direct dialing.
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleToggleFeatureFlag('enableHeaderCallButton', !Boolean(currentConfig.enableHeaderCallButton))}
+                    className={`px-4 py-2 rounded-xl text-xs font-bold transition-all shrink-0 cursor-pointer ${
+                      Boolean(currentConfig.enableHeaderCallButton)
+                        ? 'bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-300'
+                        : 'bg-[#0b2942] hover:bg-[#15385E] text-white shadow-xs'
+                    }`}
+                  >
+                    {Boolean(currentConfig.enableHeaderCallButton) ? 'Make Call Button Inactive (Default)' : 'Enable Clickable Call Button'}
+                  </button>
+                </div>
+              </div>
+
+              {/* 4. Phone call intake */}
+              <div className={`p-5 rounded-2xl border transition-all ${
+                Boolean(currentConfig.enablePhoneCallIntake)
+                  ? 'bg-white border-emerald-300 ring-2 ring-emerald-100 shadow-sm'
+                  : 'bg-slate-50/80 border-slate-200 opacity-95'
+              }`}>
+                <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
+                  <div className="flex items-start gap-3.5">
+                    <div className={`p-2.5 rounded-xl text-white shrink-0 ${
+                      Boolean(currentConfig.enablePhoneCallIntake) ? 'bg-emerald-600' : 'bg-slate-400'
+                    }`}>
+                      <PhoneCall className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-mono text-xs font-black text-slate-400">04</span>
+                        <h4 className="text-sm font-extrabold text-[#0b2942]">Phone Call Intake (Drawer &amp; Quick Action)</h4>
+                        <span className={`text-[10px] font-black uppercase px-2 py-0.5 rounded-full ${
+                          Boolean(currentConfig.enablePhoneCallIntake)
+                            ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                            : 'bg-slate-200 text-slate-700 border border-slate-300'
+                        }`}>
+                          {Boolean(currentConfig.enablePhoneCallIntake) ? 'Active (ON)' : 'Off by Default (Disabled)'}
+                        </span>
+                      </div>
+                      <p className="text-xs text-slate-600 mt-1 max-w-2xl leading-relaxed">
+                        Controls the instant &ldquo;Phone Call Intake&rdquo; banner and button across the Admin top navigation bar and sidebar for customer quoting while on a phone call.
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleToggleFeatureFlag('enablePhoneCallIntake', !Boolean(currentConfig.enablePhoneCallIntake))}
+                    className={`px-4 py-2 rounded-xl text-xs font-bold transition-all shrink-0 cursor-pointer ${
+                      Boolean(currentConfig.enablePhoneCallIntake)
+                        ? 'bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200'
+                        : 'bg-[#0b2942] hover:bg-[#15385E] text-white shadow-xs'
+                    }`}
+                  >
+                    {Boolean(currentConfig.enablePhoneCallIntake) ? 'Turn OFF Feature' : 'Turn ON Feature'}
+                  </button>
+                </div>
+              </div>
+
+              {/* 5. Customers and ledger */}
+              <div className={`p-5 rounded-2xl border transition-all ${
+                Boolean(currentConfig.enableCustomersLedger)
+                  ? 'bg-white border-emerald-300 ring-2 ring-emerald-100 shadow-sm'
+                  : 'bg-slate-50/80 border-slate-200 opacity-95'
+              }`}>
+                <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
+                  <div className="flex items-start gap-3.5">
+                    <div className={`p-2.5 rounded-xl text-white shrink-0 ${
+                      Boolean(currentConfig.enableCustomersLedger) ? 'bg-[#00c0f3] text-[#0b2942]' : 'bg-slate-400'
+                    }`}>
+                      <UserCheck className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-mono text-xs font-black text-slate-400">05</span>
+                        <h4 className="text-sm font-extrabold text-[#0b2942]">Customers and Ledger (CRM &amp; Billing)</h4>
+                        <span className={`text-[10px] font-black uppercase px-2 py-0.5 rounded-full ${
+                          Boolean(currentConfig.enableCustomersLedger)
+                            ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                            : 'bg-slate-200 text-slate-700 border border-slate-300'
+                        }`}>
+                          {Boolean(currentConfig.enableCustomersLedger) ? 'Active (ON)' : 'Off by Default (Disabled)'}
+                        </span>
+                      </div>
+                      <p className="text-xs text-slate-600 mt-1 max-w-2xl leading-relaxed">
+                        Controls visibility of the Customer Accounts &amp; Financial Ledger tab in Daily Operations, active container tracking, payment plans, refunds, and adjustments.
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleToggleFeatureFlag('enableCustomersLedger', !Boolean(currentConfig.enableCustomersLedger))}
+                    className={`px-4 py-2 rounded-xl text-xs font-bold transition-all shrink-0 cursor-pointer ${
+                      Boolean(currentConfig.enableCustomersLedger)
+                        ? 'bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200'
+                        : 'bg-[#0b2942] hover:bg-[#15385E] text-white shadow-xs'
+                    }`}
+                  >
+                    {Boolean(currentConfig.enableCustomersLedger) ? 'Turn OFF Feature' : 'Turn ON Feature'}
+                  </button>
+                </div>
+              </div>
+
+              {/* 6. Smartsheet yard dispatch */}
+              <div className={`p-5 rounded-2xl border transition-all ${
+                Boolean(currentConfig.enableSmartsheetYardDispatch)
+                  ? 'bg-white border-emerald-300 ring-2 ring-emerald-100 shadow-sm'
+                  : 'bg-slate-50/80 border-slate-200 opacity-95'
+              }`}>
+                <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
+                  <div className="flex items-start gap-3.5">
+                    <div className={`p-2.5 rounded-xl text-white shrink-0 ${
+                      Boolean(currentConfig.enableSmartsheetYardDispatch) ? 'bg-emerald-600' : 'bg-slate-400'
+                    }`}>
+                      <Layers className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-mono text-xs font-black text-slate-400">06</span>
+                        <h4 className="text-sm font-extrabold text-[#0b2942]">Smartsheet Yard Dispatch (Staging &amp; Two-Way Sync)</h4>
+                        <span className={`text-[10px] font-black uppercase px-2 py-0.5 rounded-full ${
+                          Boolean(currentConfig.enableSmartsheetYardDispatch)
+                            ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                            : 'bg-slate-200 text-slate-700 border border-slate-300'
+                        }`}>
+                          {Boolean(currentConfig.enableSmartsheetYardDispatch) ? 'Active (ON)' : 'Off by Default (Disabled)'}
+                        </span>
+                      </div>
+                      <p className="text-xs text-slate-600 mt-1 max-w-2xl leading-relaxed">
+                        Controls Smartsheet Yard Dispatch in Daily Operations, the Smartsheet spreadsheet view toggle in the workspace header, yard review status, and webhook synchronization.
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleToggleFeatureFlag('enableSmartsheetYardDispatch', !Boolean(currentConfig.enableSmartsheetYardDispatch))}
+                    className={`px-4 py-2 rounded-xl text-xs font-bold transition-all shrink-0 cursor-pointer ${
+                      Boolean(currentConfig.enableSmartsheetYardDispatch)
+                        ? 'bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200'
+                        : 'bg-[#0b2942] hover:bg-[#15385E] text-white shadow-xs'
+                    }`}
+                  >
+                    {Boolean(currentConfig.enableSmartsheetYardDispatch) ? 'Turn OFF Feature' : 'Turn ON Feature'}
+                  </button>
+                </div>
+              </div>
+
+              {/* 7. Call center fleet calendar */}
+              <div className={`p-5 rounded-2xl border transition-all ${
+                Boolean(currentConfig.enableCallCenterDispatch)
+                  ? 'bg-white border-emerald-300 ring-2 ring-emerald-100 shadow-sm'
+                  : 'bg-slate-50/80 border-slate-200 opacity-95'
+              }`}>
+                <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
+                  <div className="flex items-start gap-3.5">
+                    <div className={`p-2.5 rounded-xl text-white shrink-0 ${
+                      Boolean(currentConfig.enableCallCenterDispatch) ? 'bg-indigo-600' : 'bg-slate-400'
+                    }`}>
+                      <Calendar className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-mono text-xs font-black text-slate-400">07</span>
+                        <h4 className="text-sm font-extrabold text-[#0b2942]">Call Center Fleet Calendar (Scheduling &amp; Routes)</h4>
+                        <span className={`text-[10px] font-black uppercase px-2 py-0.5 rounded-full ${
+                          Boolean(currentConfig.enableCallCenterDispatch)
+                            ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                            : 'bg-slate-200 text-slate-700 border border-slate-300'
+                        }`}>
+                          {Boolean(currentConfig.enableCallCenterDispatch) ? 'Active (ON)' : 'Off by Default (Disabled)'}
+                        </span>
+                      </div>
+                      <p className="text-xs text-slate-600 mt-1 max-w-2xl leading-relaxed">
+                        Controls the Call Center Fleet Calendar tab, Google Calendar synchronization, trailer capacity allocation, and fleet route clustering in Daily Operations.
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleToggleFeatureFlag('enableCallCenterDispatch', !Boolean(currentConfig.enableCallCenterDispatch))}
+                    className={`px-4 py-2 rounded-xl text-xs font-bold transition-all shrink-0 cursor-pointer ${
+                      Boolean(currentConfig.enableCallCenterDispatch)
+                        ? 'bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200'
+                        : 'bg-[#0b2942] hover:bg-[#15385E] text-white shadow-xs'
+                    }`}
+                  >
+                    {Boolean(currentConfig.enableCallCenterDispatch) ? 'Turn OFF Feature' : 'Turn ON Feature'}
+                  </button>
+                </div>
+              </div>
+
+              {/* 8. Drop off funnel analytics */}
+              <div className={`p-5 rounded-2xl border transition-all ${
+                Boolean(currentConfig.enableDropOffFunnelAnalytics)
+                  ? 'bg-white border-emerald-300 ring-2 ring-emerald-100 shadow-sm'
+                  : 'bg-slate-50/80 border-slate-200 opacity-95'
+              }`}>
+                <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
+                  <div className="flex items-start gap-3.5">
+                    <div className={`p-2.5 rounded-xl text-white shrink-0 ${
+                      Boolean(currentConfig.enableDropOffFunnelAnalytics) ? 'bg-rose-600' : 'bg-slate-400'
+                    }`}>
+                      <TrendingDown className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-mono text-xs font-black text-slate-400">08</span>
+                        <h4 className="text-sm font-extrabold text-[#0b2942]">Drop Off Funnel Analytics (Conversion Insights)</h4>
+                        <span className={`text-[10px] font-black uppercase px-2 py-0.5 rounded-full ${
+                          Boolean(currentConfig.enableDropOffFunnelAnalytics)
+                            ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                            : 'bg-slate-200 text-slate-700 border border-slate-300'
+                        }`}>
+                          {Boolean(currentConfig.enableDropOffFunnelAnalytics) ? 'Active (ON)' : 'Off by Default (Disabled)'}
+                        </span>
+                      </div>
+                      <p className="text-xs text-slate-600 mt-1 max-w-2xl leading-relaxed">
+                        Controls the Drop-Off Funnel Analytics tab in Daily Operations, user abandonment tracking per step, and customer follow-up trigger rates.
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleToggleFeatureFlag('enableDropOffFunnelAnalytics', !Boolean(currentConfig.enableDropOffFunnelAnalytics))}
+                    className={`px-4 py-2 rounded-xl text-xs font-bold transition-all shrink-0 cursor-pointer ${
+                      Boolean(currentConfig.enableDropOffFunnelAnalytics)
+                        ? 'bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200'
+                        : 'bg-[#0b2942] hover:bg-[#15385E] text-white shadow-xs'
+                    }`}
+                  >
+                    {Boolean(currentConfig.enableDropOffFunnelAnalytics) ? 'Turn OFF Feature' : 'Turn ON Feature'}
+                  </button>
+                </div>
+              </div>
+
+              {/* 9. Field assets and logistics */}
+              <div className={`p-5 rounded-2xl border transition-all ${
+                Boolean(currentConfig.enableFieldAssetsLogistics)
+                  ? 'bg-white border-emerald-300 ring-2 ring-emerald-100 shadow-sm'
+                  : 'bg-slate-50/80 border-slate-200 opacity-95'
+              }`}>
+                <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
+                  <div className="flex items-start gap-3.5">
+                    <div className={`p-2.5 rounded-xl text-white shrink-0 ${
+                      Boolean(currentConfig.enableFieldAssetsLogistics) ? 'bg-amber-600' : 'bg-slate-400'
+                    }`}>
+                      <Compass className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-mono text-xs font-black text-slate-400">09</span>
+                        <h4 className="text-sm font-extrabold text-[#0b2942]">Field Assets &amp; Logistics (Containers, Depots &amp; Tiers)</h4>
+                        <span className={`text-[10px] font-black uppercase px-2 py-0.5 rounded-full ${
+                          Boolean(currentConfig.enableFieldAssetsLogistics)
+                            ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                            : 'bg-slate-200 text-slate-700 border border-slate-300'
+                        }`}>
+                          {Boolean(currentConfig.enableFieldAssetsLogistics) ? 'Active (ON)' : 'Off by Default (Disabled)'}
+                        </span>
+                      </div>
+                      <p className="text-xs text-slate-600 mt-1 max-w-2xl leading-relaxed">
+                        Controls the entire &ldquo;FIELD ASSETS &amp; LOGISTICS&rdquo; section in the admin sidebar, including Container Assets &amp; QR Codes, Postcode Coverage Tiers, Depot Hubs, and Blocked Postcodes.
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleToggleFeatureFlag('enableFieldAssetsLogistics', !Boolean(currentConfig.enableFieldAssetsLogistics))}
+                    className={`px-4 py-2 rounded-xl text-xs font-bold transition-all shrink-0 cursor-pointer ${
+                      Boolean(currentConfig.enableFieldAssetsLogistics)
+                        ? 'bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200'
+                        : 'bg-[#0b2942] hover:bg-[#15385E] text-white shadow-xs'
+                    }`}
+                  >
+                    {Boolean(currentConfig.enableFieldAssetsLogistics) ? 'Turn OFF Feature' : 'Turn ON Feature'}
+                  </button>
+                </div>
+              </div>
+
+              {/* 10. Top Announcement Banner (Staff Only / CEO Selected) */}
+              <div className={`p-5 rounded-2xl border transition-all ${
+                Boolean(currentConfig.enablePromoBanner)
+                  ? 'bg-white border-emerald-300 ring-2 ring-emerald-100 shadow-sm'
+                  : 'bg-slate-50/80 border-slate-200 opacity-95'
+              }`}>
+                <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
+                  <div className="flex items-start gap-3.5">
+                    <div className={`p-2.5 rounded-xl shrink-0 shadow-xs ${
+                      Boolean(currentConfig.enablePromoBanner)
+                        ? 'bg-[#F7D347] text-[#1A1A1A] border border-[#e5c235]'
+                        : 'bg-slate-400 text-white'
+                    }`}>
+                      <Sparkles className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-mono text-xs font-black text-slate-400">10</span>
+                        <h4 className="text-sm font-extrabold text-[#0b2942]">
+                          Top Announcement Banner (Staff Only / CEO Selected)
+                        </h4>
+                        <span className={`text-[10px] font-black uppercase px-2 py-0.5 rounded-full ${
+                          Boolean(currentConfig.enablePromoBanner)
+                            ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                            : 'bg-slate-200 text-slate-700 border border-slate-300'
+                        }`}>
+                          {Boolean(currentConfig.enablePromoBanner) ? 'Active (ON)' : 'Off by Default (Disabled)'}
+                        </span>
+                        <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-amber-100 text-amber-900 border border-amber-300">
+                          Restricted Access
+                        </span>
+                      </div>
+                      <p className="text-xs text-slate-600 mt-1 max-w-2xl leading-relaxed">
+                        Puts the top header promotional announcement strip (&ldquo;{currentConfig.promoBannerSlogan || 'UP TO 50% MORE SPACE · GUARANTEED LOWER COST · PRICE MATCH GUARANTEE'}&rdquo;) behind this feature flag. <strong>When active, this banner is strictly restricted to admin staff members selected by the CEO.</strong> Public customers and unauthorized staff will not see it.
+                      </p>
+
+                      {/* CEO Staff Selection Controls */}
+                      <div className="mt-3 p-3.5 rounded-xl bg-slate-50 border border-slate-200 max-w-2xl">
+                        <div className="flex items-center justify-between gap-2 flex-wrap mb-2.5">
+                          <span className="text-xs font-bold text-[#0b2942] flex items-center gap-1.5">
+                            <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
+                            <span>Staff Members Authorized by CEO to View Banner:</span>
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => handleSelectNavTab('staff_permissions', 'Staff Governance & MFA')}
+                            className="text-[11px] font-bold text-[#00c0f3] hover:underline cursor-pointer flex items-center gap-1"
+                          >
+                            <span>Open Permissions Matrix</span>
+                            <ArrowRight className="w-3 h-3" />
+                          </button>
+                        </div>
+
+                        <div className="flex flex-wrap gap-2">
+                          {loadStaffMembers().map((staff) => {
+                            const isAuthorized = staff.role === 'ceo' || hasStaffPermission(staff, 'view_announcement_banner');
+                            const isCeo = staff.role === 'ceo';
+
+                            return (
+                              <button
+                                key={staff.id}
+                                type="button"
+                                disabled={isCeo}
+                                onClick={() => {
+                                  if (isCeo) return;
+                                  setStaffBannerPermission(staff.id, !isAuthorized);
+                                  setSaveSuccess(true);
+                                  setTimeout(() => setSaveSuccess(false), 2000);
+                                }}
+                                title={isCeo ? 'CEO Dan Harrington always has banner visibility' : `Click to ${isAuthorized ? 'revoke' : 'grant'} banner visibility`}
+                                className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium border transition-all ${
+                                  isCeo
+                                    ? 'bg-amber-50 text-amber-900 border-amber-300 font-bold cursor-default'
+                                    : isAuthorized
+                                    ? 'bg-emerald-50 text-emerald-800 border-emerald-300 hover:bg-emerald-100 cursor-pointer shadow-2xs'
+                                    : 'bg-white text-slate-500 border-slate-200 hover:border-slate-400 hover:text-slate-800 cursor-pointer opacity-70'
+                                }`}
+                              >
+                                {isCeo ? (
+                                  <span className="w-2 h-2 rounded-full bg-amber-500" />
+                                ) : isAuthorized ? (
+                                  <Check className="w-3 h-3 text-emerald-600 stroke-[3]" />
+                                ) : (
+                                  <span className="w-2 h-2 rounded-full bg-slate-300" />
+                                )}
+                                <span>{staff.name}</span>
+                                <span className="text-[10px] opacity-75 font-mono">
+                                  {isCeo ? '(CEO)' : isAuthorized ? '(Access Granted)' : '(Hidden)'}
+                                </span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex sm:flex-col items-end gap-2 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => handleToggleFeatureFlag('enablePromoBanner', !Boolean(currentConfig.enablePromoBanner))}
+                      className={`px-4 py-2 rounded-xl text-xs font-bold transition-all shrink-0 cursor-pointer ${
+                        Boolean(currentConfig.enablePromoBanner)
+                          ? 'bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200'
+                          : 'bg-[#0b2942] hover:bg-[#15385E] text-white shadow-xs'
+                      }`}
+                    >
+                      {Boolean(currentConfig.enablePromoBanner) ? 'Turn OFF Feature' : 'Turn ON Feature'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleSelectNavTab('branding', 'Top Banner & Slogan')}
+                      className="px-3 py-1.5 rounded-lg text-[11px] font-semibold text-slate-600 hover:text-[#0b2942] hover:bg-slate-100 transition-all cursor-pointer"
+                    >
+                      Edit Slogan Text
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Section Divider: Additional Supporting Modules */}
+            <div className="pt-6 pb-2 border-t border-slate-200">
+              <h4 className="text-sm font-black text-[#0b2942] uppercase tracking-wider">
+                Additional Modules &amp; Secondary Switches
+              </h4>
+              <p className="text-xs text-slate-500">
+                Secondary feature flags for operational incentives and quote flow options.
+              </p>
+            </div>
+
+            {/* Feature: Container Inventory QR Code Tracking */}
+            <div className={`p-5 rounded-2xl border transition-all ${
               currentConfig.enableContainerInventory !== false
                 ? 'bg-white border-slate-200 shadow-xs'
-                : 'bg-amber-50/50 border-amber-200'
+                : 'bg-slate-50/80 border-slate-200'
             }`}>
               <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
-                <div className="flex items-start gap-4">
-                  <div className={`p-3 rounded-2xl shrink-0 ${
+                <div className="flex items-start gap-3.5">
+                  <div className={`p-2.5 rounded-xl text-white shrink-0 ${
+                    currentConfig.enableContainerInventory !== false ? 'bg-[#FF9900] text-[#0b2942]' : 'bg-slate-400'
+                  }`}>
+                    <QrCode className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h4 className="text-sm font-extrabold text-[#0b2942]">Container Inventory System (QR Tracking)</h4>
+                    <p className="text-xs text-slate-600 mt-1 max-w-2xl">
+                      Tracks every container with serialized QR codes, serviceability ratings, and maintenance history.
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => handleToggleFeatureFlag('enableContainerInventory', currentConfig.enableContainerInventory === false)}
+                  className={`px-4 py-2 rounded-xl text-xs font-bold transition-all shrink-0 cursor-pointer ${
                     currentConfig.enableContainerInventory !== false
-                      ? 'bg-[#FF9900] text-[#0b2942] border border-[#FEBD69] shadow-xs'
-                      : 'bg-slate-400 text-white'
-                  }`}>
-                    <QrCode className="w-6 h-6" />
-                  </div>
-                  <div>
-                    <div className="flex items-center gap-2.5 flex-wrap">
-                      <h4 className="text-base font-extrabold text-[#0b2942]">
-                        Container Inventory System (QR Code Tracking & Serviceability Score)
-                      </h4>
-                      <span className={`text-[10px] font-black uppercase px-2.5 py-0.5 rounded-full ${
-                        currentConfig.enableContainerInventory !== false
-                          ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
-                          : 'bg-rose-100 text-rose-800 border border-rose-200'
-                      }`}>
-                        {currentConfig.enableContainerInventory !== false ? 'Feature Selected (Enabled)' : 'Feature Deselected (Disabled)'}
-                      </span>
-                    </div>
-                    <p className="text-xs text-slate-600 mt-1 max-w-2xl leading-relaxed">
-                      Tracks every container across Portabox depots and customer locations with serialized QR codes that drivers scan on check-out/check-in, 0–100 serviceability level scores, and real-time visibility into whether each container is generating income.
-                    </p>
-                  </div>
-                </div>
-                <div className="flex sm:flex-col items-end gap-2 shrink-0">
-                  <button
-                    type="button"
-                    onClick={() => handleToggleFeatureFlag('enableContainerInventory', currentConfig.enableContainerInventory === false)}
-                    className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer shadow-xs ${
-                      currentConfig.enableContainerInventory !== false
-                        ? 'bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200'
-                        : 'bg-emerald-600 hover:bg-emerald-700 text-white'
-                    }`}
-                  >
-                    {currentConfig.enableContainerInventory !== false ? 'Deselect Feature' : 'Select Feature (Enable)'}
-                  </button>
-                </div>
+                      ? 'bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300'
+                      : 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                  }`}
+                >
+                  {currentConfig.enableContainerInventory !== false ? 'Deactivate QR System' : 'Activate QR System'}
+                </button>
               </div>
             </div>
 
-            {/* Feature 1C: "Select Weeks" Storage Duration Function */}
-            <div className={`p-6 rounded-2xl border transition-all ${
-              Boolean(currentConfig.enableSelectWeeks)
-                ? 'bg-white border-slate-200 shadow-xs'
-                : 'bg-amber-50/50 border-amber-200'
-            }`}>
-              <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
-                <div className="flex items-start gap-4">
-                  <div className={`p-3 rounded-2xl text-white shrink-0 ${
-                    Boolean(currentConfig.enableSelectWeeks) ? 'bg-[#0b2942]' : 'bg-slate-400'
-                  }`}>
-                    <Clock className="w-6 h-6 text-[#FEBD69]" />
-                  </div>
-                  <div>
-                    <div className="flex items-center gap-2.5 flex-wrap">
-                      <h4 className="text-base font-extrabold text-[#0b2942]">
-                        "Select Weeks" Storage Duration Function
-                      </h4>
-                      <span className={`text-[10px] font-black uppercase px-2.5 py-0.5 rounded-full ${
-                        Boolean(currentConfig.enableSelectWeeks)
-                          ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
-                          : 'bg-rose-100 text-rose-800 border border-rose-200'
-                      }`}>
-                        {Boolean(currentConfig.enableSelectWeeks) ? 'Feature Selected (Enabled)' : 'Feature Deselected (Disabled)'}
-                      </span>
-                    </div>
-                    <p className="text-xs text-slate-600 mt-1 max-w-2xl leading-relaxed">
-                      Allows toggling between "Select Months" and "Select Weeks" in duration configurations. When deselected (default), customer view uses clean standard durations including the 2 Weeks option ($199 flat rate).
-                    </p>
-                  </div>
-                </div>
-                <div className="flex sm:flex-col items-end gap-2 shrink-0">
-                  <button
-                    type="button"
-                    onClick={() => handleToggleFeatureFlag('enableSelectWeeks', !Boolean(currentConfig.enableSelectWeeks))}
-                    className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer shadow-xs ${
-                      Boolean(currentConfig.enableSelectWeeks)
-                        ? 'bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200'
-                        : 'bg-emerald-600 hover:bg-emerald-700 text-white'
-                    }`}
-                  >
-                    {Boolean(currentConfig.enableSelectWeeks) ? 'Deselect Feature' : 'Select Feature (Enable)'}
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            {/* Feature 1D: Efficiency Discount & Emissions Reduction Recognition */}
-            <div className={`p-6 rounded-2xl border transition-all ${
+            {/* Feature: Eco Efficiency Incentive */}
+            <div className={`p-5 rounded-2xl border transition-all ${
               currentConfig.enableEcoEfficiencyIncentive !== false
                 ? 'bg-white border-slate-200 shadow-xs'
-                : 'bg-amber-50/50 border-amber-200'
+                : 'bg-slate-50/80 border-slate-200'
             }`}>
               <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
-                <div className="flex items-start gap-4">
-                  <div className={`p-3 rounded-2xl text-white shrink-0 ${
+                <div className="flex items-start gap-3.5">
+                  <div className={`p-2.5 rounded-xl text-white shrink-0 ${
                     currentConfig.enableEcoEfficiencyIncentive !== false ? 'bg-emerald-600' : 'bg-slate-400'
                   }`}>
-                    <Leaf className="w-6 h-6" />
+                    <Leaf className="w-5 h-5" />
                   </div>
                   <div>
-                    <div className="flex items-center gap-2.5 flex-wrap">
-                      <h4 className="text-base font-extrabold text-[#0b2942]">
-                        Efficiency Discount & Emissions Reduction Recognition
-                      </h4>
-                      <span className={`text-[10px] font-black uppercase px-2.5 py-0.5 rounded-full ${
-                        currentConfig.enableEcoEfficiencyIncentive !== false
-                          ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
-                          : 'bg-rose-100 text-rose-800 border border-rose-200'
-                      }`}>
-                        {currentConfig.enableEcoEfficiencyIncentive !== false ? 'Feature Selected (Enabled)' : 'Feature Deselected (Disabled)'}
-                      </span>
-                    </div>
-                    <p className="text-xs text-slate-600 mt-1 max-w-2xl leading-relaxed">
-                      Controls whether the 48-hour fleet route clustering Eco Efficiency Discount and CO₂ Emissions Reduction Recognition banners appear in the delivery slot picker and quote engine.
+                    <h4 className="text-sm font-extrabold text-[#0b2942]">Eco Efficiency Incentive &amp; Route Clustering</h4>
+                    <p className="text-xs text-slate-600 mt-1 max-w-2xl">
+                      Displays fleet route clustering discounts and CO₂ emissions reduction recognition in the delivery schedule picker.
                     </p>
                   </div>
                 </div>
-                <div className="flex sm:flex-col items-end gap-2 shrink-0">
-                  <button
-                    type="button"
-                    onClick={() => handleToggleFeatureFlag('enableEcoEfficiencyIncentive', currentConfig.enableEcoEfficiencyIncentive === false)}
-                    className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer shadow-xs ${
-                      currentConfig.enableEcoEfficiencyIncentive !== false
-                        ? 'bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200'
-                        : 'bg-emerald-600 hover:bg-emerald-700 text-white'
-                    }`}
-                  >
-                    {currentConfig.enableEcoEfficiencyIncentive !== false ? 'Deselect Feature' : 'Select Feature (Enable)'}
-                  </button>
-                </div>
+                <button
+                  type="button"
+                  onClick={() => handleToggleFeatureFlag('enableEcoEfficiencyIncentive', currentConfig.enableEcoEfficiencyIncentive === false)}
+                  className={`px-4 py-2 rounded-xl text-xs font-bold transition-all shrink-0 cursor-pointer ${
+                    currentConfig.enableEcoEfficiencyIncentive !== false
+                      ? 'bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300'
+                      : 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                  }`}
+                >
+                  {currentConfig.enableEcoEfficiencyIncentive !== false ? 'Deactivate Eco Incentive' : 'Activate Eco Incentive'}
+                </button>
               </div>
             </div>
 
-            {/* Feature: 100% Driveway Fit Guarantee & Driveway Assessment Process */}
-            <div className="p-6 rounded-2xl border border-slate-200 bg-white shadow-xs">
+            {/* Feature: 100% Driveway Fit Guarantee */}
+            <div className="p-5 rounded-2xl border border-slate-200 bg-white shadow-xs">
               <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
-                <div className="flex items-start gap-4">
-                  <div className={`p-3 rounded-2xl text-white shrink-0 ${
+                <div className="flex items-start gap-3.5">
+                  <div className={`p-2.5 rounded-xl text-white shrink-0 ${
                     currentConfig.enableDrivewayFitGuarantee ? 'bg-emerald-600' : 'bg-slate-400'
                   }`}>
-                    <ShieldCheck className="w-6 h-6" />
+                    <ShieldCheck className="w-5 h-5" />
                   </div>
                   <div>
-                    <div className="flex items-center gap-2.5 flex-wrap">
-                      <h4 className="text-base font-extrabold text-[#0b2942]">
-                        100% Driveway Fit Guarantee &amp; Driveway Assessment Process
-                      </h4>
-                      <span className={`text-[10px] font-black uppercase px-2.5 py-0.5 rounded-full ${
-                        currentConfig.enableDrivewayFitGuarantee
-                          ? 'bg-emerald-100 text-emerald-800 border border-emerald-200 font-bold'
-                          : 'bg-amber-100 text-amber-800 border border-amber-200 font-bold'
-                      }`}>
-                        {currentConfig.enableDrivewayFitGuarantee ? 'Active' : 'Deactivated (Flagged Off)'}
-                      </span>
-                    </div>
-                    <p className="text-xs text-slate-600 mt-1 max-w-2xl leading-relaxed">
-                      Controls customer-facing visibility of the <strong>100% Driveway Fit Guarantee</strong> and the interactive <strong>Driveway assessment process</strong> across quote steps, sidebar, and footer. Admin can reactivate this at any time.
+                    <h4 className="text-sm font-extrabold text-[#0b2942]">100% Driveway Fit Guarantee &amp; Assessment</h4>
+                    <p className="text-xs text-slate-600 mt-1 max-w-2xl">
+                      Controls customer-facing visibility of the 100% Driveway Fit Guarantee badge and assessment flow.
                     </p>
                   </div>
                 </div>
-
-                <div className="flex sm:flex-col items-end gap-2 shrink-0">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const updated: AppConfig = {
-                        ...currentConfig,
-                        enableDrivewayFitGuarantee: !currentConfig.enableDrivewayFitGuarantee,
-                      };
-                      setCurrentConfig(updated);
-                      onSaveConfig(updated);
-                      setSaveSuccess(true);
-                      setTimeout(() => setSaveSuccess(false), 2500);
-                    }}
-                    className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer shadow-xs ${
-                      currentConfig.enableDrivewayFitGuarantee
-                        ? 'bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300'
-                        : 'bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold'
-                    }`}
-                  >
-                    {currentConfig.enableDrivewayFitGuarantee ? 'Deactivate Guarantee' : 'Reactivate Guarantee'}
-                  </button>
-                </div>
+                <button
+                  type="button"
+                  onClick={() => handleToggleFeatureFlag('enableDrivewayFitGuarantee', !currentConfig.enableDrivewayFitGuarantee)}
+                  className={`px-4 py-2 rounded-xl text-xs font-bold transition-all shrink-0 cursor-pointer ${
+                    currentConfig.enableDrivewayFitGuarantee
+                      ? 'bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300'
+                      : 'bg-[#15385E] hover:bg-[#1f4a7a] text-white'
+                  }`}
+                >
+                  {currentConfig.enableDrivewayFitGuarantee ? 'Deactivate Guarantee' : 'Activate Guarantee'}
+                </button>
               </div>
             </div>
 
-            {/* Feature: Google Calendar Availability Links & Slot Integrations */}
-            <div className="p-6 rounded-2xl border border-slate-200 bg-white shadow-xs">
+            {/* Feature: Google Calendar Links */}
+            <div className="p-5 rounded-2xl border border-slate-200 bg-white shadow-xs">
               <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
-                <div className="flex items-start gap-4">
-                  <div className={`p-3 rounded-2xl text-white shrink-0 ${
+                <div className="flex items-start gap-3.5">
+                  <div className={`p-2.5 rounded-xl text-white shrink-0 ${
                     currentConfig.enableGoogleCalendarLink ? 'bg-sky-600' : 'bg-slate-400'
                   }`}>
-                    <Calendar className="w-6 h-6" />
+                    <Calendar className="w-5 h-5" />
                   </div>
                   <div>
-                    <div className="flex items-center gap-2.5 flex-wrap">
-                      <h4 className="text-base font-extrabold text-[#0b2942]">
-                        Google Calendar Availability &amp; Slot Integrations
-                      </h4>
-                      <span className={`text-[10px] font-black uppercase px-2.5 py-0.5 rounded-full ${
-                        currentConfig.enableGoogleCalendarLink
-                          ? 'bg-emerald-100 text-emerald-800 border border-emerald-200 font-bold'
-                          : 'bg-amber-100 text-amber-800 border border-amber-200 font-bold'
-                      }`}>
-                        {currentConfig.enableGoogleCalendarLink ? 'Active' : 'Turned Off (Admin Default)'}
-                      </span>
-                    </div>
-                    <p className="text-xs text-slate-600 mt-1 max-w-2xl leading-relaxed">
-                      Controls customer-facing visibility of external <strong>&ldquo;Open Google Calendar Availability&rdquo;</strong> links in Step 6 (Schedule &amp; Placement), sidebar tracking, and quote review. Default is turned off to keep scheduling seamlessly native to Portabox. Admin can reactivate this at any time.
+                    <h4 className="text-sm font-extrabold text-[#0b2942]">Google Calendar Slot Availability Links</h4>
+                    <p className="text-xs text-slate-600 mt-1 max-w-2xl">
+                      Controls customer-facing external Google Calendar availability links in Step 6.
                     </p>
                   </div>
                 </div>
-
-                <div className="flex sm:flex-col items-end gap-2 shrink-0">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const updated: AppConfig = {
-                        ...currentConfig,
-                        enableGoogleCalendarLink: !currentConfig.enableGoogleCalendarLink,
-                      };
-                      setCurrentConfig(updated);
-                      onSaveConfig(updated);
-                      setSaveSuccess(true);
-                      setTimeout(() => setSaveSuccess(false), 2500);
-                    }}
-                    className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer shadow-xs ${
-                      currentConfig.enableGoogleCalendarLink
-                        ? 'bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300'
-                        : 'bg-[#15385E] hover:bg-[#1f4a7a] text-white font-extrabold'
-                    }`}
-                  >
-                    {currentConfig.enableGoogleCalendarLink ? 'Turn Off Google Calendar Link' : 'Enable Google Calendar Link'}
-                  </button>
-                </div>
+                <button
+                  type="button"
+                  onClick={() => handleToggleFeatureFlag('enableGoogleCalendarLink', !currentConfig.enableGoogleCalendarLink)}
+                  className={`px-4 py-2 rounded-xl text-xs font-bold transition-all shrink-0 cursor-pointer ${
+                    currentConfig.enableGoogleCalendarLink
+                      ? 'bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300'
+                      : 'bg-[#15385E] hover:bg-[#1f4a7a] text-white'
+                  }`}
+                >
+                  {currentConfig.enableGoogleCalendarLink ? 'Turn Off Link' : 'Enable Link'}
+                </button>
               </div>
             </div>
 
-            {/* Feature: Portabox Moving Cartons & Packing Boxes (Default OFF) */}
-            <div className="p-6 rounded-2xl border border-slate-200 bg-white shadow-xs">
+            {/* Feature: Moving Cartons & Packing Boxes */}
+            <div className="p-5 rounded-2xl border border-slate-200 bg-white shadow-xs">
               <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
-                <div className="flex items-start gap-4">
-                  <div className={`p-3 rounded-2xl text-white shrink-0 ${
+                <div className="flex items-start gap-3.5">
+                  <div className={`p-2.5 rounded-xl text-white shrink-0 ${
                     currentConfig.enableMovingCartons ? 'bg-amber-600' : 'bg-slate-400'
                   }`}>
-                    <Package className="w-6 h-6" />
+                    <Package className="w-5 h-5" />
                   </div>
                   <div>
-                    <div className="flex items-center gap-2.5 flex-wrap">
-                      <h4 className="text-base font-extrabold text-[#0b2942]">
-                        Moving Cartons &amp; Packing Boxes
-                      </h4>
-                      <span className={`text-[10px] font-black uppercase px-2.5 py-0.5 rounded-full ${
-                        currentConfig.enableMovingCartons
-                          ? 'bg-emerald-100 text-emerald-800 border border-emerald-200 font-bold'
-                          : 'bg-amber-100 text-amber-800 border border-amber-200 font-bold'
-                      }`}>
-                        {currentConfig.enableMovingCartons ? 'Active (Cartons Enabled)' : 'Turned Off (Admin Default)'}
-                      </span>
-                    </div>
-                    <p className="text-xs text-slate-600 mt-1 max-w-2xl leading-relaxed">
-                      Controls customer-facing availability of heavy-duty moving cartons and boxes in Step 6 (Packing Supplies &amp; Accessories). Portabox does not supply moving cartons at the moment. Admins can enable this feature flag when carton supply is ready.
+                    <h4 className="text-sm font-extrabold text-[#0b2942]">Moving Cartons &amp; Packing Boxes (Default OFF)</h4>
+                    <p className="text-xs text-slate-600 mt-1 max-w-2xl">
+                      Controls customer availability of cartons in Step 6. Portabox does not supply moving cartons at the moment.
                     </p>
                   </div>
                 </div>
-
-                <div className="flex sm:flex-col items-end gap-2 shrink-0">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const updated: AppConfig = {
-                        ...currentConfig,
-                        enableMovingCartons: !currentConfig.enableMovingCartons,
-                      };
-                      setCurrentConfig(updated);
-                      onSaveConfig(updated);
-                      setSaveSuccess(true);
-                      setTimeout(() => setSaveSuccess(false), 2500);
-                    }}
-                    className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer shadow-xs ${
-                      currentConfig.enableMovingCartons
-                        ? 'bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300'
-                        : 'bg-[#15385E] hover:bg-[#1f4a7a] text-white font-extrabold'
-                    }`}
-                  >
-                    {currentConfig.enableMovingCartons ? 'Turn Off Moving Cartons' : 'Enable Moving Cartons'}
-                  </button>
-                </div>
+                <button
+                  type="button"
+                  onClick={() => handleToggleFeatureFlag('enableMovingCartons', !currentConfig.enableMovingCartons)}
+                  className={`px-4 py-2 rounded-xl text-xs font-bold transition-all shrink-0 cursor-pointer ${
+                    currentConfig.enableMovingCartons
+                      ? 'bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300'
+                      : 'bg-[#15385E] hover:bg-[#1f4a7a] text-white'
+                  }`}
+                >
+                  {currentConfig.enableMovingCartons ? 'Turn Off Cartons' : 'Enable Cartons'}
+                </button>
               </div>
             </div>
 
-            {/* Feature: Post-Quote Next Steps & Self-Booking Flow (Default OFF) */}
-            <div className="p-6 rounded-2xl border border-slate-200 bg-white shadow-xs">
+            {/* Feature: Post-Quote Next Steps Flow */}
+            <div className="p-5 rounded-2xl border border-slate-200 bg-white shadow-xs">
               <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
-                <div className="flex items-start gap-4">
-                  <div className={`p-3 rounded-2xl text-white shrink-0 ${
+                <div className="flex items-start gap-3.5">
+                  <div className={`p-2.5 rounded-xl text-white shrink-0 ${
                     currentConfig.enableNextStepsFlow ? 'bg-emerald-600' : 'bg-slate-400'
                   }`}>
-                    <ArrowRight className="w-6 h-6" />
+                    <ArrowRight className="w-5 h-5" />
                   </div>
                   <div>
-                    <div className="flex items-center gap-2.5 flex-wrap">
-                      <h4 className="text-base font-extrabold text-[#0b2942]">
-                        Post-Quote Next Steps &amp; Self-Booking Flow
-                      </h4>
-                      <span className={`text-[10px] font-black uppercase px-2.5 py-0.5 rounded-full ${
-                        currentConfig.enableNextStepsFlow
-                          ? 'bg-emerald-100 text-emerald-800 border border-emerald-200 font-bold'
-                          : 'bg-amber-100 text-amber-800 border border-amber-200 font-bold'
-                      }`}>
-                        {currentConfig.enableNextStepsFlow ? 'Active (Next Steps Flow Enabled)' : 'Turned Off (Admin Default)'}
-                      </span>
-                    </div>
-                    <p className="text-xs text-slate-600 mt-1 max-w-2xl leading-relaxed">
-                      Controls customer access to self-service delivery window selection, placement verification, and online card deposit flow immediately after generating the instant quote. When turned off (default), customers are guided to call, message, or email Portabox booking desk directly from the quotation.
+                    <h4 className="text-sm font-extrabold text-[#0b2942]">Post-Quote Next Steps &amp; Self-Booking Flow (Default OFF)</h4>
+                    <p className="text-xs text-slate-600 mt-1 max-w-2xl">
+                      Controls self-service online deposit and delivery window checkout immediately following the quotation.
                     </p>
                   </div>
                 </div>
-
-                <div className="flex sm:flex-col items-end gap-2 shrink-0">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const updated: AppConfig = {
-                        ...currentConfig,
-                        enableNextStepsFlow: !currentConfig.enableNextStepsFlow,
-                      };
-                      setCurrentConfig(updated);
-                      onSaveConfig(updated);
-                      setSaveSuccess(true);
-                      setTimeout(() => setSaveSuccess(false), 2500);
-                    }}
-                    className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer shadow-xs ${
-                      currentConfig.enableNextStepsFlow
-                        ? 'bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300'
-                        : 'bg-[#15385E] hover:bg-[#1f4a7a] text-white font-extrabold'
-                    }`}
-                  >
-                    {currentConfig.enableNextStepsFlow ? 'Turn Off Next Steps Flow' : 'Enable Next Steps Flow'}
-                  </button>
-                </div>
+                <button
+                  type="button"
+                  onClick={() => handleToggleFeatureFlag('enableNextStepsFlow', !currentConfig.enableNextStepsFlow)}
+                  className={`px-4 py-2 rounded-xl text-xs font-bold transition-all shrink-0 cursor-pointer ${
+                    currentConfig.enableNextStepsFlow
+                      ? 'bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300'
+                      : 'bg-[#15385E] hover:bg-[#1f4a7a] text-white'
+                  }`}
+                >
+                  {currentConfig.enableNextStepsFlow ? 'Turn Off Next Steps Flow' : 'Enable Next Steps Flow'}
+                </button>
               </div>
             </div>
 
-            {/* Feature: Select Weeks Duration Option & 2-Week Rate (Default OFF) */}
-            <div className="p-6 rounded-2xl border border-slate-200 bg-white shadow-xs">
+            {/* Feature: Select Weeks Duration Option & 2-Week Rate */}
+            <div className="p-5 rounded-2xl border border-slate-200 bg-white shadow-xs">
               <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
-                <div className="flex items-start gap-4">
-                  <div className={`p-3 rounded-2xl text-white shrink-0 ${
+                <div className="flex items-start gap-3.5">
+                  <div className={`p-2.5 rounded-xl text-white shrink-0 ${
                     currentConfig.enableSelectWeeks ? 'bg-indigo-600' : 'bg-slate-400'
                   }`}>
-                    <Clock className="w-6 h-6" />
+                    <Clock className="w-5 h-5" />
                   </div>
                   <div>
-                    <div className="flex items-center gap-2.5 flex-wrap">
-                      <h4 className="text-base font-extrabold text-[#0b2942]">
-                        Select Weeks Duration Option &amp; 2-Week Rate
-                      </h4>
-                      <span className={`text-[10px] font-black uppercase px-2.5 py-0.5 rounded-full ${
-                        currentConfig.enableSelectWeeks
-                          ? 'bg-emerald-100 text-emerald-800 border border-emerald-200 font-bold'
-                          : 'bg-amber-100 text-amber-800 border border-amber-200 font-bold'
-                      }`}>
-                        {currentConfig.enableSelectWeeks ? 'Active (Weeks Visible)' : 'Turned Off (Admin Default)'}
-                      </span>
-                    </div>
-                    <p className="text-xs text-slate-600 mt-1 max-w-2xl leading-relaxed">
+                    <h4 className="text-sm font-extrabold text-[#0b2942]">Select Weeks Duration Option &amp; 2-Week Rate (Default OFF)</h4>
+                    <p className="text-xs text-slate-600 mt-1 max-w-2xl">
                       Controls customer visibility of the weekly selection option on Page 5. Standard rate for 2 weeks across Small, Medium, Large is currently set to ${currentConfig.twoWeeksStorageRate ?? 199}.
                     </p>
                     <div className="mt-3 flex items-center gap-2">
@@ -7416,29 +7873,17 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                     </div>
                   </div>
                 </div>
-
-                <div className="flex sm:flex-col items-end gap-2 shrink-0">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const updated: AppConfig = {
-                        ...currentConfig,
-                        enableSelectWeeks: !currentConfig.enableSelectWeeks,
-                      };
-                      setCurrentConfig(updated);
-                      onSaveConfig(updated);
-                      setSaveSuccess(true);
-                      setTimeout(() => setSaveSuccess(false), 2500);
-                    }}
-                    className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer shadow-xs ${
-                      currentConfig.enableSelectWeeks
-                        ? 'bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300'
-                        : 'bg-[#15385E] hover:bg-[#1f4a7a] text-white font-extrabold'
-                    }`}
-                  >
-                    {currentConfig.enableSelectWeeks ? 'Turn Off Select Weeks' : 'Enable Select Weeks'}
-                  </button>
-                </div>
+                <button
+                  type="button"
+                  onClick={() => handleToggleFeatureFlag('enableSelectWeeks', !currentConfig.enableSelectWeeks)}
+                  className={`px-4 py-2 rounded-xl text-xs font-bold transition-all shrink-0 cursor-pointer ${
+                    currentConfig.enableSelectWeeks
+                      ? 'bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300'
+                      : 'bg-[#15385E] hover:bg-[#1f4a7a] text-white'
+                  }`}
+                >
+                  {currentConfig.enableSelectWeeks ? 'Turn Off Select Weeks' : 'Enable Select Weeks'}
+                </button>
               </div>
             </div>
 
@@ -7546,65 +7991,29 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
               </div>
             </div>
 
-            {/* Feature 4: Top Promo Banner & Slogan */}
-            <div className={`p-6 rounded-2xl border transition-all ${
-              currentConfig.enablePromoBanner !== false
-                ? 'bg-white border-slate-200 shadow-xs'
-                : 'bg-amber-50/50 border-amber-200'
-            }`}>
-              <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
-                <div className="flex items-start gap-4">
-                  <div className={`p-3 rounded-2xl text-[#1A1A1A] shrink-0 shadow-xs ${
-                    currentConfig.enablePromoBanner !== false ? 'bg-[#F7D347] border border-[#e5c235]' : 'bg-slate-300'
-                  }`}>
-                    <Sparkles className="w-6 h-6" />
+            {/* Feature 4: Top Promo Banner & Slogan Reference */}
+            <div className="p-5 rounded-2xl border border-slate-200 bg-slate-50/70">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div className="flex items-center gap-3.5">
+                  <div className="p-2.5 rounded-xl bg-[#F7D347] text-[#1A1A1A] border border-[#e5c235] shadow-xs">
+                    <Sparkles className="w-5 h-5" />
                   </div>
                   <div>
-                    <div className="flex items-center gap-2.5 flex-wrap">
-                      <h4 className="text-base font-extrabold text-[#0b2942]">
-                        Top Header Announcement Banner &amp; Price Match Guarantee
-                      </h4>
-                      <span className={`text-[10px] font-black uppercase px-2.5 py-0.5 rounded-full ${
-                        currentConfig.enablePromoBanner !== false
-                          ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
-                          : 'bg-rose-100 text-rose-800 border border-rose-200'
-                      }`}>
-                        {currentConfig.enablePromoBanner !== false ? 'Banner Visible' : 'Banner Hidden'}
-                      </span>
-                    </div>
-                    <p className="text-xs text-slate-600 mt-1 max-w-2xl leading-relaxed">
-                      Displays the top gold announcement bar across the app: &ldquo;{currentConfig.promoBannerSlogan || 'UP TO 50% MORE SPACE · GUARANTEED LOWER COST · PRICE MATCH GUARANTEE'}&rdquo;.
+                    <h4 className="text-sm font-extrabold text-[#0b2942]">
+                      Top Announcement Banner &amp; Marketing Slogan
+                    </h4>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      Governed by <strong>Feature Flag #10</strong> above (Restricted to CEO-selected admin staff). Edit slogan text in Branding.
                     </p>
                   </div>
                 </div>
-
-                <div className="flex sm:flex-col items-end gap-2 shrink-0">
+                <div className="flex items-center gap-2 shrink-0">
                   <button
                     type="button"
                     onClick={() => handleSelectNavTab('branding', 'Top Banner & Slogan')}
-                    className="px-4 py-2.5 rounded-xl text-xs font-bold bg-[#00c0f3] hover:bg-[#00a9d7] text-white transition-all cursor-pointer shadow-xs"
+                    className="px-3.5 py-2 rounded-xl text-xs font-bold bg-[#00c0f3] hover:bg-[#00a9d7] text-[#0b2942] transition-all cursor-pointer shadow-xs"
                   >
-                    Configure Slogan
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const updated: AppConfig = {
-                        ...currentConfig,
-                        enablePromoBanner: currentConfig.enablePromoBanner === false,
-                      };
-                      setCurrentConfig(updated);
-                      onSaveConfig(updated);
-                      setSaveSuccess(true);
-                      setTimeout(() => setSaveSuccess(false), 2500);
-                    }}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
-                      currentConfig.enablePromoBanner !== false
-                        ? 'text-rose-600 hover:text-rose-800'
-                        : 'text-emerald-600 hover:text-emerald-800'
-                    }`}
-                  >
-                    {currentConfig.enablePromoBanner !== false ? 'Hide Banner' : 'Show Banner'}
+                    Configure Slogan Text
                   </button>
                 </div>
               </div>

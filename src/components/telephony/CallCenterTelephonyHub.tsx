@@ -26,7 +26,20 @@ import {
   Mic,
   MicOff,
   ExternalLink,
+  Check,
+  Copy,
+  Smartphone,
+  RefreshCw,
 } from 'lucide-react';
+import {
+  ClickSendConfig,
+  ClickSendAccountInfo,
+  loadClickSendConfig,
+  saveClickSendConfig,
+  fetchClickSendAccount,
+  sendClickSendSms,
+  formatAustralianMobile,
+} from '../../services/clicksendService';
 import {
   CustomerAccount,
   ContainerOrder,
@@ -82,6 +95,77 @@ export const CallCenterTelephonyHub: React.FC = () => {
   const [simPhone, setSimPhone] = useState('0412 849 201');
   const [simEmail, setSimEmail] = useState('sarah.jenkins@gmail.com');
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  // ClickSend Australian Gateway State
+  const [clicksendConfig, setClicksendConfig] = useState<ClickSendConfig>(loadClickSendConfig());
+  const [clicksendAccount, setClicksendAccount] = useState<ClickSendAccountInfo | null>(null);
+  const [isCheckingBalance, setIsCheckingBalance] = useState(false);
+  const [gatewaySubTab, setGatewaySubTab] = useState<'clicksend' | 'twilio'>('clicksend');
+  const [testSmsRecipient, setTestSmsRecipient] = useState('0412 849 201');
+  const [testSmsText, setTestSmsText] = useState('Hi Sarah, your Portabox quote #PB-8021 for Adelaide Metro is confirmed! View quote: https://portabox.com.au/q/8021');
+  const [isSendingTestSms, setIsSendingTestSms] = useState(false);
+  const [testSmsResult, setTestSmsResult] = useState<any>(null);
+  const [copiedWebhook, setCopiedWebhook] = useState(false);
+
+  useEffect(() => {
+    fetchClickSendAccount().then(setClicksendAccount).catch(() => {});
+  }, []);
+
+  const handleRefreshClickSendBalance = async () => {
+    setIsCheckingBalance(true);
+    try {
+      const acct = await fetchClickSendAccount();
+      setClicksendAccount(acct);
+      showToast(acct.configured ? `ClickSend Account Balance: $${acct.balance?.toFixed(2)} ${acct.currency}` : 'ClickSend credentials required or in simulated sandbox');
+    } catch {
+      showToast('ClickSend balance check error');
+    } finally {
+      setIsCheckingBalance(false);
+    }
+  };
+
+  const handleSaveClickSendConfig = (e: React.FormEvent) => {
+    e.preventDefault();
+    saveClickSendConfig(clicksendConfig);
+    showToast('ClickSend Australian Gateway configuration saved!');
+    handleRefreshClickSendBalance();
+  };
+
+  const handleSendTestClickSendSms = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!testSmsRecipient.trim() || !testSmsText.trim()) return;
+    setIsSendingTestSms(true);
+    setTestSmsResult(null);
+    try {
+      const res = await sendClickSendSms({
+        to: testSmsRecipient,
+        message: testSmsText,
+        contactId: selectedCustomerId,
+      });
+      setTestSmsResult(res);
+      showToast(res.simulated ? 'Test SMS Simulated (ClickSend sandbox)' : 'Test SMS Sent via ClickSend Australia!');
+      await sendSmsMessage({
+        customerPhone: testSmsRecipient,
+        text: testSmsText,
+        sender: 'agent',
+        customerId: selectedCustomerId,
+      });
+    } catch (err: any) {
+      setTestSmsResult({ success: false, error: err.message });
+      showToast('ClickSend dispatch failed');
+    } finally {
+      setIsSendingTestSms(false);
+    }
+  };
+
+  const handleCopyWebhookUrl = () => {
+    const origin = typeof window !== 'undefined' ? window.location.origin : 'https://portabox.com.au';
+    const webhookUrl = `${origin}/api/clicksend/inbound`;
+    navigator.clipboard.writeText(webhookUrl);
+    setCopiedWebhook(true);
+    showToast('ClickSend Inbound Webhook URL copied!');
+    setTimeout(() => setCopiedWebhook(false), 2500);
+  };
 
   // Sync state with custom event & real-time listeners
   useEffect(() => {
@@ -319,8 +403,8 @@ export const CallCenterTelephonyHub: React.FC = () => {
               : 'bg-white text-slate-600 hover:text-slate-900 border border-slate-200'
           }`}
         >
-          <Settings className="w-4 h-4" />
-          <span>Twilio Australian Settings & TwiML</span>
+          <Smartphone className="w-4 h-4" />
+          <span>Telephony & SMS Gateway (ClickSend & Twilio)</span>
         </button>
       </div>
 
@@ -735,131 +819,464 @@ export const CallCenterTelephonyHub: React.FC = () => {
         </div>
       )}
 
-      {/* ================= TAB 4: TWILIO AUSTRALIAN SETTINGS & TWIML ================= */}
+      {/* ================= TAB 4: TELEPHONY & SMS GATEWAY INFRASTRUCTURE ================= */}
       {hubTab === 'twilio_infrastructure' && (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
-          {/* Settings Form */}
-          <div className="bg-white rounded-3xl p-6 border border-slate-200 shadow-xs space-y-4">
-            <h3 className="font-extrabold text-[#0b2942] text-sm flex items-center gap-2">
-              <Settings className="w-4 h-4 text-[#00c0f3]" />
-              Twilio Australian Telephony Credentials
-            </h3>
-
-            <form onSubmit={handleSaveTwilioConfig} className="space-y-4 text-xs">
-              <div>
-                <label className="block text-slate-600 font-bold mb-1">Twilio Account SID</label>
-                <input
-                  type="text"
-                  value={twilioConfig.accountSid}
-                  onChange={(e) => setTwilioConfig({ ...twilioConfig, accountSid: e.target.value })}
-                  className="w-full p-2.5 rounded-xl border border-slate-200 font-mono text-xs"
-                />
-              </div>
-
-              <div>
-                <label className="block text-slate-600 font-bold mb-1">Twilio Auth Token</label>
-                <input
-                  type="password"
-                  value={twilioConfig.authTokenMasked}
-                  onChange={(e) => setTwilioConfig({ ...twilioConfig, authTokenMasked: e.target.value })}
-                  className="w-full p-2.5 rounded-xl border border-slate-200 font-mono text-xs"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-slate-600 font-bold mb-1">Australian 1300 / Voice Number</label>
-                  <input
-                    type="text"
-                    value={twilioConfig.twilioVoiceNumber}
-                    onChange={(e) => setTwilioConfig({ ...twilioConfig, twilioVoiceNumber: e.target.value })}
-                    className="w-full p-2.5 rounded-xl border border-slate-200 font-mono text-xs"
-                  />
-                </div>
-                <div>
-                  <label className="block text-slate-600 font-bold mb-1">Australian Mobile SMS Number</label>
-                  <input
-                    type="text"
-                    value={twilioConfig.twilioSmsNumber}
-                    onChange={(e) => setTwilioConfig({ ...twilioConfig, twilioSmsNumber: e.target.value })}
-                    className="w-full p-2.5 rounded-xl border border-slate-200 font-mono text-xs"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-slate-600 font-bold mb-1">IVR Australian Voice Profile</label>
-                <select
-                  value={twilioConfig.ivrGreetingVoice}
-                  onChange={(e) => setTwilioConfig({ ...twilioConfig, ivrGreetingVoice: e.target.value as any })}
-                  className="w-full p-2.5 rounded-xl border border-slate-200 font-semibold"
-                >
-                  <option value="Polly.Nicole (Australian English Female)">
-                    Polly.Nicole (Australian English Female - Natural)
-                  </option>
-                  <option value="Polly.Russell-Neural (Australian English Male)">
-                    Polly.Russell-Neural (Australian English Male - Natural)
-                  </option>
-                </select>
-              </div>
-
-              <div className="space-y-2 pt-2 border-t border-slate-100">
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={twilioConfig.autoScreenPop}
-                    onChange={(e) => setTwilioConfig({ ...twilioConfig, autoScreenPop: e.target.checked })}
-                    className="rounded text-[#00c0f3]"
-                  />
-                  <span className="font-bold text-slate-700">
-                    Automatic Screen-Pop: instantly open caller history when call connects
-                  </span>
-                </label>
-
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={twilioConfig.soundEffectsEnabled}
-                    onChange={(e) => setTwilioConfig({ ...twilioConfig, soundEffectsEnabled: e.target.checked })}
-                    className="rounded text-[#00c0f3]"
-                  />
-                  <span className="font-bold text-slate-700">
-                    Audible Web Audio ring chime for incoming calls
-                  </span>
-                </label>
-              </div>
-
-              <div className="flex justify-end pt-2">
-                <button
-                  type="submit"
-                  className="px-5 py-2.5 bg-[#0b2942] hover:bg-[#081e30] text-white font-extrabold rounded-xl shadow-xs transition-transform active:scale-95 cursor-pointer"
-                >
-                  Save Twilio Settings
-                </button>
-              </div>
-            </form>
-          </div>
-
-          {/* Generated TwiML XML Preview */}
-          <div className="bg-slate-900 text-slate-100 rounded-3xl p-6 border border-slate-800 shadow-xl space-y-4">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-              <h3 className="font-extrabold text-white text-sm flex items-center gap-2">
-                <Code className="w-4 h-4 text-[#00c0f3]" />
-                Live Generated Twilio TwiML Response
-              </h3>
-              <span className="text-[10px] font-mono bg-sky-950 text-sky-300 px-2 py-0.5 rounded">
-                IVR Voice XML
+        <div className="space-y-6">
+          {/* Sub Navigation Switch */}
+          <div className="flex flex-wrap items-center gap-2 bg-slate-100 p-1.5 rounded-2xl w-fit border border-slate-200">
+            <button
+              type="button"
+              onClick={() => setGatewaySubTab('clicksend')}
+              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-extrabold transition-all cursor-pointer ${
+                gatewaySubTab === 'clicksend'
+                  ? 'bg-[#0b2942] text-white shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900 bg-transparent'
+              }`}
+            >
+              <Smartphone className="w-3.5 h-3.5 text-[#00c0f3]" />
+              <span>ClickSend Australia (Direct SMS & Webhooks)</span>
+              <span className="bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-[9px] font-bold px-2 py-0.5 rounded-full">
+                Primary SMS
               </span>
-            </div>
-
-            <p className="text-slate-400 text-xs">
-              When an Australian customer calls Portabox, Twilio executes this exact TwiML XML to collect their email address and route them to our browser softphone:
-            </p>
-
-            <pre className="p-4 bg-slate-950 rounded-2xl text-[11px] font-mono text-emerald-400 overflow-x-auto leading-relaxed border border-slate-800">
-              {generateTwilioTwiML(selectedCustomer?.mobile || '0412849201', selectedCustomer)}
-            </pre>
+            </button>
+            <button
+              type="button"
+              onClick={() => setGatewaySubTab('twilio')}
+              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-extrabold transition-all cursor-pointer ${
+                gatewaySubTab === 'twilio'
+                  ? 'bg-[#0b2942] text-white shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900 bg-transparent'
+              }`}
+            >
+              <Settings className="w-3.5 h-3.5 text-[#00c0f3]" />
+              <span>Twilio (Voice Media Stream & TwiML Softphone)</span>
+            </button>
           </div>
+
+          {/* ================= SUB-TAB 1: CLICKSEND AUSTRALIAN SMS GATEWAY ================= */}
+          {gatewaySubTab === 'clicksend' && (
+            <div className="space-y-6">
+              {/* Australian Carrier Banner */}
+              <div className="bg-gradient-to-r from-[#0b2942] via-[#0d3455] to-[#00c0f3]/40 text-white rounded-3xl p-6 border border-slate-800 shadow-lg flex flex-wrap items-center justify-between gap-4">
+                <div className="flex items-start gap-4">
+                  <div className="w-12 h-12 rounded-2xl bg-[#00c0f3] text-white flex items-center justify-center font-bold shadow-md shrink-0">
+                    <Smartphone className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h3 className="font-extrabold text-base">ClickSend Australian Tier-1 Direct SMS Route</h3>
+                      <span className="bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-[10px] font-bold uppercase px-2.5 py-0.5 rounded-full">
+                        ACMA Compliant
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-300 mt-1 max-w-2xl leading-relaxed">
+                      Portabox utilizes ClickSend for direct SMPP routes to Telstra, Optus, and TPG Vodafone. Delivers sub-second quote delivery, 2-way inbound customer replies, native AUD billing (~$0.045/SMS), and custom alphanumeric sender ID <span className="font-mono text-sky-300 font-bold">"Portabox"</span>.
+                    </p>
+                  </div>
+                </div>
+
+                {/* Account Balance Widget */}
+                <div className="bg-white/10 backdrop-blur-md rounded-2xl p-4 border border-white/10 min-w-[210px] text-right">
+                  <div className="flex items-center justify-between gap-2 mb-1">
+                    <span className="text-[10px] uppercase font-bold text-slate-300 tracking-wider">ClickSend AUD Balance</span>
+                    <button
+                      type="button"
+                      onClick={handleRefreshClickSendBalance}
+                      disabled={isCheckingBalance}
+                      className="text-xs text-sky-300 hover:text-white transition-colors cursor-pointer flex items-center gap-1 font-bold"
+                    >
+                      <RefreshCw className={`w-3 h-3 ${isCheckingBalance ? 'animate-spin' : ''}`} />
+                      <span>Sync</span>
+                    </button>
+                  </div>
+                  <div className="text-xl font-extrabold text-white">
+                    {clicksendAccount?.balance !== undefined && clicksendAccount?.balance !== null
+                      ? `$${clicksendAccount.balance.toFixed(2)} ${clicksendAccount.currency || 'AUD'}`
+                      : clicksendConfig.username && clicksendConfig.apiKey
+                      ? 'Live Active'
+                      : '$0.00 AUD (Sandbox)'}
+                  </div>
+                  <span className="text-[10px] text-emerald-300 block mt-0.5 font-medium">
+                    {clicksendAccount?.configured
+                      ? `Account: ${clicksendAccount.username || clicksendConfig.username}`
+                      : 'Simulated dispatch active until keys set'}
+                  </span>
+                </div>
+              </div>
+
+              {/* Configuration and Live Test Grid */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
+                {/* ClickSend Settings Card */}
+                <div className="bg-white rounded-3xl p-6 border border-slate-200 shadow-xs space-y-4">
+                  <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                    <h4 className="font-extrabold text-[#0b2942] text-sm flex items-center gap-2">
+                      <Settings className="w-4 h-4 text-[#00c0f3]" />
+                      ClickSend API v3 Credentials
+                    </h4>
+                    <span className="text-[10px] font-mono font-bold bg-sky-50 text-[#00c0f3] px-2 py-0.5 rounded">
+                      rest.clicksend.com/v3
+                    </span>
+                  </div>
+
+                  <form onSubmit={handleSaveClickSendConfig} className="space-y-4 text-xs">
+                    <div>
+                      <label className="block text-slate-600 font-bold mb-1">ClickSend Username / Email</label>
+                      <input
+                        type="text"
+                        value={clicksendConfig.username}
+                        onChange={(e) => setClicksendConfig({ ...clicksendConfig, username: e.target.value })}
+                        placeholder="e.g. accounts@portabox.com.au or clicksend_username"
+                        className="w-full p-2.5 rounded-xl border border-slate-200 font-mono text-xs focus:ring-2 focus:ring-[#00c0f3] outline-hidden"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-slate-600 font-bold mb-1">ClickSend API Key</label>
+                      <input
+                        type="password"
+                        value={clicksendConfig.apiKey}
+                        onChange={(e) => setClicksendConfig({ ...clicksendConfig, apiKey: e.target.value })}
+                        placeholder="e.g. 55B5A245-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+                        className="w-full p-2.5 rounded-xl border border-slate-200 font-mono text-xs focus:ring-2 focus:ring-[#00c0f3] outline-hidden"
+                      />
+                      <p className="text-[10px] text-slate-400 mt-1">
+                        Obtained from ClickSend Dashboard &gt; Developers &gt; API Credentials.
+                      </p>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-slate-600 font-bold mb-1">Sender ID (From)</label>
+                        <input
+                          type="text"
+                          value={clicksendConfig.senderId}
+                          onChange={(e) => setClicksendConfig({ ...clicksendConfig, senderId: e.target.value })}
+                          placeholder="Portabox or 0412345678"
+                          className="w-full p-2.5 rounded-xl border border-slate-200 font-mono text-xs focus:ring-2 focus:ring-[#00c0f3] outline-hidden"
+                        />
+                        <span className="text-[10px] text-slate-400 mt-0.5 block">
+                          Alphanumeric "Portabox" or AU Virtual Number
+                        </span>
+                      </div>
+                      <div>
+                        <label className="block text-slate-600 font-bold mb-1">Delivery Receipts (DLR)</label>
+                        <div className="p-2.5 rounded-xl border border-slate-200 bg-slate-50 text-slate-600 font-mono text-xs">
+                          Direct Carrier DLR
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="pt-2 border-t border-slate-100 flex items-center justify-between">
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={clicksendConfig.enabled}
+                          onChange={(e) => setClicksendConfig({ ...clicksendConfig, enabled: e.target.checked })}
+                          className="rounded text-[#00c0f3] focus:ring-[#00c0f3]"
+                        />
+                        <span className="font-bold text-slate-700">
+                          Route All Outbound Australian SMS via ClickSend
+                        </span>
+                      </label>
+
+                      <button
+                        type="submit"
+                        className="px-5 py-2.5 bg-[#0b2942] hover:bg-[#081e30] text-white font-extrabold rounded-xl shadow-xs transition-transform active:scale-95 cursor-pointer"
+                      >
+                        Save ClickSend Settings
+                      </button>
+                    </div>
+                  </form>
+                </div>
+
+                {/* Interactive Test SMS Dispatcher */}
+                <div className="bg-white rounded-3xl p-6 border border-slate-200 shadow-xs space-y-4">
+                  <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                    <h4 className="font-extrabold text-[#0b2942] text-sm flex items-center gap-2">
+                      <Send className="w-4 h-4 text-[#00c0f3]" />
+                      Live ClickSend Australian Test Dispatcher
+                    </h4>
+                    <span className="text-[10px] font-bold uppercase bg-emerald-100 text-emerald-700 px-2.5 py-0.5 rounded-full">
+                      Ready to Test
+                    </span>
+                  </div>
+
+                  <form onSubmit={handleSendTestClickSendSms} className="space-y-3 text-xs">
+                    <div>
+                      <label className="block text-slate-600 font-bold mb-1">Destination Australian Mobile Number</label>
+                      <input
+                        type="text"
+                        value={testSmsRecipient}
+                        onChange={(e) => setTestSmsRecipient(e.target.value)}
+                        placeholder="e.g. 0412 849 201 or +61412849201"
+                        className="w-full p-2.5 rounded-xl border border-slate-200 font-mono text-xs focus:ring-2 focus:ring-[#00c0f3] outline-hidden"
+                      />
+                      <span className="text-[10px] text-slate-400 mt-0.5 block">
+                        Auto-normalizes to E.164 Australian international format (+614...).
+                      </span>
+                    </div>
+
+                    <div>
+                      <div className="flex items-center justify-between mb-1">
+                        <label className="block text-slate-600 font-bold">SMS Body</label>
+                        <span className="text-[10px] font-mono text-slate-400">
+                          {testSmsText.length}/160 chars ({Math.ceil(testSmsText.length / 160) || 1} segment)
+                        </span>
+                      </div>
+                      <textarea
+                        rows={3}
+                        value={testSmsText}
+                        onChange={(e) => setTestSmsText(e.target.value)}
+                        className="w-full p-2.5 rounded-xl border border-slate-200 text-xs focus:ring-2 focus:ring-[#00c0f3] outline-hidden resize-none"
+                      />
+                    </div>
+
+                    <div className="flex justify-between items-center pt-1">
+                      <span className="text-[11px] text-slate-500">
+                        Est. Cost: <span className="font-bold text-slate-800">$0.045 AUD</span>
+                      </span>
+
+                      <button
+                        type="submit"
+                        disabled={isSendingTestSms || !testSmsRecipient.trim() || !testSmsText.trim()}
+                        className="px-5 py-2.5 bg-[#00c0f3] hover:bg-[#00ace0] disabled:opacity-50 text-white font-extrabold rounded-xl shadow-xs transition-transform active:scale-95 cursor-pointer flex items-center gap-2 text-xs"
+                      >
+                        <Send className="w-3.5 h-3.5" />
+                        <span>{isSendingTestSms ? 'Transmitting...' : 'Send Test SMS via ClickSend'}</span>
+                      </button>
+                    </div>
+                  </form>
+
+                  {/* Dispatch Receipt Feedback */}
+                  {testSmsResult && (
+                    <div
+                      className={`p-3.5 rounded-2xl border text-xs space-y-1.5 animate-in fade-in ${
+                        testSmsResult.success
+                          ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
+                          : 'bg-rose-50 border-rose-200 text-rose-900'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between font-bold">
+                        <span className="flex items-center gap-1.5">
+                          <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                          <span>
+                            {testSmsResult.simulated
+                              ? 'Simulation Succeeded (Credentials not configured)'
+                              : 'Dispatched to ClickSend Direct SMPP'}
+                          </span>
+                        </span>
+                        <span className="font-mono text-[10px]">
+                          {testSmsResult.messageId || 'M-OK'}
+                        </span>
+                      </div>
+                      <p className="text-[11px] opacity-90 leading-relaxed">
+                        {testSmsResult.simulated
+                          ? 'Message recorded in Portabox Two-Way SMS Hub. To send real SMS to mobile devices, input your ClickSend API Key.'
+                          : `Successfully delivered to carrier gateway. Cost: $${(testSmsResult.cost || 0.045).toFixed(3)} ${testSmsResult.currency || 'AUD'}.`}
+                      </p>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Inbound Two-Way Webhook Setup Card */}
+              <div className="bg-white rounded-3xl p-6 border border-slate-200 shadow-xs space-y-4">
+                <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                  <h4 className="font-extrabold text-[#0b2942] text-sm flex items-center gap-2">
+                    <MessageSquare className="w-4 h-4 text-[#00c0f3]" />
+                    Two-Way SMS Inbound Webhook (Customer Replies)
+                  </h4>
+                  <span className="text-[10px] font-mono font-bold bg-purple-50 text-purple-700 px-2 py-0.5 rounded">
+                    POST Webhook
+                  </span>
+                </div>
+
+                <p className="text-xs text-slate-600 leading-relaxed">
+                  When Australian customers reply to Portabox SMS notifications (such as confirming delivery dates, asking container size questions, or submitting dunning responses), ClickSend forwards the incoming message payload to this webhook. The message automatically pops into the Portabox Two-Way SMS Workspace and links to the customer profile.
+                </p>
+
+                <div className="space-y-2">
+                  <label className="block text-slate-600 font-bold text-xs">
+                    Your Portabox Inbound Webhook URL (Paste into ClickSend Dashboard)
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      readOnly
+                      value={`${typeof window !== 'undefined' ? window.location.origin : 'https://portabox.com.au'}/api/clicksend/inbound`}
+                      className="flex-1 p-2.5 rounded-xl border border-slate-200 font-mono text-xs bg-slate-50 text-slate-700 select-all"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleCopyWebhookUrl}
+                      className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold rounded-xl text-xs flex items-center gap-1.5 transition-colors cursor-pointer"
+                    >
+                      {copiedWebhook ? (
+                        <>
+                          <Check className="w-3.5 h-3.5 text-emerald-600" />
+                          <span className="text-emerald-700">Copied!</span>
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="w-3.5 h-3.5" />
+                          <span>Copy URL</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-2 text-xs">
+                  <div className="p-3 bg-slate-50 rounded-2xl border border-slate-100">
+                    <span className="font-bold text-[#0b2942] block mb-1">1. Get Dedicated AU Number</span>
+                    <p className="text-slate-500 text-[11px]">
+                      Under ClickSend &gt; SMS &gt; Dedicated Numbers, allocate an Australian 04xx virtual mobile number.
+                    </p>
+                  </div>
+                  <div className="p-3 bg-slate-50 rounded-2xl border border-slate-100">
+                    <span className="font-bold text-[#0b2942] block mb-1">2. Configure Inbound Rule</span>
+                    <p className="text-slate-500 text-[11px]">
+                      Under ClickSend &gt; SMS &gt; Inbound SMS &gt; Rules, set Action to "Forward to URL" with POST format.
+                    </p>
+                  </div>
+                  <div className="p-3 bg-slate-50 rounded-2xl border border-slate-100">
+                    <span className="font-bold text-[#0b2942] block mb-1">3. Instant Screen-Pop</span>
+                    <p className="text-slate-500 text-[11px]">
+                      Customer replies are matched to accounts and display live with notification badges in the Portabox portal.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ================= SUB-TAB 2: TWILIO VOICE & TWIML ================= */}
+          {gatewaySubTab === 'twilio' && (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
+              {/* Settings Form */}
+              <div className="bg-white rounded-3xl p-6 border border-slate-200 shadow-xs space-y-4">
+                <h3 className="font-extrabold text-[#0b2942] text-sm flex items-center gap-2">
+                  <Settings className="w-4 h-4 text-[#00c0f3]" />
+                  Twilio Australian Telephony Credentials
+                </h3>
+
+                <form onSubmit={handleSaveTwilioConfig} className="space-y-4 text-xs">
+                  <div>
+                    <label className="block text-slate-600 font-bold mb-1">Twilio Account SID</label>
+                    <input
+                      type="text"
+                      value={twilioConfig.accountSid}
+                      onChange={(e) => setTwilioConfig({ ...twilioConfig, accountSid: e.target.value })}
+                      className="w-full p-2.5 rounded-xl border border-slate-200 font-mono text-xs"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-slate-600 font-bold mb-1">Twilio Auth Token</label>
+                    <input
+                      type="password"
+                      value={twilioConfig.authTokenMasked}
+                      onChange={(e) => setTwilioConfig({ ...twilioConfig, authTokenMasked: e.target.value })}
+                      className="w-full p-2.5 rounded-xl border border-slate-200 font-mono text-xs"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-slate-600 font-bold mb-1">Australian 1300 / Voice Number</label>
+                      <input
+                        type="text"
+                        value={twilioConfig.twilioVoiceNumber}
+                        onChange={(e) => setTwilioConfig({ ...twilioConfig, twilioVoiceNumber: e.target.value })}
+                        className="w-full p-2.5 rounded-xl border border-slate-200 font-mono text-xs"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-slate-600 font-bold mb-1">Australian Mobile SMS Number</label>
+                      <input
+                        type="text"
+                        value={twilioConfig.twilioSmsNumber}
+                        onChange={(e) => setTwilioConfig({ ...twilioConfig, twilioSmsNumber: e.target.value })}
+                        className="w-full p-2.5 rounded-xl border border-slate-200 font-mono text-xs"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-slate-600 font-bold mb-1">IVR Australian Voice Profile</label>
+                    <select
+                      value={twilioConfig.ivrGreetingVoice}
+                      onChange={(e) => setTwilioConfig({ ...twilioConfig, ivrGreetingVoice: e.target.value as any })}
+                      className="w-full p-2.5 rounded-xl border border-slate-200 font-semibold"
+                    >
+                      <option value="Polly.Nicole (Australian English Female)">
+                        Polly.Nicole (Australian English Female - Natural)
+                      </option>
+                      <option value="Polly.Russell-Neural (Australian English Male)">
+                        Polly.Russell-Neural (Australian English Male - Natural)
+                      </option>
+                    </select>
+                  </div>
+
+                  <div className="space-y-2 pt-2 border-t border-slate-100">
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={twilioConfig.autoScreenPop}
+                        onChange={(e) => setTwilioConfig({ ...twilioConfig, autoScreenPop: e.target.checked })}
+                        className="rounded text-[#00c0f3]"
+                      />
+                      <span className="font-bold text-slate-700">
+                        Automatic Screen-Pop: instantly open caller history when call connects
+                      </span>
+                    </label>
+
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={twilioConfig.soundEffectsEnabled}
+                        onChange={(e) => setTwilioConfig({ ...twilioConfig, soundEffectsEnabled: e.target.checked })}
+                        className="rounded text-[#00c0f3]"
+                      />
+                      <span className="font-bold text-slate-700">
+                        Audible Web Audio ring chime for incoming calls
+                      </span>
+                    </label>
+                  </div>
+
+                  <div className="flex justify-end pt-2">
+                    <button
+                      type="submit"
+                      className="px-5 py-2.5 bg-[#0b2942] hover:bg-[#081e30] text-white font-extrabold rounded-xl shadow-xs transition-transform active:scale-95 cursor-pointer"
+                    >
+                      Save Twilio Settings
+                    </button>
+                  </div>
+                </form>
+              </div>
+
+              {/* Generated TwiML XML Preview */}
+              <div className="bg-slate-900 text-slate-100 rounded-3xl p-6 border border-slate-800 shadow-xl space-y-4">
+                <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+                  <h3 className="font-extrabold text-white text-sm flex items-center gap-2">
+                    <Code className="w-4 h-4 text-[#00c0f3]" />
+                    Live Generated Twilio TwiML Response
+                  </h3>
+                  <span className="text-[10px] font-mono bg-sky-950 text-sky-300 px-2 py-0.5 rounded">
+                    IVR Voice XML
+                  </span>
+                </div>
+
+                <p className="text-slate-400 text-xs">
+                  When an Australian customer calls Portabox, Twilio executes this exact TwiML XML to collect their email address and route them to our browser softphone:
+                </p>
+
+                <pre className="p-4 bg-slate-950 rounded-2xl text-[11px] font-mono text-emerald-400 overflow-x-auto leading-relaxed border border-slate-800">
+                  {generateTwilioTwiML(selectedCustomer?.mobile || '0412849201', selectedCustomer)}
+                </pre>
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>
