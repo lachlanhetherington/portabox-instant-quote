@@ -331,6 +331,51 @@ if (hits.length) {
   say('');
 }
 
+/* -------------------------------------------------- prices and the flags */
+
+say('## Prices and feature flags');
+say('');
+let pricingOut = '';
+let pricingChanged = false;
+try {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'crm-pricing-'));
+  const oldFile = path.join(dir, 'old.ts');
+  const newFile = path.join(dir, 'new.ts');
+  fs.writeFileSync(oldFile, git(['show', `${marker.sha}:src/services/pricingEngine.ts`], upstream));
+  fs.writeFileSync(newFile, git(['show', `${head}:src/services/pricingEngine.ts`], upstream));
+  try {
+    pricingOut = run('node', [path.join(ROOT, 'tools/diff-pricing.cjs'), oldFile, newFile], { cwd: ROOT });
+  } catch (e) {
+    /* Exit 1 means it found changes, which is the interesting case, not a
+       failure. Anything else is the tool losing its anchor. */
+    pricingOut = ((e.stdout || '') + (e.stderr || '')).toString();
+    pricingChanged = e.status === 1;
+    if (e.status === 3) {
+      block('**Prices and flag defaults were not compared** — `DEFAULT_CONFIG` moved in `pricingEngine.ts`, so `tools/diff-pricing.cjs` needs re-anchoring. Until then, check the numbers by hand.');
+    }
+  }
+  fs.rmSync(dir, { recursive: true, force: true });
+} catch {
+  pricingOut = 'Could not read the previous revision of pricingEngine.ts, so prices\n'
+    + 'and flag defaults were not compared. Check them by hand.';
+  block('**Prices and flag defaults were not compared**, because the previous revision of `pricingEngine.ts` could not be read. Check the numbers by hand before merging.');
+}
+console.log(pricingOut.trimEnd());
+say('```');
+say(pricingOut.trimEnd());
+say('```');
+say('');
+const moneyChanged = /^Prices and rates —/m.test(pricingOut);
+if (moneyChanged) {
+  say('A price changed. That is not a merge decision — it is a question for the');
+  say('client, and the website is a separate repo that will not have followed.');
+  say('');
+} else if (pricingChanged) {
+  say('No price moved, but a flag default did, which changes what the public sees');
+  say('without changing a word of copy.');
+  say('');
+}
+
 /* ------------------------------------------------------- staff surfaces */
 
 say('## Staff surfaces');
@@ -391,12 +436,17 @@ if (removed.length) {
   for (const f of removed.slice(0, 20)) say(`  - \`${f}\``);
   if (removed.length > 20) say(`  - …and ${removed.length - 20} more`);
 }
-say('- **Prices and rates.** A pricing change is a question for the client, not');
-say('  a merge decision. The website and the quote engine have disagreed on the');
-say('  Medium size before ($209 against $219).');
-say('- **Feature flag defaults.** Flipping one changes what the public sees');
-say('  without changing any copy. The last drop turned the promo banner and the');
-say('  dispatch console off.');
+if (moneyChanged) {
+  say('- **The price changes listed above**, against what the client actually');
+  say('  asked for. The website is a separate repo and will not have followed —');
+  say('  the two have disagreed on the Medium size before, $209 against $219.');
+} else if (pricingChanged) {
+  say('- **The flag defaults listed above.** Turning one on or off changes what');
+  say('  the public sees without changing any copy.');
+}
+say('- **Anything priced outside `DEFAULT_CONFIG`.** The comparison above covers');
+say('  the numbers in that object. A rate computed in code, or read from a');
+say('  staff-edited setting, will not appear in it.');
 say('');
 
 /* ------------------------------------------------------------- the marker */
