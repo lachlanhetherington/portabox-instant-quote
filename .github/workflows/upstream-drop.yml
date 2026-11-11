@@ -47,6 +47,27 @@
 # stops there when nothing has changed: a full clone of that repo is 64 MB, so
 # cloning hourly to learn nothing would be 1.5 GB a day.
 #
+# UPSTREAM_TOKEN, and why it is not optional:
+#
+# ahammo67/portabox-CRM is private and owned by someone else. A workflow's
+# own GITHUB_TOKEN only grants access to the repository it runs in, so
+# without a token of its own this job gets "Repository not found" and cannot
+# see upstream at all. Confirmed by the first run of this workflow.
+#
+# Add a repository secret named UPSTREAM_TOKEN containing a token that can
+# read that repo. In order of preference:
+#
+#   1. A read-only deploy key or a fine-grained token created by ahammo67,
+#      scoped to that one repository with Contents: Read. Narrowest, but
+#      needs the repo's owner to make it — a fine-grained token can only
+#      reach repositories owned by whoever created it, so one made from this
+#      side cannot cover theirs.
+#   2. A classic personal access token with the `repo` scope, from an account
+#      that is already a collaborator there. Works immediately, but `repo` is
+#      broad: it can read every private repository that account can see, and
+#      it would be sitting in this repo's secrets. Prefer a token on an
+#      account with little else on it, and give it an expiry.
+#
 # Also needed: Settings -> Actions -> General -> Workflow permissions ->
 # "Allow GitHub Actions to create and approve pull requests", or the pull
 # request cannot be opened or merged.
@@ -117,15 +138,45 @@ jobs:
       # alone. No clone, no node, no install.
       - name: Anything new upstream?
         id: peek
+        env:
+          # Upstream is a PRIVATE repo belonging to someone else, so the
+          # job's own GITHUB_TOKEN cannot read it — that token only ever
+          # grants access to this repository. Without this secret the step
+          # below gets "Repository not found" and the whole pipeline is
+          # blind. See the note at the top of this file for what to create.
+          UPSTREAM_TOKEN: ${{ secrets.UPSTREAM_TOKEN }}
         run: |
           REPO=$(jq -r '.repo' .upstream-crm.json)
           UBRANCH=$(jq -r '.branch // "main"' .upstream-crm.json)
           HAD=$(jq -r '.sha' .upstream-crm.json)
 
-          HEADSHA=$(git ls-remote "$REPO" "refs/heads/$UBRANCH" | cut -f1)
+          # Built by stripping the scheme and host and putting them back with
+          # the credential — no regex, so nothing in the token can be read as
+          # a delimiter. Deliberately NOT written to GITHUB_OUTPUT: a step
+          # output is not a secret, and the clone step can build the same
+          # thing from the secret itself. Never echoed; errors print $REPO,
+          # which carries no credential.
+          if [ -n "$UPSTREAM_TOKEN" ]; then
+            AUTH_REPO="https://x-access-token:$UPSTREAM_TOKEN@github.com/${REPO#https://github.com/}"
+          else
+            AUTH_REPO="$REPO"
+          fi
+
+          HEADSHA=$(git ls-remote "$AUTH_REPO" "refs/heads/$UBRANCH" 2>/dev/null | cut -f1)
           if [ -z "$HEADSHA" ]; then
-            echo "Could not read $UBRANCH from $REPO. Upstream may have been" >&2
-            echo "renamed, made private, or had its default branch changed." >&2
+            echo "Could not read $UBRANCH from $REPO." >&2
+            echo >&2
+            if [ -z "$UPSTREAM_TOKEN" ]; then
+              echo "No UPSTREAM_TOKEN secret is set, and that repository is private," >&2
+              echo "so this job cannot see it at all. A workflow's own GITHUB_TOKEN" >&2
+              echo "only grants access to the repository it runs in. Add a secret" >&2
+              echo "named UPSTREAM_TOKEN holding a token that can read it — the note" >&2
+              echo "at the top of this workflow says which kind." >&2
+            else
+              echo "UPSTREAM_TOKEN is set but did not work. It may have expired, been" >&2
+              echo "revoked, or not cover this repository. Upstream may also have been" >&2
+              echo "renamed or had its default branch changed." >&2
+            fi
             exit 1
           fi
 
@@ -195,8 +246,24 @@ jobs:
 
       - name: Clone upstream
         if: steps.staging.outputs.clear == 'yes'
+        env:
+          UPSTREAM_TOKEN: ${{ secrets.UPSTREAM_TOKEN }}
+          REPO: ${{ steps.peek.outputs.repo }}
         run: |
-          git clone --quiet "${{ steps.peek.outputs.repo }}" "$RUNNER_TEMP/upstream"
+          if [ -n "$UPSTREAM_TOKEN" ]; then
+            AUTH_REPO="https://x-access-token:$UPSTREAM_TOKEN@github.com/${REPO#https://github.com/}"
+          else
+            AUTH_REPO="$REPO"
+          fi
+
+          git clone --quiet "$AUTH_REPO" "$RUNNER_TEMP/upstream" 2>/dev/null \
+            || { echo "clone of $REPO failed" >&2; exit 1; }
+
+          # A clone writes its URL into .git/config, credential and all.
+          # Strip it: apply-upstream-drop.mjs only reads history and files,
+          # and a token has no business sitting in a working copy.
+          git -C "$RUNNER_TEMP/upstream" remote set-url origin "$REPO"
+
           git -C "$RUNNER_TEMP/upstream" log -1 --oneline \
             "origin/${{ steps.peek.outputs.ubranch }}"
 
