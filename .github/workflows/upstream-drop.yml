@@ -245,3 +245,48 @@ jobs:
             --title "$TITLE" --body-file "$RUNNER_TEMP/pr-body.md" $DRAFT
 
           gh pr view "$BRANCH" --json url -q .url >> "$GITHUB_STEP_SUMMARY"
+
+      # Deliberately ends the run in failure when a drop needs attention.
+      #
+      # Not because anything broke — the PR above was created and is intact.
+      # It is how the notification happens. A drop that opens a draft PR is
+      # otherwise a successful run, and GitHub does not email anyone about
+      # those, so a drop could sit unread for as long as nobody happens to
+      # look. GitHub does email about a failed scheduled run, to whoever last
+      # changed the cron line, and that is the only push notification
+      # available here without adding a service and a secret.
+      #
+      # So: green run means nothing needed you. Red run means read the PR.
+      - name: Say if this needs a person
+        if: steps.status.outputs.status != 'none'
+        env:
+          BLOCKERS: ${{ steps.status.outputs.blockers }}
+          TSC: ${{ steps.tsc.outcome }}
+          BUILD: ${{ steps.build.outcome }}
+          GATES: ${{ steps.gates.outcome }}
+          SHORT: ${{ steps.status.outputs.short }}
+        run: |
+          # if-blocks rather than `[ test ] && VAR=1`. Not because the && form
+          # aborts mid-script — under bash -e it does not, the failing test is
+          # exempt as a non-final command of an && list — but because such a
+          # line becomes the step's exit status if it ever ends up last, and a
+          # false test then fails the step silently. The explicit form cannot
+          # acquire that behaviour by being moved.
+          NEEDS=0
+          if [ "$BLOCKERS" != "0" ]; then NEEDS=1; fi
+          if [ "$TSC" != "success" ]; then NEEDS=1; fi
+          if [ "$BUILD" != "success" ]; then NEEDS=1; fi
+          if [ "$GATES" != "success" ]; then NEEDS=1; fi
+
+          if [ "$NEEDS" = "0" ]; then
+            echo "Drop $SHORT applied cleanly. The PR is ready for review."
+            exit 0
+          fi
+
+          echo "Drop $SHORT needs a person before it can be merged:"
+          echo "  blocking findings: $BLOCKERS"
+          echo "  type-check: $TSC   build: $BUILD   gate suite: $GATES"
+          echo
+          echo "The pull request was opened and is complete — this step fails on"
+          echo "purpose, so that the run goes red and GitHub sends a notification."
+          exit 1
