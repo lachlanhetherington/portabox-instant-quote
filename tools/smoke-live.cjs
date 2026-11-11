@@ -65,6 +65,22 @@ const STAFF_ONLY = [
 
   /* 1. the page itself */
   const home = await get('/');
+
+  /* A preview deployment sitting behind Vercel's Deployment Protection
+     answers every request with a login page, so none of this can see it.
+     Worth its own message: it looks like a broken deployment otherwise, and
+     the fix is a project setting rather than anything in the code. */
+  if (home.status === 401 || home.status === 403) {
+    note(`  homepage                 ${fail(
+      `this deployment is behind Vercel Deployment Protection (${home.status}), so it cannot be ` +
+      'checked from here. Either turn protection off for preview deployments in ' +
+      'Project Settings -> Deployment Protection, or add a protection bypass token ' +
+      'for automation and pass it to this script'
+    )}`);
+    report();
+    return;
+  }
+
   note(`  homepage                 ${home.status === 200 ? '200' : fail(`the homepage returned ${home.status || home.error}`)}`);
   if (home.status !== 200) {
     note('\nNothing else is worth checking if the page will not load.');

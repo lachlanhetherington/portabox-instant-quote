@@ -13,11 +13,23 @@
 # shut. Any one of those failing leaves a draft pull request and notifies
 # instead, and nothing goes out.
 #
-# After the merge it waits for the deploy and runs tools/smoke-live.cjs
-# against production, because a build that is green on a runner can still be
-# broken live and nobody is watching. If that fails, the run goes red and the
-# rollback is the Revert button on the pull request the job just merged —
-# which is why the PR is always created, even for a drop merged seconds later.
+# Before any of that, the drop has to stand up as a real deployment. Vercel
+# builds a preview for every branch, so the drop's own branch gets deployed
+# and tools/smoke-live.cjs is run against it — a build that is green on a
+# runner can still be broken once served. No preview, or a preview that fails,
+# and the drop is not promoted: production never sees it. The preview URL is
+# discovered from what Vercel records against the commit, so there is nothing
+# to keep in step by hand.
+#
+# The shared `staging` branch is deliberately not used for this. Each drop is
+# verified on its own branch preview, which gives the same guarantee without
+# the robot overwriting a branch that people are using for their own work.
+#
+# After the merge it runs the same smoke test against production, because the
+# production deploy is its own event and can fail on its own. If that fails,
+# the run goes red and the rollback is the Revert button on the pull request
+# the job just merged — which is why the PR is always created, even for a drop
+# merged seconds later.
 #
 # What is still not covered: a staff surface whose name does not match the
 # pattern in find-staff-surfaces.cjs, and anything that is a judgement rather
@@ -280,6 +292,7 @@ jobs:
           echo "live bundle before this drop: ${HASH:-unknown}"
 
       - name: Push the branch and open the PR
+        id: push
         if: steps.peek.outputs.new == 'yes'
         # Upstream's commit subject reaches this step. It goes through env,
         # not through ${{ }} inside the script, so a subject containing
@@ -318,23 +331,83 @@ jobs:
             -m "$SUBJECT" \
             -m "Applied by .github/workflows/upstream-drop.yml. See the pull request for what still needs reading."
           git push -q origin "HEAD:refs/heads/$BRANCH"
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
-          # A draft when anything is unresolved, so it cannot be merged by
-          # habit; ready for review only when every check came back clean.
-          DRAFT=--draft
-          if [ "$BLOCKERS" = "0" ] && [ "$TSC" = "success" ] && [ "$BUILD" = "success" ] && [ "$GATES" = "success" ]; then
-            DRAFT=
-          fi
-
-          TITLE="Upstream CRM drop $SHORT: $SUBJECT"
-          if [ -n "$DRAFT" ]; then
-            TITLE="[needs review] $TITLE"
-          fi
-
+          # Always a draft to begin with. Whether this is fit to merge is not
+          # known yet: the drop still has to come up as a real deployment and
+          # pass a smoke test against it, which happens in the steps after
+          # this one. The merge step marks it ready, or retitles it to say
+          # what stopped it.
           gh pr create --base main --head "$BRANCH" \
-            --title "$TITLE" --body-file "$RUNNER_TEMP/pr-body.md" $DRAFT
+            --title "Upstream CRM drop $SHORT: $SUBJECT" \
+            --body-file "$RUNNER_TEMP/pr-body.md" --draft
 
           gh pr view "$BRANCH" --json url -q .url >> "$GITHUB_STEP_SUMMARY"
+
+      # Vercel builds a preview for every branch, so the drop is a real
+      # deployment before production is touched. The URL is discovered rather
+      # than configured: Vercel's GitHub integration records it against the
+      # commit, so there is nothing to keep in step by hand.
+      - name: Find the drop's preview deployment
+        id: preview
+        if: steps.peek.outputs.new == 'yes' && steps.push.outputs.sha != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SHA: ${{ steps.push.outputs.sha }}
+        run: |
+          URL=''
+          for i in $(seq 1 30); do
+            # Current Vercel: a GitHub Deployment carrying environment_url.
+            for id in $(gh api "repos/$GITHUB_REPOSITORY/deployments?sha=$SHA&per_page=20" \
+                          --jq '.[].id' 2>/dev/null || true); do
+              URL=$(gh api "repos/$GITHUB_REPOSITORY/deployments/$id/statuses?per_page=20" \
+                      --jq 'map(select(.state == "success")) | .[0].environment_url // empty' \
+                      2>/dev/null || true)
+              if [ -n "$URL" ]; then break; fi
+            done
+            if [ -n "$URL" ]; then break; fi
+
+            # Older Vercel: a commit status whose target_url is the preview.
+            URL=$(gh api "repos/$GITHUB_REPOSITORY/commits/$SHA/statuses?per_page=30" \
+                    --jq 'map(select(.state == "success") | .target_url)
+                          | map(select(. != null and (contains("vercel.app"))))
+                          | .[0] // empty' 2>/dev/null || true)
+            if [ -n "$URL" ]; then break; fi
+
+            sleep 20
+          done
+
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+          if [ -n "$URL" ]; then
+            echo "preview deployment: $URL"
+          else
+            echo "No preview deployment URL appeared within about ten minutes."
+            echo "Without one the drop cannot be checked on a real deployment, so it"
+            echo "will not be promoted to production."
+          fi
+
+      - name: Smoke-test the preview, before production sees it
+        id: preview_smoke
+        if: steps.preview.outputs.url != ''
+        continue-on-error: true
+        env:
+          URL: ${{ steps.preview.outputs.url }}
+        run: |
+          set +e
+          node tools/smoke-live.cjs "$URL" > "$RUNNER_TEMP/preview-smoke.txt" 2>&1
+          RC=$?
+          set -e
+          cat "$RUNNER_TEMP/preview-smoke.txt"
+          {
+            echo '## The drop, on its own preview deployment'
+            echo
+            echo "<$URL>"
+            echo
+            echo '```'
+            cat "$RUNNER_TEMP/preview-smoke.txt"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit $RC
 
       # The pull request is still created first, every time, even though a
       # clean drop is merged seconds later. It costs nothing and it is what
@@ -346,10 +419,14 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           BRANCH: ${{ steps.peek.outputs.prbranch }}
+          SHORT: ${{ steps.peek.outputs.short }}
+          SUBJECT: ${{ steps.status.outputs.subject }}
           BLOCKERS: ${{ steps.status.outputs.blockers }}
           TSC: ${{ steps.tsc.outcome }}
           BUILD: ${{ steps.build.outcome }}
           GATES: ${{ steps.gates.outcome }}
+          PREVIEW_URL: ${{ steps.preview.outputs.url }}
+          PREVIEW_SMOKE: ${{ steps.preview_smoke.outcome }}
         run: |
           NEEDS=0
           if [ "$BLOCKERS" != "0" ]; then NEEDS=1; fi
@@ -357,11 +434,29 @@ jobs:
           if [ "$BUILD" != "success" ]; then NEEDS=1; fi
           if [ "$GATES" != "success" ]; then NEEDS=1; fi
 
+          # The drop has to have stood up as a real deployment. No preview
+          # URL means it was never checked anywhere but a runner, which is
+          # not enough to go to production unattended.
+          if [ -z "$PREVIEW_URL" ]; then
+            NEEDS=1
+            echo "No preview deployment was found, so nothing has been verified"
+            echo "outside CI."
+          elif [ "$PREVIEW_SMOKE" != "success" ]; then
+            NEEDS=1
+            echo "The preview deployment did not pass its smoke test."
+          fi
+
           if [ "$NEEDS" != "0" ]; then
             echo "merged=no" >> "$GITHUB_OUTPUT"
             echo "Not merging: something needs a person. The draft pull request stands."
+            gh pr edit "$BRANCH" \
+              --title "[needs review] Upstream CRM drop $SHORT: $SUBJECT" || true
             exit 0
           fi
+
+          # Clean, and verified on its own deployment. Out of draft so it can
+          # be merged.
+          gh pr ready "$BRANCH"
 
           # Merged, but the branch is deliberately kept. It is the record of
           # which drops have been offered, and that record has to survive a
@@ -475,6 +570,8 @@ jobs:
           TSC: ${{ steps.tsc.outcome }}
           BUILD: ${{ steps.build.outcome }}
           GATES: ${{ steps.gates.outcome }}
+          PREVIEW_URL: ${{ steps.preview.outputs.url }}
+          PREVIEW_SMOKE: ${{ steps.preview_smoke.outcome }}
         run: |
           # if-blocks rather than `[ test ] && VAR=1`. Not because the && form
           # aborts mid-script — under bash -e it does not, the failing test is
@@ -498,10 +595,16 @@ jobs:
             exit 1
           fi
 
-          echo "Drop $SHORT was NOT merged, and is waiting as a pull request:"
+          echo "Drop $SHORT was NOT merged, and is waiting as a draft pull request:"
           echo "  blocking findings: $BLOCKERS"
           echo "  type-check: $TSC   build: $BUILD   gate suite: $GATES"
+          if [ -z "$PREVIEW_URL" ]; then
+            echo "  preview deployment: none found, so nothing was verified outside CI"
+          else
+            echo "  preview deployment: $PREVIEW_SMOKE  ($PREVIEW_URL)"
+          fi
           echo
           echo "Nothing reached the live site. Read the pull request — its report says"
-          echo "what stopped it."
+          echo "what stopped it, and the preview URL above is the drop running, so you"
+          echo "can click through it without deploying anything."
           exit 1
