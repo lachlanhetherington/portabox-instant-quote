@@ -70,23 +70,17 @@ const upstreamImports = src.slice(0, start)
  * It looks attractive: in production this whole file becomes one Vercel
  * function, and smsService reaches twilio and firebase, which together are
  * most of its weight, loaded on every invocation for the sake of two SMS
- * routes. Deferring that to first use was tried and it broke the function
- * outright:
+ * routes. It is also beside the point: nothing under src/ loads in that
+ * function at all at the moment, static or dynamic. The compiled function
+ * is ESM and every import in this tree is extensionless, which Node's ESM
+ * loader will not resolve — the header of api/index.ts has the error and
+ * the three ways out. Static or dynamic changes only whether the failure is
+ * legible from outside.
  *
- *   Cannot find module '/var/task/src/server/apiRoutes'
- *   imported from /var/task/api/index.js
- *
- * The Vercel Node builder bundles the function's static import graph with
- * esbuild, so a statically imported file is compiled into the output and
- * there is nothing to resolve at runtime. An `await import()` is left as a
- * runtime import of a file that was never emitted. The same applies to any
- * `await import()` inside the route bodies — upstream has two, for
- * smartsheetService, and those two routes will fail on the deployment for
- * this reason while working locally.
- *
- * So the list is empty and this exists to say why. If a drop makes the
- * function too heavy, the answer is to split it into several functions, not
- * to defer the imports. */
+ * So the list is empty, and this exists to say why rather than have it
+ * tried a second time. If a drop really does make the function too heavy,
+ * the answer is to split it into several functions, not to defer the
+ * imports. */
 const LAZY = [];
 
 const lazyBlocks = [];

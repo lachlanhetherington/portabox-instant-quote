@@ -6,30 +6,48 @@
  * them: the next drop from the CRM repo changes src/server/apiRoutes.ts and
  * nothing here needs touching.
  *
- * Two things about the shape of this file are load-bearing.
+ * THIS FUNCTION DOES NOT WORK ON THE DEPLOYMENT YET, and the reason is not
+ * in this file. Read this before changing anything here.
  *
- * The imports are static, and must be. The Vercel Node builder bundles the
- * function's static import graph with esbuild, so a statically imported
- * file is compiled into the output and there is nothing left to resolve at
- * runtime, while an `await import()` is left as a runtime import of a file
- * that was never emitted. Deferring these to first use — to keep twilio and
- * firebase out of every invocation — produced exactly that:
+ * Every /api/* path returns FUNCTION_INVOCATION_FAILED, including paths
+ * with no route at all, which Express would have answered with a 404 — so
+ * the module fails before any route runs. The error, caught by making the
+ * imports dynamic for one deploy so a handler could report it:
  *
  *   Cannot find module '/var/task/src/server/apiRoutes'
  *   imported from /var/task/api/index.js
  *
- * The default export is a plain handler, not the Express app. The app used
- * to be built at module scope and exported directly, and every /api/* path
- * returned FUNCTION_INVOCATION_FAILED — including paths with no route at
- * all, which Express would have answered with a 404, so the module was
- * failing before any route ran. api/admin.ts, beside it on the same
- * deployment, worked throughout, and what it does differently is export a
- * handler. The app is built on the first request and kept for later ones.
+ * Node's ESM loader requires an explicit file extension in an import
+ * specifier. package.json sets "type": "module", so the compiled function
+ * is ESM; tsconfig.json sets "moduleResolution": "bundler", which lets the
+ * whole source tree import extensionlessly and is meant only for code that
+ * a bundler will consume. Vercel compiles these files but the emitted
+ * specifiers stay extensionless, and Node will not guess, so nothing under
+ * src/ can be loaded from here. api/admin.ts works on the same deployment
+ * because it imports only node: builtins, which need no resolution.
  *
- * A failure also answers with its reason now, as JSON, rather than
- * FUNCTION_INVOCATION_FAILED with nothing attached. That is worth keeping:
- * reading these logs needs the deployment's own Vercel account, and three
- * attempts at this were spent inferring the cause from the outside.
+ * Static or dynamic imports only change whether the failure is legible: a
+ * dynamic one fails inside the handler, where the catch below can report
+ * it; a static one fails at module load, which no catch can reach. They are
+ * static here because that is what the fix will want.
+ *
+ * Three ways out, none of them a change to this file alone:
+ *   - compile the function to CommonJS, where extensionless resolution
+ *     works. Blocked today by import.meta.env in services/firebaseService,
+ *     which CommonJS cannot express, and that file needs it for the
+ *     browser.
+ *   - bundle the function into one file, so it has no runtime imports at
+ *     all. Needs a build step that Vercel will pick up in place of
+ *     compiling api/*.ts itself.
+ *   - put explicit .js extensions throughout the chain. It is upstream's
+ *     code, so that means patching it on every drop.
+ *
+ * Nothing customer-facing waits on this: the quote flow, Step 1 to Step 6,
+ * makes no API calls, and the staff gate is api/admin.ts.
+ *
+ * The default export is a plain handler rather than the Express app, which
+ * is the shape api/admin.ts has. The app is built on the first request and
+ * kept for later ones.
  *
  * Note that these routes are not serving the quote flow. Step 1 to Step 6
  * make no API calls at all — this is the CRM side: the Twilio and ClickSend
