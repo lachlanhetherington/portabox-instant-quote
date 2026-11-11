@@ -1,17 +1,30 @@
 # Watch the upstream CRM repo, apply what is new, and open a pull request.
 #
-# Nothing here reaches the live site. Vercel deploys production from main, so
-# the point of this job is to get a drop as far as a reviewable branch and
-# stop. Vercel still builds a preview for the branch, so the PR comes with a
-# URL you can click through before merging.
+# This DOES reach the live site. A drop that passes every check is merged to
+# main by this job, and Vercel deploys production from main. That is the
+# owner's decision, made knowingly; what follows is how the risk is held down.
 #
-# It is deliberately not auto-merge. Three of the four drops before this job
-# existed added a staff surface that opened with no password: the dispatch
-# console, the driver portal, the softphone bar. Each was found by reading the
-# diff. tools/find-staff-surfaces.cjs now catches the shape of that mistake
-# and tools/verify-staff-gates.cjs proves the known gates still hold, but
-# neither can judge a surface nobody has looked at. The report on the PR says
-# which checks passed and what is left for a person.
+# A drop is merged only when all of these are true: no blocking finding from
+# tools/apply-upstream-drop.mjs (which covers a local fix that no longer
+# applies, a live credential, an API route that vanished, and a staff surface
+# with no gate and no recorded decision), the type-check passes, the build
+# passes, and tools/verify-staff-gates.cjs drives a real browser through
+# upstream's own staff login for every role and finds each surface still
+# shut. Any one of those failing leaves a draft pull request and notifies
+# instead, and nothing goes out.
+#
+# After the merge it waits for the deploy and runs tools/smoke-live.cjs
+# against production, because a build that is green on a runner can still be
+# broken live and nobody is watching. If that fails, the run goes red and the
+# rollback is the Revert button on the pull request the job just merged —
+# which is why the PR is always created, even for a drop merged seconds later.
+#
+# What is still not covered: a staff surface whose name does not match the
+# pattern in find-staff-surfaces.cjs, and anything that is a judgement rather
+# than a check — whether a commit message describes what the commit does,
+# whether a price change is the one the client asked for. Those are written
+# into the report on the PR, which is worth reading after the fact even when
+# the drop went out clean.
 #
 # Runs hourly, which the first step is built around: it reads upstream's head
 # with `git ls-remote` and stops there when nothing has changed. A full clone
@@ -48,6 +61,11 @@ jobs:
   drop:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+
+    env:
+      # Production. Merging to main deploys here, so this is also what the
+      # post-deploy smoke test checks.
+      LIVE_URL: https://portabox-instant-quote-dun.vercel.app
 
     steps:
       - name: Check out this repo
@@ -235,11 +253,31 @@ jobs:
             fi
             echo '---'
             echo
-            echo 'Opened by `.github/workflows/upstream-drop.yml`. Merging this to `main`'
-            echo 'is what deploys it — Vercel builds production from `main`. The branch'
-            echo 'itself gets a preview URL, so it can be clicked through first.'
+            echo 'Opened by `.github/workflows/upstream-drop.yml`, which merges a drop'
+            echo 'automatically when every check passes — so if this is already merged,'
+            echo 'it is live. If it is a draft, something in the report stopped it and'
+            echo 'nothing was deployed.'
+            echo
+            echo 'To roll back a merged drop, press Revert above. Vercel redeploys from'
+            echo '`main`, so the revert is the rollback, and the drop stays on its branch.'
+            echo
+            echo 'The "for a person to read" section is worth reading either way — the'
+            echo 'checks cannot tell whether a commit message is true or whether a price'
+            echo 'change is the one that was asked for.'
           } > "$RUNNER_TEMP/pr-body.md"
           cat "$RUNNER_TEMP/pr-body.md" >> "$GITHUB_STEP_SUMMARY"
+
+      # Recorded before the merge, so the smoke test afterwards can tell a
+      # landed deploy from Vercel not having finished yet.
+      - name: Note what is live now
+        id: before
+        if: steps.peek.outputs.new == 'yes'
+        run: |
+          HASH=$(curl -fsS --max-time 25 "$LIVE_URL/" \
+            | grep -o 'assets/index-[A-Za-z0-9_-]*\.js' | head -1 \
+            | sed 's|assets/index-||; s|\.js$||') || HASH=''
+          echo "bundle=$HASH" >> "$GITHUB_OUTPUT"
+          echo "live bundle before this drop: ${HASH:-unknown}"
 
       - name: Push the branch and open the PR
         if: steps.peek.outputs.new == 'yes'
@@ -298,28 +336,145 @@ jobs:
 
           gh pr view "$BRANCH" --json url -q .url >> "$GITHUB_STEP_SUMMARY"
 
-      # Deliberately ends the run in failure when a drop needs attention.
-      #
-      # Not because anything broke — the PR above was created and is intact.
-      # It is how the notification happens. A drop that opens a draft PR is
-      # otherwise a successful run, and GitHub does not email anyone about
-      # those, so a drop could sit unread for as long as nobody happens to
-      # look. GitHub does email about a failed scheduled run, to whoever last
-      # changed the cron line, and that is the only push notification
-      # available here without adding a service and a secret.
-      #
-      # It fires once, not every hour: the peek step stops before any of this
-      # for a drop that has already been offered.
-      #
-      # So: green run means nothing needed you. Red run means read the PR.
-      - name: Say if this needs a person
+      # The pull request is still created first, every time, even though a
+      # clean drop is merged seconds later. It costs nothing and it is what
+      # makes the rollback a button: the PR holds the report, the diff, and
+      # GitHub's Revert.
+      - name: Merge it when every check passed
+        id: merge
         if: steps.peek.outputs.new == 'yes'
         env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BRANCH: ${{ steps.peek.outputs.prbranch }}
           BLOCKERS: ${{ steps.status.outputs.blockers }}
           TSC: ${{ steps.tsc.outcome }}
           BUILD: ${{ steps.build.outcome }}
           GATES: ${{ steps.gates.outcome }}
+        run: |
+          NEEDS=0
+          if [ "$BLOCKERS" != "0" ]; then NEEDS=1; fi
+          if [ "$TSC" != "success" ]; then NEEDS=1; fi
+          if [ "$BUILD" != "success" ]; then NEEDS=1; fi
+          if [ "$GATES" != "success" ]; then NEEDS=1; fi
+
+          if [ "$NEEDS" != "0" ]; then
+            echo "merged=no" >> "$GITHUB_OUTPUT"
+            echo "Not merging: something needs a person. The draft pull request stands."
+            exit 0
+          fi
+
+          # Merged, but the branch is deliberately kept. It is the record of
+          # which drops have been offered, and that record has to survive a
+          # revert.
+          #
+          # Pressing Revert on the merged pull request undoes the squashed
+          # commit — which contains the .upstream-crm.json update as well as
+          # upstream's files. So after a revert the marker points at the
+          # previous revision again, and the next hourly run would see this
+          # drop as new. With the branch deleted it would rebuild it and merge
+          # it straight back, re-deploying the thing that was just reverted,
+          # once an hour. With the branch kept, the peek step sees it has been
+          # offered and stops.
+          #
+          # To deliberately re-offer a drop, delete its branch.
+          #
+          # Mergeability is computed asynchronously after the PR is opened,
+          # so the first attempt can lose a race with GitHub.
+          for i in 1 2 3 4 5; do
+            if gh pr merge "$BRANCH" --squash; then
+              echo "merged=yes" >> "$GITHUB_OUTPUT"
+              echo "Merged to main. Vercel deploys from there."
+              exit 0
+            fi
+            echo "merge attempt $i did not take; waiting"
+            sleep 15
+          done
+
+          echo "merged=no" >> "$GITHUB_OUTPUT"
+          echo "The checks all passed but the merge would not go through." >&2
+          echo "Branch protection, or the repo setting that lets Actions open and" >&2
+          echo "merge pull requests, is the usual reason. The pull request is open" >&2
+          echo "and complete, so it can be merged by hand." >&2
+          exit 1
+
+      # Between CI passing and production working there is a deploy, and
+      # nobody is watching it. A build that is green on a runner can still be
+      # broken live.
+      - name: Wait for Vercel, then smoke-test production
+        id: smoke
+        if: steps.merge.outputs.merged == 'yes'
+        continue-on-error: true
+        env:
+          BEFORE: ${{ steps.before.outputs.bundle }}
+        run: |
+          echo "waiting for Vercel to publish a new bundle (was ${BEFORE:-unknown})"
+          LANDED=no
+          for i in $(seq 1 20); do
+            NOW=$(curl -fsS --max-time 20 "$LIVE_URL/" \
+              | grep -o 'assets/index-[A-Za-z0-9_-]*\.js' | head -1 \
+              | sed 's|assets/index-||; s|\.js$||') || NOW=''
+            if [ -n "$NOW" ] && [ "$NOW" != "$BEFORE" ]; then
+              echo "deploy landed after ~$(( i * 20 ))s: $BEFORE -> $NOW"
+              LANDED=yes
+              break
+            fi
+            sleep 20
+          done
+          if [ "$LANDED" != "yes" ]; then
+            echo "No new bundle within about seven minutes. Smoke-testing anyway so"
+            echo "the summary says what production is actually serving."
+          fi
+
+          # With the old hash, so a deploy that never landed is a failure
+          # rather than a pass against the previous build.
+          #
+          # Run first, printed second, and the exit status kept. Piping
+          # straight into tee would hand this step tee's status instead —
+          # always zero — so a failing smoke test would read as a pass.
+          set +e
+          if [ -n "$BEFORE" ]; then
+            node tools/smoke-live.cjs "$LIVE_URL" --expect-bundle-change "$BEFORE" \
+              > "$RUNNER_TEMP/smoke.txt" 2>&1
+          else
+            node tools/smoke-live.cjs "$LIVE_URL" > "$RUNNER_TEMP/smoke.txt" 2>&1
+          fi
+          RC=$?
+          set -e
+
+          cat "$RUNNER_TEMP/smoke.txt"
+          {
+            echo '## Production after the merge'
+            echo
+            echo '```'
+            cat "$RUNNER_TEMP/smoke.txt"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit $RC
+
+      # Deliberately ends the run in failure when a person is needed.
+      #
+      # Not because the job broke — it is how the notification happens.
+      # GitHub does not email anyone about a successful scheduled run, so a
+      # held-back drop, or a deploy that went out and broke something, would
+      # sit unseen for as long as nobody happened to look. GitHub does email
+      # about a failed scheduled run, to whoever last changed the cron line,
+      # and that is the only push notification available here without adding
+      # a service and a secret.
+      #
+      # It fires once per drop, not once an hour: the peek step stops before
+      # any of this for a drop that already has a branch.
+      #
+      # Green run: it went live and production checks out. Red run: read it.
+      - name: Say if this needs a person
+        if: steps.peek.outputs.new == 'yes'
+        env:
           SHORT: ${{ steps.peek.outputs.short }}
+          MERGED: ${{ steps.merge.outputs.merged }}
+          SMOKE: ${{ steps.smoke.outcome }}
+          BLOCKERS: ${{ steps.status.outputs.blockers }}
+          TSC: ${{ steps.tsc.outcome }}
+          BUILD: ${{ steps.build.outcome }}
+          GATES: ${{ steps.gates.outcome }}
         run: |
           # if-blocks rather than `[ test ] && VAR=1`. Not because the && form
           # aborts mid-script — under bash -e it does not, the failing test is
@@ -327,21 +482,26 @@ jobs:
           # line becomes the step's exit status if it ever ends up last, and a
           # false test then fails the step silently. The explicit form cannot
           # acquire that behaviour by being moved.
-          NEEDS=0
-          if [ "$BLOCKERS" != "0" ]; then NEEDS=1; fi
-          if [ "$TSC" != "success" ]; then NEEDS=1; fi
-          if [ "$BUILD" != "success" ]; then NEEDS=1; fi
-          if [ "$GATES" != "success" ]; then NEEDS=1; fi
 
-          if [ "$NEEDS" = "0" ]; then
-            echo "Drop $SHORT applied cleanly. The PR is ready for review."
+          if [ "$MERGED" = "yes" ] && [ "$SMOKE" = "success" ]; then
+            echo "Drop $SHORT is live, and production is serving the quote flow with"
+            echo "the staff gate in place. Nothing needed you."
             exit 0
           fi
 
-          echo "Drop $SHORT needs a person before it can be merged:"
+          if [ "$MERGED" = "yes" ]; then
+            echo "Drop $SHORT WENT LIVE and the production smoke test did not pass."
+            echo
+            echo "Production is in that state now. The smoke output above says which"
+            echo "check failed. To roll back, open the merged pull request and press"
+            echo "Revert — Vercel redeploys from main, so the revert is the rollback."
+            exit 1
+          fi
+
+          echo "Drop $SHORT was NOT merged, and is waiting as a pull request:"
           echo "  blocking findings: $BLOCKERS"
           echo "  type-check: $TSC   build: $BUILD   gate suite: $GATES"
           echo
-          echo "The pull request was opened and is complete — this step fails on"
-          echo "purpose, so that the run goes red and GitHub sends a notification."
+          echo "Nothing reached the live site. Read the pull request — its report says"
+          echo "what stopped it."
           exit 1
