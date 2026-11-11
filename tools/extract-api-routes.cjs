@@ -65,23 +65,29 @@ const upstreamImports = src.slice(0, start)
   .filter((l) => /^import /.test(l) && !SHELL.test(l))
   .map(rewrite);
 
-/* Modules that must not be imported at the top of this file.
+/* Keep imports static — do not be tempted to make these lazy.
  *
- * In production the whole file becomes one Vercel function, and a top-level
- * import runs when the function is invoked at all — not when the route that
- * needs it is hit. smsService reaches twilio and firebase, which together
- * are most of the function's weight, for the sake of two SMS routes. If
- * anything in that chain fails to load, every route in the file dies with
- * FUNCTION_INVOCATION_FAILED, including the ones that touch none of it: the
- * ClickSend routes talk to the ClickSend API over plain fetch and need
- * neither library.
+ * It looks attractive: in production this whole file becomes one Vercel
+ * function, and smsService reaches twilio and firebase, which together are
+ * most of its weight, loaded on every invocation for the sake of two SMS
+ * routes. Deferring that to first use was tried and it broke the function
+ * outright:
  *
- * So these are loaded on first use instead. The named bindings are replaced
- * by thin async wrappers with upstream's own types, which means the route
- * bodies below are still upstream's code, unedited. Anything not on this
- * list stays a normal import, and the run says so, because a service that
- * is not a handful of async functions would not survive this treatment. */
-const LAZY = ['../services/smsService'];
+ *   Cannot find module '/var/task/src/server/apiRoutes'
+ *   imported from /var/task/api/index.js
+ *
+ * The Vercel Node builder bundles the function's static import graph with
+ * esbuild, so a statically imported file is compiled into the output and
+ * there is nothing to resolve at runtime. An `await import()` is left as a
+ * runtime import of a file that was never emitted. The same applies to any
+ * `await import()` inside the route bodies — upstream has two, for
+ * smartsheetService, and those two routes will fail on the deployment for
+ * this reason while working locally.
+ *
+ * So the list is empty and this exists to say why. If a drop makes the
+ * function too heavy, the answer is to split it into several functions, not
+ * to defer the imports. */
+const LAZY = [];
 
 const lazyBlocks = [];
 const eagerImports = [];
@@ -112,9 +118,7 @@ const header = `/* The API surface, lifted out of server.ts so one definition se
 import express from 'express';
 ${eagerImports.join('\n')}
 import type { Express } from 'express';
-
-${lazyBlocks.join('\n\n')}
-
+${lazyBlocks.length ? '\n' + lazyBlocks.join('\n\n') + '\n' : ''}
 export function registerApiRoutes(app: Express) {
 
 `;
