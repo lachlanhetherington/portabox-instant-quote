@@ -1,0 +1,23 @@
+{
+  "_comment": [
+    "Which upstream CRM revision this repo currently carries.",
+    "",
+    "Upstream is the client developer's own repo. It is not a git remote of",
+    "this one and the histories are unrelated: each drop arrives as a file",
+    "copy, because this repo also holds the local fixes in tools/local-fixes.mjs",
+    "and the deployment wiring (api/, vercel.json, src/server/) that upstream",
+    "has no equivalent of. So the only record of where we are up to is this",
+    "file.",
+    "",
+    "tools/apply-upstream-drop.mjs reads 'sha' to work out what is new, and",
+    "writes it back after a successful apply. The scheduled job in",
+    ".github/workflows/upstream-drop.yml commits that change on the pull",
+    "request it opens, so merging the PR is what records the drop as taken.",
+    "Do not edit 'sha' by hand unless an apply has been done by hand."
+  ],
+  "repo": "https://github.com/ahammo67/portabox-CRM.git",
+  "branch": "main",
+  "sha": "a581d0eb3e3a30efa156d52c5da24c856a4fb46d",
+  "subject": "feat: gate softphone feature and remove dev auth bypass",
+  "applied": "2026-11-11"
+}

@@ -1,0 +1,247 @@
+# Watch the upstream CRM repo, apply what is new, and open a pull request.
+#
+# Nothing here reaches the live site. Vercel deploys production from main, so
+# the point of this job is to get a drop as far as a reviewable branch and
+# stop. Vercel still builds a preview for the branch, so the PR comes with a
+# URL you can click through before merging.
+#
+# It is deliberately not auto-merge. Three of the four drops before this job
+# existed added a staff surface that opened with no password, and each was
+# found by reading the diff. tools/find-staff-surfaces.cjs now catches the
+# shape of that mistake, and tools/verify-staff-gates.cjs proves the known
+# gates still hold, but neither can judge a surface nobody has looked at. The
+# report on the PR says which checks passed and what is left for a person.
+#
+# Repo setting this needs: Settings → Actions → General → Workflow
+# permissions → "Allow GitHub Actions to create and approve pull requests".
+# Without it the job does everything else and fails only at the last step.
+
+name: Upstream CRM drop
+
+on:
+  schedule:
+    # 07:00 UTC daily — mid-afternoon in South Australia, so a drop made
+    # during the client developer's working day is waiting the next morning.
+    - cron: '0 7 * * *'
+  workflow_dispatch:
+    inputs:
+      force:
+        description: 'Open a PR even if the checks find blocking items'
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: upstream-drop
+  cancel-in-progress: false
+
+jobs:
+  drop:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out this repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Read the upstream repo from .upstream-crm.json
+        id: marker
+        run: |
+          echo "repo=$(jq -r .repo .upstream-crm.json)" >> "$GITHUB_OUTPUT"
+          echo "branch=$(jq -r '.branch // "main"' .upstream-crm.json)" >> "$GITHUB_OUTPUT"
+
+      # Cloned into the runner's temp dir, not the workspace, so upstream's
+      # files never look like changes to this repo.
+      - name: Clone upstream
+        run: |
+          git clone --quiet "${{ steps.marker.outputs.repo }}" "$RUNNER_TEMP/upstream"
+          git -C "$RUNNER_TEMP/upstream" log -1 --oneline "origin/${{ steps.marker.outputs.branch }}"
+
+      # Copies upstream in, re-extracts the API routes, re-applies the local
+      # fixes, scans for live credentials, and lists every staff surface with
+      # whether it is gated. Writes the report that becomes the PR body.
+      # Allowed to fail: a blocking finding should still produce a PR to read.
+      - name: Apply the drop
+        id: apply
+        continue-on-error: true
+        run: |
+          node tools/apply-upstream-drop.mjs \
+            --upstream "$RUNNER_TEMP/upstream" \
+            --report "$RUNNER_TEMP/report.md" \
+            --status "$RUNNER_TEMP/status.json"
+
+      - name: Read the status
+        id: status
+        run: |
+          S="$RUNNER_TEMP/status.json"
+          if [ ! -f "$S" ]; then
+            echo 'The apply step produced no status file, so it died before it could' >&2
+            echo 'report. Read its log above — this is not a drop finding.' >&2
+            exit 1
+          fi
+          cat "$S"
+          {
+            echo "status=$(jq -r '.status' "$S")"
+            echo "sha=$(jq -r '.sha // ""' "$S")"
+            echo "short=$(jq -r '(.sha // "") | .[0:7]' "$S")"
+            echo "blockers=$(jq -r '.blockers' "$S")"
+            # Quoted through jq so a subject containing quotes or backticks
+            # cannot break the shell or the later gh invocation.
+            echo "subject=$(jq -r '.subject // ""' "$S" | tr -d '\n' | cut -c1-120)"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Nothing new
+        if: steps.status.outputs.status == 'none'
+        run: |
+          echo "Already at upstream ${{ steps.status.outputs.short }}. Nothing to do." \
+            >> "$GITHUB_STEP_SUMMARY"
+
+      # Everything below only runs when a drop actually arrived.
+
+      - name: Install dependencies
+        if: steps.status.outputs.status != 'none'
+        run: npm ci || npm install
+
+      - name: Type-check
+        if: steps.status.outputs.status != 'none'
+        id: tsc
+        continue-on-error: true
+        run: npx tsc --noEmit
+
+      - name: Build
+        if: steps.status.outputs.status != 'none'
+        id: build
+        continue-on-error: true
+        run: npx vite build
+
+      # The gate suite drives a real browser through upstream's own staff
+      # login for each role and checks the surface stays shut. The password is
+      # generated here and thrown away, so this needs no repository secret.
+      - name: Install Playwright
+        if: steps.status.outputs.status != 'none' && steps.build.outcome == 'success'
+        run: |
+          # Not a dependency of the app — only the gate suite needs it, and
+          # pinning it here keeps it out of everyone's install. This is the
+          # version the suite was written against.
+          npm install --no-save playwright@1.63.0
+          npx playwright install --with-deps chromium
+
+      - name: Verify the staff gates
+        if: steps.status.outputs.status != 'none' && steps.build.outcome == 'success'
+        id: gates
+        continue-on-error: true
+        run: |
+          PW=$(node -e 'console.log(require("crypto").randomBytes(16).toString("hex"))')
+          NODE_ENV=production ADMIN_PASSWORD="$PW" PORT=3111 npx tsx server.ts \
+            > "$RUNNER_TEMP/server.log" 2>&1 &
+          for i in $(seq 1 40); do
+            if curl -fsS -o /dev/null http://localhost:3111/; then break; fi
+            sleep 2
+          done
+          curl -fsS -o /dev/null http://localhost:3111/ || {
+            echo "the server never came up:"; cat "$RUNNER_TEMP/server.log"; exit 1; }
+          ADMIN_PASSWORD="$PW" node tools/verify-staff-gates.cjs \
+            | tee "$RUNNER_TEMP/gates.txt"
+
+      - name: Assemble the pull request body
+        if: steps.status.outputs.status != 'none'
+        run: |
+          {
+            cat "$RUNNER_TEMP/report.md"
+            echo
+            echo '## Checks'
+            echo
+            echo '| | |'
+            echo '|---|---|'
+            echo "| type-check | ${{ steps.tsc.outcome }} |"
+            echo "| build | ${{ steps.build.outcome }} |"
+            echo "| staff gate suite | ${{ steps.gates.outcome || 'skipped' }} |"
+            echo
+            if [ -f "$RUNNER_TEMP/gates.txt" ]; then
+              echo '<details><summary>Gate suite output</summary>'
+              echo
+              echo '```'
+              cat "$RUNNER_TEMP/gates.txt"
+              echo '```'
+              echo
+              echo '</details>'
+              echo
+            fi
+            echo '---'
+            echo
+            echo 'Opened by `.github/workflows/upstream-drop.yml`. Merging this to `main`'
+            echo 'is what deploys it — Vercel builds production from `main`. The branch'
+            echo 'itself gets a preview URL, so it can be clicked through first.'
+          } > "$RUNNER_TEMP/pr-body.md"
+          cat "$RUNNER_TEMP/pr-body.md" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Push the branch and open the PR
+        if: steps.status.outputs.status != 'none'
+        # Upstream's commit subject reaches this step. It goes through env,
+        # not through ${{ }} inside the script, so a subject containing
+        # quotes or backticks is a string here rather than shell.
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SHORT: ${{ steps.status.outputs.short }}
+          SUBJECT: ${{ steps.status.outputs.subject }}
+          BRANCH: upstream-drop/${{ steps.status.outputs.short }}
+          BLOCKERS: ${{ steps.status.outputs.blockers }}
+          TSC: ${{ steps.tsc.outcome }}
+          BUILD: ${{ steps.build.outcome }}
+          GATES: ${{ steps.gates.outcome }}
+        run: |
+          git config user.name  'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+
+          # dist/ and node_modules/ are both in .gitignore, so the build and
+          # the no-save playwright install cannot end up on the branch.
+          git add -A
+
+          if git diff --cached --quiet; then
+            echo 'Upstream moved but nothing changed in this repo.' >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          # If the branch is already there, this drop has been offered before
+          # and someone may be working on it. Pushing would overwrite their
+          # commits — a blocked drop is expected to be fixed up on its own
+          # branch — so leave it and say where it is.
+          if git ls-remote --exit-code --heads origin "$BRANCH" >/dev/null 2>&1; then
+            {
+              echo "Upstream drop \`$SHORT\` was already offered on \`$BRANCH\`."
+              echo 'Left untouched, in case it is being worked on. Delete the branch'
+              echo 'to have the next run build it fresh.'
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          git commit -q -m "Upstream CRM drop $SHORT" \
+            -m "$SUBJECT" \
+            -m "Applied by .github/workflows/upstream-drop.yml. See the pull request for what still needs reading."
+          git push -q origin "HEAD:refs/heads/$BRANCH"
+
+          # A draft when anything is unresolved, so it cannot be merged by
+          # habit; ready for review only when every check came back clean.
+          DRAFT=--draft
+          if [ "$BLOCKERS" = "0" ] && [ "$TSC" = "success" ] && [ "$BUILD" = "success" ] && [ "$GATES" = "success" ]; then
+            DRAFT=
+          fi
+
+          TITLE="Upstream CRM drop $SHORT: $SUBJECT"
+          if [ -n "$DRAFT" ]; then
+            TITLE="[needs review] $TITLE"
+          fi
+
+          gh pr create --base main --head "$BRANCH" \
+            --title "$TITLE" --body-file "$RUNNER_TEMP/pr-body.md" $DRAFT
+
+          gh pr view "$BRANCH" --json url -q .url >> "$GITHUB_STEP_SUMMARY"
