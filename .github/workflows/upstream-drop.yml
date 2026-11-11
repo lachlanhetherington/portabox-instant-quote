@@ -1,65 +1,50 @@
-# Watch the upstream CRM repo, apply what is new, and open a pull request.
+# Watch the upstream CRM repo, put what is new on `staging`, and promote it
+# to `main` once the staging deployment checks out.
 #
-# This DOES reach the live site. A drop that passes every check is merged to
-# main by this job, and Vercel deploys production from main. That is the
-# owner's decision, made knowingly; what follows is how the risk is held down.
+#   upstream commit  ->  staging  ->  staging deployment is tested  ->  main
 #
-# A drop is merged only when all of these are true: no blocking finding from
-# tools/apply-upstream-drop.mjs (which covers a local fix that no longer
-# applies, a live credential, an API route that vanished, and a staff surface
-# with no gate and no recorded decision), the type-check passes, the build
-# passes, and tools/verify-staff-gates.cjs drives a real browser through
-# upstream's own staff login for every role and finds each surface still
-# shut. Any one of those failing leaves a draft pull request and notifies
-# instead, and nothing goes out.
+# main is production: Vercel deploys it the moment anything lands there. So
+# nothing reaches customers until a drop has been built, checked, deployed to
+# staging, and tested on that real deployment.
 #
-# Before any of that, the drop has to stand up as a real deployment. Vercel
-# builds a preview for every branch, so the drop's own branch gets deployed
-# and tools/smoke-live.cjs is run against it — a build that is green on a
-# runner can still be broken once served. No preview, or a preview that fails,
-# and the drop is not promoted: production never sees it. The preview address
-# comes from VERCEL_PROJECT and VERCEL_SCOPE below, because what Vercel
-# records against a commit is a link to its own dashboard rather than to the
-# deployed site.
+# A drop is promoted only when all of these hold: no blocking finding from
+# tools/apply-upstream-drop.mjs (a local fix that no longer applies, a live
+# credential, an API route that vanished, a staff surface with no gate and no
+# recorded decision), the type-check passes, the build passes,
+# tools/verify-staff-gates.cjs drives a real browser through upstream's own
+# staff login for every role and finds each surface still shut, and
+# tools/smoke-live.cjs passes against the deployed staging site. Any one of
+# those failing leaves the drop sitting on staging with an open pull request,
+# and production is untouched.
 #
-# The shared `staging` branch is deliberately not used for this. Each drop is
-# verified on its own branch preview, which gives the same guarantee without
-# the robot overwriting a branch that people are using for their own work.
+# Because staging is a shared branch, the job will not start while staging has
+# anything on it that main does not. A held drop, or somebody's unfinished
+# work, has to be dealt with first — otherwise promoting a drop would carry
+# that work into production with it. That check is also what stops a failed
+# drop being rebuilt and re-notified every hour.
 #
-# After the merge it runs the same smoke test against production, because the
-# production deploy is its own event and can fail on its own. If that fails,
-# the run goes red and the rollback is the Revert button on the pull request
-# the job just merged — which is why the PR is always created, even for a drop
-# merged seconds later.
+# The promotion is a real merge commit, deliberately, so that staging stays an
+# ancestor of main and the next run sees a clean staging. A squash merge would
+# leave staging permanently "ahead" of main and block every future drop.
 #
-# What is still not covered: a staff surface whose name does not match the
-# pattern in find-staff-surfaces.cjs, and anything that is a judgement rather
-# than a check — whether a commit message describes what the commit does,
-# whether a price change is the one the client asked for. Those are written
-# into the report on the PR, which is worth reading after the fact even when
-# the drop went out clean.
-#
-# Runs hourly, which the first step is built around: it reads upstream's head
-# with `git ls-remote` and stops there when nothing has changed. A full clone
-# of that repo is 64 MB, so cloning every hour to discover nothing would be
-# 1.5 GB a day. The same step also stops when the drop it finds has already
-# been offered, because otherwise an unresolved drop would rebuild itself and
-# send a failure notification every hour until someone dealt with it.
+# Runs hourly. The first step reads upstream's head with `git ls-remote` and
+# stops there when nothing has changed: a full clone of that repo is 64 MB, so
+# cloning every hour to learn nothing would be 1.5 GB a day.
 #
 # Two things outside this file have to be set up.
 #
 # Settings → Actions → General → Workflow permissions → "Allow GitHub Actions
 # to create and approve pull requests". Without it the job builds and checks a
-# drop but the merge will not go through.
+# drop but cannot open or merge the pull request.
 #
 # Preview deployments are protected by default, and a protected deployment
-# answers automation with a Vercel login page — so the preview check cannot
-# pass and no drop is promoted. That is the safe way round, not a bug: until
-# it is sorted, a drop waits as a draft pull request with a preview URL that
-# a signed-in browser can open perfectly well. To let the robot in, either
-# turn Vercel Authentication off for Preview in Project Settings → Deployment
-# Protection, or create a Protection Bypass for Automation token there and
-# add it as the repository secret VERCEL_PROTECTION_BYPASS.
+# answers automation with a Vercel login page — so the staging check cannot
+# pass and nothing is promoted. That is the safe way round, not a bug: the
+# drop waits on staging, and a signed-in browser opens the staging URL
+# perfectly well. To let the robot in, either turn Vercel Authentication off
+# for Preview in Project Settings → Deployment Protection, or create a
+# Protection Bypass for Automation token there and add it as the repository
+# secret VERCEL_PROTECTION_BYPASS.
 
 name: Upstream CRM drop
 
@@ -74,9 +59,6 @@ permissions:
   contents: write
   pull-requests: write
 
-# One at a time. A run that is still building when the next hour comes round
-# should not be raced; the queued one will see the same upstream head and
-# stop at the first step.
 concurrency:
   group: upstream-drop
   cancel-in-progress: false
@@ -87,27 +69,20 @@ jobs:
     timeout-minutes: 30
 
     env:
-      # Production. Merging to main deploys here, so this is also what the
-      # post-deploy smoke test checks.
+      # Production, which main deploys to.
       LIVE_URL: https://portabox-instant-quote-dun.vercel.app
 
-      # Vercel gives every branch a stable alias, built from the project and
-      # the team slug:
-      #
-      #   <project>-git-<branch, with / and _ as ->-<scope>.vercel.app
-      #
+      # Vercel's stable per-branch alias is
+      #   <project>-git-<branch>-<scope>.vercel.app
       # Taken from these rather than discovered, because what Vercel records
-      # against the commit is a link to its own dashboard
-      # (vercel.com/<scope>/<project>/<id>), not to the deployed site — so
-      # there is nothing to read the site URL out of. Verified: the alias for
-      # `main` answers, and the scope here is from that status link.
-      #
-      # If the project or the team is ever renamed, these two change with it,
-      # and until they do no drop will be promoted — the preview check cannot
-      # pass against a host that does not resolve, which is the right way for
-      # this to fail.
+      # against a commit is a link to its own dashboard, not to the deployed
+      # site. If the project or team is renamed, these change with it, and
+      # until they do nothing is promoted — the staging check cannot pass
+      # against a host that does not resolve, which is the right failure.
       VERCEL_PROJECT: portabox-instant-quote
       VERCEL_SCOPE: lhm-edia
+
+      STAGING_BRANCH: staging
 
     steps:
       - name: Check out this repo
@@ -115,8 +90,8 @@ jobs:
         with:
           fetch-depth: 0
 
-      # The whole point of this step is to be cheap, because at hourly it is
-      # the step that almost always runs alone. No clone, no node, no install.
+      # Cheap on purpose: at hourly this is the step that almost always runs
+      # alone. No clone, no node, no install.
       - name: Anything new upstream?
         id: peek
         run: |
@@ -132,59 +107,70 @@ jobs:
           fi
 
           SHORT=$(printf '%s' "$HEADSHA" | cut -c1-7)
-          PRBRANCH="upstream-drop/$SHORT"
-
           {
             echo "repo=$REPO"
             echo "ubranch=$UBRANCH"
             echo "head=$HEADSHA"
             echo "short=$SHORT"
-            echo "prbranch=$PRBRANCH"
           } >> "$GITHUB_OUTPUT"
 
           if [ "$HEADSHA" = "$HAD" ]; then
             echo "new=no" >> "$GITHUB_OUTPUT"
             echo "Up to date with upstream at $SHORT."
-            exit 0
+          else
+            echo "new=yes" >> "$GITHUB_OUTPUT"
+            echo "Upstream has moved to $SHORT."
           fi
 
-          # Offered before means there is a branch, and possibly someone's
-          # work on it. Stop rather than rebuild it and notify again.
-          if git ls-remote --exit-code --heads origin "$PRBRANCH" >/dev/null 2>&1; then
-            echo "new=offered" >> "$GITHUB_OUTPUT"
-            echo "Upstream $SHORT was already offered on $PRBRANCH."
-            exit 0
+      # staging is shared. If anything is on it that main does not have — a
+      # drop that stalled, or someone's own work — a drop must not be stacked
+      # on top, because promoting it would take that work to production too.
+      - name: Is staging clear?
+        id: staging
+        if: steps.peek.outputs.new == 'yes'
+        run: |
+          git fetch origin --quiet "+refs/heads/*:refs/remotes/origin/*"
+          AHEAD=$(git rev-list --count "origin/main..origin/$STAGING_BRANCH")
+          echo "ahead=$AHEAD" >> "$GITHUB_OUTPUT"
+          if [ "$AHEAD" = "0" ]; then
+            echo "clear=yes" >> "$GITHUB_OUTPUT"
+            echo "staging holds nothing that main does not. Safe to put a drop on it."
+          else
+            echo "clear=no" >> "$GITHUB_OUTPUT"
+            echo "staging has $AHEAD commit(s) that main does not:"
+            git log --oneline "origin/main..origin/$STAGING_BRANCH"
           fi
-
-          echo "new=yes" >> "$GITHUB_OUTPUT"
-          echo "Upstream has moved to $SHORT, and it has not been offered yet."
 
       - name: Nothing to do
-        if: steps.peek.outputs.new != 'yes'
+        if: steps.peek.outputs.new != 'yes' || steps.staging.outputs.clear == 'no'
         run: |
-          if [ "${{ steps.peek.outputs.new }}" = "offered" ]; then
-            {
-              echo "Upstream \`${{ steps.peek.outputs.short }}\` is already waiting on"
-              echo "\`${{ steps.peek.outputs.prbranch }}\`. Left untouched in case it is being"
-              echo "worked on — delete that branch to have it rebuilt from scratch."
-            } >> "$GITHUB_STEP_SUMMARY"
-          else
+          if [ "${{ steps.peek.outputs.new }}" != "yes" ]; then
             echo "Up to date with upstream at \`${{ steps.peek.outputs.short }}\`." \
               >> "$GITHUB_STEP_SUMMARY"
+          else
+            {
+              echo "Upstream has \`${{ steps.peek.outputs.short }}\` waiting, but **staging is not clear**:"
+              echo "it holds ${{ steps.staging.outputs.ahead }} commit(s) that \`main\` does not."
+              echo
+              echo 'Nothing has been done. Either merge staging into main, or reset it'
+              echo 'with `git push origin main:staging --force`, and the next run will'
+              echo 'pick the drop up.'
+              echo
+              echo 'This run is green on purpose — a drop that stalled here was already'
+              echo 'reported once, and repeating that every hour would be noise.'
+            } >> "$GITHUB_STEP_SUMMARY"
           fi
 
-      # Everything below runs only when a drop actually needs taking, which
-      # at hourly is a few times a month.
+      # Everything below runs only when there is a drop to take and somewhere
+      # clear to put it.
 
       - uses: actions/setup-node@v4
-        if: steps.peek.outputs.new == 'yes'
+        if: steps.staging.outputs.clear == 'yes'
         with:
           node-version: '22'
 
-      # Into the runner's temp dir, not the workspace, so upstream's files
-      # never look like changes to this repo.
       - name: Clone upstream
-        if: steps.peek.outputs.new == 'yes'
+        if: steps.staging.outputs.clear == 'yes'
         run: |
           git clone --quiet "${{ steps.peek.outputs.repo }}" "$RUNNER_TEMP/upstream"
           git -C "$RUNNER_TEMP/upstream" log -1 --oneline \
@@ -193,11 +179,11 @@ jobs:
       # Copies upstream in, re-extracts the API routes, re-applies the local
       # fixes, scans for live credentials, diffs the prices and flag defaults,
       # and lists every staff surface with whether it is gated. Writes the
-      # report that becomes the PR body. Allowed to fail: a blocking finding
-      # should still produce a PR to read.
+      # report that becomes the pull request body. Allowed to fail: a blocking
+      # finding should still produce something to read.
       - name: Apply the drop
         id: apply
-        if: steps.peek.outputs.new == 'yes'
+        if: steps.staging.outputs.clear == 'yes'
         continue-on-error: true
         run: |
           node tools/apply-upstream-drop.mjs \
@@ -207,7 +193,7 @@ jobs:
 
       - name: Read the status
         id: status
-        if: steps.peek.outputs.new == 'yes'
+        if: steps.staging.outputs.clear == 'yes'
         run: |
           S="$RUNNER_TEMP/status.json"
           if [ ! -f "$S" ]; then
@@ -225,36 +211,35 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Install dependencies
-        if: steps.peek.outputs.new == 'yes'
+        if: steps.staging.outputs.clear == 'yes'
         run: npm ci || npm install
 
       - name: Type-check
         id: tsc
-        if: steps.peek.outputs.new == 'yes'
+        if: steps.staging.outputs.clear == 'yes'
         continue-on-error: true
         run: npx tsc --noEmit
 
       - name: Build
         id: build
-        if: steps.peek.outputs.new == 'yes'
+        if: steps.staging.outputs.clear == 'yes'
         continue-on-error: true
         run: npx vite build
 
       - name: Install Playwright
-        if: steps.peek.outputs.new == 'yes' && steps.build.outcome == 'success'
+        if: steps.staging.outputs.clear == 'yes' && steps.build.outcome == 'success'
         run: |
           # Not a dependency of the app — only the gate suite needs it, and
-          # pinning it here keeps it out of everyone's install. This is the
-          # version the suite was written against.
+          # pinning it here keeps it out of everyone's install.
           npm install --no-save playwright@1.63.0
           npx playwright install --with-deps chromium
 
-      # Drives a real browser through upstream's own staff login for each
-      # role and checks the surface stays shut. The password is generated here
-      # and thrown away, so this needs no repository secret.
+      # Drives a real browser through upstream's own staff login for each role
+      # and checks the surface stays shut. The password is generated here and
+      # thrown away, so this needs no repository secret.
       - name: Verify the staff gates
         id: gates
-        if: steps.peek.outputs.new == 'yes' && steps.build.outcome == 'success'
+        if: steps.staging.outputs.clear == 'yes' && steps.build.outcome == 'success'
         continue-on-error: true
         run: |
           PW=$(node -e 'console.log(require("crypto").randomBytes(16).toString("hex"))')
@@ -270,7 +255,7 @@ jobs:
             | tee "$RUNNER_TEMP/gates.txt"
 
       - name: Assemble the pull request body
-        if: steps.peek.outputs.new == 'yes'
+        if: steps.staging.outputs.clear == 'yes'
         run: |
           {
             cat "$RUNNER_TEMP/report.md"
@@ -295,25 +280,26 @@ jobs:
             fi
             echo '---'
             echo
-            echo 'Opened by `.github/workflows/upstream-drop.yml`, which merges a drop'
-            echo 'automatically when every check passes — so if this is already merged,'
-            echo 'it is live. If it is a draft, something in the report stopped it and'
-            echo 'nothing was deployed.'
+            echo 'Opened by `.github/workflows/upstream-drop.yml`. The drop is on'
+            echo '`staging` and deployed there. If every check passed, including a smoke'
+            echo 'test against the staging deployment, this is merged automatically and'
+            echo 'is already live. If it is still open, something stopped it — the report'
+            echo 'above says what, and production has not been touched.'
             echo
-            echo 'To roll back a merged drop, press Revert above. Vercel redeploys from'
-            echo '`main`, so the revert is the rollback, and the drop stays on its branch.'
+            echo 'To undo a merged drop, press Revert. Vercel redeploys from `main`, so'
+            echo 'the revert is the rollback.'
             echo
-            echo 'The "for a person to read" section is worth reading either way — the'
-            echo 'checks cannot tell whether a commit message is true or whether a price'
+            echo 'The "for a person to read" section is worth reading either way: the'
+            echo 'checks cannot tell whether a commit message is true, or whether a price'
             echo 'change is the one that was asked for.'
           } > "$RUNNER_TEMP/pr-body.md"
           cat "$RUNNER_TEMP/pr-body.md" >> "$GITHUB_STEP_SUMMARY"
 
-      # Recorded before the merge, so the smoke test afterwards can tell a
-      # landed deploy from Vercel not having finished yet.
+      # Recorded before anything is promoted, so the production smoke test can
+      # tell a landed deploy from Vercel not having finished.
       - name: Note what is live now
         id: before
-        if: steps.peek.outputs.new == 'yes'
+        if: steps.staging.outputs.clear == 'yes'
         run: |
           HASH=$(curl -fsS --max-time 25 "$LIVE_URL/" \
             | grep -o 'assets/index-[A-Za-z0-9_-]*\.js' | head -1 \
@@ -321,208 +307,143 @@ jobs:
           echo "bundle=$HASH" >> "$GITHUB_OUTPUT"
           echo "live bundle before this drop: ${HASH:-unknown}"
 
-      - name: Push the branch and open the PR
+      - name: Put the drop on staging, and open the promotion PR
         id: push
-        if: steps.peek.outputs.new == 'yes'
-        # Upstream's commit subject reaches this step. It goes through env,
-        # not through ${{ }} inside the script, so a subject containing
-        # quotes or backticks is a string here rather than shell.
+        if: steps.staging.outputs.clear == 'yes'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SHORT: ${{ steps.peek.outputs.short }}
-          BRANCH: ${{ steps.peek.outputs.prbranch }}
           SUBJECT: ${{ steps.status.outputs.subject }}
-          BLOCKERS: ${{ steps.status.outputs.blockers }}
-          TSC: ${{ steps.tsc.outcome }}
-          BUILD: ${{ steps.build.outcome }}
-          GATES: ${{ steps.gates.outcome }}
         run: |
           git config user.name  'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
 
-          # dist/ and node_modules/ are both in .gitignore, so the build and
-          # the no-save playwright install cannot end up on the branch.
+          # dist/ and node_modules/ are in .gitignore, so the build and the
+          # no-save playwright install cannot end up on the branch.
           git add -A
-
           if git diff --cached --quiet; then
             echo 'Upstream moved but nothing changed in this repo.' >> "$GITHUB_STEP_SUMMARY"
-            exit 0
-          fi
-
-          # The peek step already found no such branch. Checked again because
-          # between then and now is a few minutes of building, and losing
-          # someone's commits to a force-push is not worth the risk.
-          if git ls-remote --exit-code --heads origin "$BRANCH" >/dev/null 2>&1; then
-            echo "\`$BRANCH\` appeared while this ran. Left alone." >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
 
           git commit -q -m "Upstream CRM drop $SHORT" \
             -m "$SUBJECT" \
             -m "Applied by .github/workflows/upstream-drop.yml. See the pull request for what still needs reading."
-          git push -q origin "HEAD:refs/heads/$BRANCH"
-          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
-          # Always a draft to begin with. Whether this is fit to merge is not
-          # known yet: the drop still has to come up as a real deployment and
-          # pass a smoke test against it, which happens in the steps after
-          # this one. The merge step marks it ready, or retitles it to say
-          # what stopped it.
-          gh pr create --base main --head "$BRANCH" \
+          # A fast-forward: this is main plus one commit, and staging was
+          # checked to hold nothing main does not.
+          git push -q origin "HEAD:refs/heads/$STAGING_BRANCH"
+          echo "pushed=yes" >> "$GITHUB_OUTPUT"
+
+          # One promotion PR at a time, staging into main. If one is already
+          # open, refresh its body rather than failing.
+          gh pr create --base main --head "$STAGING_BRANCH" \
             --title "Upstream CRM drop $SHORT: $SUBJECT" \
-            --body-file "$RUNNER_TEMP/pr-body.md" --draft
+            --body-file "$RUNNER_TEMP/pr-body.md" --draft \
+          || gh pr edit "$STAGING_BRANCH" --body-file "$RUNNER_TEMP/pr-body.md"
 
-          gh pr view "$BRANCH" --json url -q .url >> "$GITHUB_STEP_SUMMARY"
+          gh pr view "$STAGING_BRANCH" --json url -q .url >> "$GITHUB_STEP_SUMMARY"
 
-      # Vercel builds a preview for every branch, so the drop is a real
-      # deployment before production is touched. The URL is discovered rather
-      # than configured: Vercel's GitHub integration records it against the
-      # commit, so there is nothing to keep in step by hand.
-      - name: Wait for the drop's preview deployment
-        id: preview
-        if: steps.peek.outputs.new == 'yes' && steps.push.outputs.sha != ''
-        env:
-          BRANCH: ${{ steps.peek.outputs.prbranch }}
+      - name: Wait for the staging deployment
+        id: staging_deploy
+        if: steps.push.outputs.pushed == 'yes'
         run: |
-          # Vercel's branch alias slug: / and _ become -, lower case.
-          SLUG=$(printf '%s' "$BRANCH" | tr '/_' '--' | tr '[:upper:]' '[:lower:]')
-          HOST="$VERCEL_PROJECT-git-$SLUG-$VERCEL_SCOPE"
-
-          # A DNS label stops at 63 characters, and past that Vercel truncates
-          # and appends a hash, which this cannot predict. Branch names here
-          # are short and fixed-length so it does not happen, but if it ever
-          # does, guessing would be worse than stopping.
-          if [ "${#HOST}" -gt 63 ]; then
-            echo "url=" >> "$GITHUB_OUTPUT"
-            echo "The preview host would be ${#HOST} characters, over the 63-character"
-            echo "limit, so Vercel will have truncated it to something unpredictable."
-            echo "Not promoting. Shorten the branch name scheme in the peek step."
-            exit 0
-          fi
-
-          URL="https://$HOST.vercel.app"
+          URL="https://$VERCEL_PROJECT-git-$STAGING_BRANCH-$VERCEL_SCOPE.vercel.app"
           echo "expecting $URL"
-
           FOUND=''
           for i in $(seq 1 30); do
             CODE=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 "$URL/" || echo 000)
-            # 404 is Vercel saying no such deployment yet. 000 is no answer.
-            # Anything else means it exists — including 401, which is
-            # Deployment Protection, and which the smoke test reports properly.
+            # 404 is Vercel saying there is no such deployment yet, 000 is no
+            # answer. Anything else means it exists — including 401 and 302,
+            # which are Deployment Protection, and which the smoke test
+            # reports properly.
             if [ "$CODE" != "404" ] && [ "$CODE" != "000" ]; then
-              echo "preview answering with $CODE after about $(( i * 20 ))s"
+              echo "staging answering with $CODE after about $(( i * 20 ))s"
               FOUND="$URL"
               break
             fi
             sleep 20
           done
-
           echo "url=$FOUND" >> "$GITHUB_OUTPUT"
           if [ -z "$FOUND" ]; then
-            echo "No preview deployment at $URL within about ten minutes."
-            echo "Without one the drop has only been seen on a runner, so it will not"
-            echo "be promoted. Check the Vercel project still builds this branch, and"
-            echo "that VERCEL_PROJECT and VERCEL_SCOPE in this workflow are current."
+            echo "No staging deployment at $URL within about ten minutes, so the drop"
+            echo "has only been seen on a runner. It will not be promoted."
           fi
 
-      - name: Smoke-test the preview, before production sees it
-        id: preview_smoke
-        if: steps.preview.outputs.url != ''
+      - name: Smoke-test staging, before main sees it
+        id: staging_smoke
+        if: steps.staging_deploy.outputs.url != ''
         continue-on-error: true
         env:
-          URL: ${{ steps.preview.outputs.url }}
+          URL: ${{ steps.staging_deploy.outputs.url }}
           # Optional. Preview deployments are protected by default, and a
-          # protected deployment cannot be tested from here — see the note
-          # at the top of this file. Without it the drop is held rather than
-          # promoted, which is the safe way round.
+          # protected deployment cannot be tested from here — see the notes at
+          # the top of this file. Without it the drop stays on staging rather
+          # than being promoted, which is the safe way round.
           VERCEL_PROTECTION_BYPASS: ${{ secrets.VERCEL_PROTECTION_BYPASS }}
         run: |
           set +e
-          node tools/smoke-live.cjs "$URL" > "$RUNNER_TEMP/preview-smoke.txt" 2>&1
+          node tools/smoke-live.cjs "$URL" > "$RUNNER_TEMP/staging-smoke.txt" 2>&1
           RC=$?
           set -e
-          cat "$RUNNER_TEMP/preview-smoke.txt"
+          cat "$RUNNER_TEMP/staging-smoke.txt"
           {
-            echo '## The drop, on its own preview deployment'
+            echo '## Staging'
             echo
             echo "<$URL>"
             echo
             echo '```'
-            cat "$RUNNER_TEMP/preview-smoke.txt"
+            cat "$RUNNER_TEMP/staging-smoke.txt"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
           exit $RC
 
-      # The pull request is still created first, every time, even though a
-      # clean drop is merged seconds later. It costs nothing and it is what
-      # makes the rollback a button: the PR holds the report, the diff, and
-      # GitHub's Revert.
-      - name: Merge it when every check passed
+      - name: Promote staging to main
         id: merge
-        if: steps.peek.outputs.new == 'yes'
+        if: steps.push.outputs.pushed == 'yes'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          BRANCH: ${{ steps.peek.outputs.prbranch }}
           SHORT: ${{ steps.peek.outputs.short }}
           SUBJECT: ${{ steps.status.outputs.subject }}
           BLOCKERS: ${{ steps.status.outputs.blockers }}
           TSC: ${{ steps.tsc.outcome }}
           BUILD: ${{ steps.build.outcome }}
           GATES: ${{ steps.gates.outcome }}
-          PREVIEW_URL: ${{ steps.preview.outputs.url }}
-          PREVIEW_SMOKE: ${{ steps.preview_smoke.outcome }}
+          STAGING_URL: ${{ steps.staging_deploy.outputs.url }}
+          STAGING_SMOKE: ${{ steps.staging_smoke.outcome }}
         run: |
           NEEDS=0
           if [ "$BLOCKERS" != "0" ]; then NEEDS=1; fi
           if [ "$TSC" != "success" ]; then NEEDS=1; fi
           if [ "$BUILD" != "success" ]; then NEEDS=1; fi
           if [ "$GATES" != "success" ]; then NEEDS=1; fi
-
-          # The drop has to have stood up as a real deployment. No preview
-          # URL means it was never checked anywhere but a runner, which is
-          # not enough to go to production unattended.
-          if [ -z "$PREVIEW_URL" ]; then
+          if [ -z "$STAGING_URL" ]; then
             NEEDS=1
-            echo "No preview deployment was found, so nothing has been verified"
-            echo "outside CI."
-          elif [ "$PREVIEW_SMOKE" != "success" ]; then
+            echo "No staging deployment, so nothing was verified outside CI."
+          elif [ "$STAGING_SMOKE" != "success" ]; then
             NEEDS=1
-            echo "The preview deployment did not pass its smoke test."
+            echo "The staging deployment did not pass its smoke test."
           fi
 
           if [ "$NEEDS" != "0" ]; then
             echo "merged=no" >> "$GITHUB_OUTPUT"
-            echo "Not merging: something needs a person. The draft pull request stands."
-            gh pr edit "$BRANCH" \
+            echo "Not promoting. The drop stays on staging and production is untouched."
+            gh pr edit "$STAGING_BRANCH" \
               --title "[needs review] Upstream CRM drop $SHORT: $SUBJECT" || true
             exit 0
           fi
 
-          # Clean, and verified on its own deployment. Out of draft so it can
-          # be merged.
-          gh pr ready "$BRANCH"
+          gh pr ready "$STAGING_BRANCH"
 
-          # Merged, but the branch is deliberately kept. It is the record of
-          # which drops have been offered, and that record has to survive a
-          # revert.
-          #
-          # Pressing Revert on the merged pull request undoes the squashed
-          # commit — which contains the .upstream-crm.json update as well as
-          # upstream's files. So after a revert the marker points at the
-          # previous revision again, and the next hourly run would see this
-          # drop as new. With the branch deleted it would rebuild it and merge
-          # it straight back, re-deploying the thing that was just reverted,
-          # once an hour. With the branch kept, the peek step sees it has been
-          # offered and stops.
-          #
-          # To deliberately re-offer a drop, delete its branch.
-          #
-          # Mergeability is computed asynchronously after the PR is opened,
-          # so the first attempt can lose a race with GitHub.
+          # A merge commit, not a squash. Squashing would rewrite the drop as
+          # a new commit on main, leaving staging permanently ahead of main
+          # and blocking every future drop at the "is staging clear?" step.
+          # Mergeability is computed asynchronously, so the first attempt can
+          # lose a race with GitHub.
           for i in 1 2 3 4 5; do
-            if gh pr merge "$BRANCH" --squash; then
+            if gh pr merge "$STAGING_BRANCH" --merge; then
               echo "merged=yes" >> "$GITHUB_OUTPUT"
-              echo "Merged to main. Vercel deploys from there."
+              echo "Promoted to main. Vercel deploys production from there."
               exit 0
             fi
             echo "merge attempt $i did not take; waiting"
@@ -530,22 +451,18 @@ jobs:
           done
 
           echo "merged=no" >> "$GITHUB_OUTPUT"
-          echo "The checks all passed but the merge would not go through." >&2
+          echo "Everything passed but the merge would not go through." >&2
           echo "Branch protection, or the repo setting that lets Actions open and" >&2
           echo "merge pull requests, is the usual reason. The pull request is open" >&2
           echo "and complete, so it can be merged by hand." >&2
           exit 1
 
-      # Between CI passing and production working there is a deploy, and
-      # nobody is watching it. A build that is green on a runner can still be
-      # broken live.
-      - name: Wait for Vercel, then smoke-test production
+      - name: Wait for production, then smoke-test it
         id: smoke
         if: steps.merge.outputs.merged == 'yes'
         continue-on-error: true
         env:
           BEFORE: ${{ steps.before.outputs.bundle }}
-          # Production is not normally protected, so this is usually unused.
           VERCEL_PROTECTION_BYPASS: ${{ secrets.VERCEL_PROTECTION_BYPASS }}
         run: |
           echo "waiting for Vercel to publish a new bundle (was ${BEFORE:-unknown})"
@@ -566,12 +483,9 @@ jobs:
             echo "the summary says what production is actually serving."
           fi
 
-          # With the old hash, so a deploy that never landed is a failure
-          # rather than a pass against the previous build.
-          #
-          # Run first, printed second, and the exit status kept. Piping
-          # straight into tee would hand this step tee's status instead —
-          # always zero — so a failing smoke test would read as a pass.
+          # Run first, print second, keep the exit status. Piping into tee
+          # would hand this step tee's status instead — always zero — so a
+          # failing smoke test would read as a pass.
           set +e
           if [ -n "$BEFORE" ]; then
             node tools/smoke-live.cjs "$LIVE_URL" --expect-bundle-change "$BEFORE" \
@@ -584,7 +498,7 @@ jobs:
 
           cat "$RUNNER_TEMP/smoke.txt"
           {
-            echo '## Production after the merge'
+            echo '## Production after the promotion'
             echo
             echo '```'
             cat "$RUNNER_TEMP/smoke.txt"
@@ -592,22 +506,20 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
           exit $RC
 
-      # Deliberately ends the run in failure when a person is needed.
+      # Deliberately ends the run in failure when a person is needed. Not
+      # because the job broke — it is how the notification happens. GitHub
+      # does not email about a successful scheduled run, so a drop waiting on
+      # staging, or a promotion that broke production, would sit unseen.
+      # GitHub does email about a failed scheduled run, to whoever last
+      # changed the cron line.
       #
-      # Not because the job broke — it is how the notification happens.
-      # GitHub does not email anyone about a successful scheduled run, so a
-      # held-back drop, or a deploy that went out and broke something, would
-      # sit unseen for as long as nobody happened to look. GitHub does email
-      # about a failed scheduled run, to whoever last changed the cron line,
-      # and that is the only push notification available here without adding
-      # a service and a secret.
+      # It fires once per drop, not once an hour: while a drop is stuck on
+      # staging, the "is staging clear?" step ends the run quietly.
       #
-      # It fires once per drop, not once an hour: the peek step stops before
-      # any of this for a drop that already has a branch.
-      #
-      # Green run: it went live and production checks out. Red run: read it.
+      # Green: it went live and production checks out, or there was nothing to
+      # do. Red: read it.
       - name: Say if this needs a person
-        if: steps.peek.outputs.new == 'yes'
+        if: steps.push.outputs.pushed == 'yes'
         env:
           SHORT: ${{ steps.peek.outputs.short }}
           MERGED: ${{ steps.merge.outputs.merged }}
@@ -616,41 +528,43 @@ jobs:
           TSC: ${{ steps.tsc.outcome }}
           BUILD: ${{ steps.build.outcome }}
           GATES: ${{ steps.gates.outcome }}
-          PREVIEW_URL: ${{ steps.preview.outputs.url }}
-          PREVIEW_SMOKE: ${{ steps.preview_smoke.outcome }}
+          STAGING_URL: ${{ steps.staging_deploy.outputs.url }}
+          STAGING_SMOKE: ${{ steps.staging_smoke.outcome }}
         run: |
           # if-blocks rather than `[ test ] && VAR=1`. Not because the && form
           # aborts mid-script — under bash -e it does not, the failing test is
           # exempt as a non-final command of an && list — but because such a
           # line becomes the step's exit status if it ever ends up last, and a
-          # false test then fails the step silently. The explicit form cannot
-          # acquire that behaviour by being moved.
+          # false test then fails the step silently.
 
           if [ "$MERGED" = "yes" ] && [ "$SMOKE" = "success" ]; then
-            echo "Drop $SHORT is live, and production is serving the quote flow with"
-            echo "the staff gate in place. Nothing needed you."
+            echo "Drop $SHORT went to staging, checked out there, and is now live."
+            echo "Production is serving the quote flow with the staff gate in place."
             exit 0
           fi
 
           if [ "$MERGED" = "yes" ]; then
             echo "Drop $SHORT WENT LIVE and the production smoke test did not pass."
             echo
-            echo "Production is in that state now. The smoke output above says which"
-            echo "check failed. To roll back, open the merged pull request and press"
-            echo "Revert — Vercel redeploys from main, so the revert is the rollback."
+            echo "It passed on staging, so this is the production deploy itself. The"
+            echo "smoke output above says which check failed. To roll back, open the"
+            echo "merged pull request and press Revert."
             exit 1
           fi
 
-          echo "Drop $SHORT was NOT merged, and is waiting as a draft pull request:"
+          echo "Drop $SHORT is ON STAGING and was NOT promoted:"
           echo "  blocking findings: $BLOCKERS"
           echo "  type-check: $TSC   build: $BUILD   gate suite: $GATES"
-          if [ -z "$PREVIEW_URL" ]; then
-            echo "  preview deployment: none found, so nothing was verified outside CI"
+          if [ -z "$STAGING_URL" ]; then
+            echo "  staging deployment: none found"
           else
-            echo "  preview deployment: $PREVIEW_SMOKE  ($PREVIEW_URL)"
+            echo "  staging smoke test: $STAGING_SMOKE"
+            echo "  staging URL: $STAGING_URL"
           fi
           echo
-          echo "Nothing reached the live site. Read the pull request — its report says"
-          echo "what stopped it, and the preview URL above is the drop running, so you"
-          echo "can click through it without deploying anything."
+          echo "Production is untouched. Open the staging URL above to see the drop"
+          echo "running, and the pull request for what stopped it."
+          echo
+          echo "Until staging is dealt with — merged, or reset with"
+          echo "'git push origin main:staging --force' — no further drop will be taken."
           exit 1
