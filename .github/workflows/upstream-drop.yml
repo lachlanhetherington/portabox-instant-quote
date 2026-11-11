@@ -1,50 +1,64 @@
 # Watch the upstream CRM repo, put what is new on `staging`, and promote it
-# to `main` once the staging deployment checks out.
+# to `main` once the staging deployment checks out AND a person approves.
 #
-#   upstream commit  ->  staging  ->  staging deployment is tested  ->  main
+#   upstream commit
+#     -> staging
+#     -> staging deployment is built and smoke-tested
+#     -> YOU APPROVE
+#     -> main  ->  production
 #
-# main is production: Vercel deploys it the moment anything lands there. So
-# nothing reaches customers until a drop has been built, checked, deployed to
-# staging, and tested on that real deployment.
+# The approval is a GitHub Environment protection rule, not anything built
+# here. The `promote` job declares `environment: production`, so GitHub holds
+# the run before that job starts and asks the environment's reviewers to
+# approve or reject — by email, and as a push notification in the GitHub
+# mobile app. Approve and the merge happens; reject and the run stops with
+# production untouched.
 #
-# A drop is promoted only when all of these hold: no blocking finding from
-# tools/apply-upstream-drop.mjs (a local fix that no longer applies, a live
-# credential, an API route that vanished, a staff surface with no gate and no
-# recorded decision), the type-check passes, the build passes,
+# SETUP, once, or the gate does not exist:
+#   Settings -> Environments -> New environment -> name it exactly
+#   `production` -> tick "Required reviewers" -> add yourself -> Save.
+# Without it the job still runs, just without pausing, and the drop would go
+# live unreviewed. Required reviewers are free on public repositories.
+#
+# Nothing reaches customers until a drop has been built, checked, deployed to
+# staging, tested on that real deployment, and then approved.
+#
+# A drop is only ever offered for approval when all of these hold: no blocking
+# finding from tools/apply-upstream-drop.mjs (a local fix that no longer
+# applies, a live credential, an API route that vanished, a staff surface with
+# no gate and no recorded decision), the type-check passes, the build passes,
 # tools/verify-staff-gates.cjs drives a real browser through upstream's own
 # staff login for every role and finds each surface still shut, and
 # tools/smoke-live.cjs passes against the deployed staging site. Any one of
-# those failing leaves the drop sitting on staging with an open pull request,
-# and production is untouched.
+# those failing leaves the drop on staging with the pull request open, and no
+# approval is requested — there is nothing worth approving.
 #
-# Because staging is a shared branch, the job will not start while staging has
-# anything on it that main does not. A held drop, or somebody's unfinished
-# work, has to be dealt with first — otherwise promoting a drop would carry
-# that work into production with it. That check is also what stops a failed
+# Because staging is shared, the job will not start while staging holds
+# anything main does not. A drop awaiting approval, one that stalled, or
+# somebody's own work has to be dealt with first; otherwise promoting would
+# carry that work into production too. That check is also what stops a waiting
 # drop being rebuilt and re-notified every hour.
 #
-# The promotion is a real merge commit, deliberately, so that staging stays an
-# ancestor of main and the next run sees a clean staging. A squash merge would
-# leave staging permanently "ahead" of main and block every future drop.
+# The promotion is a merge commit, deliberately, so staging stays an ancestor
+# of main and the next run sees a clean staging. A squash merge would leave
+# staging permanently ahead of main and block every future drop.
 #
 # Runs hourly. The first step reads upstream's head with `git ls-remote` and
 # stops there when nothing has changed: a full clone of that repo is 64 MB, so
-# cloning every hour to learn nothing would be 1.5 GB a day.
+# cloning hourly to learn nothing would be 1.5 GB a day.
 #
-# Two things outside this file have to be set up.
-#
-# Settings → Actions → General → Workflow permissions → "Allow GitHub Actions
-# to create and approve pull requests". Without it the job builds and checks a
-# drop but cannot open or merge the pull request.
+# Also needed: Settings -> Actions -> General -> Workflow permissions ->
+# "Allow GitHub Actions to create and approve pull requests", or the pull
+# request cannot be opened or merged.
 #
 # Preview deployments are protected by default, and a protected deployment
-# answers automation with a Vercel login page — so the staging check cannot
-# pass and nothing is promoted. That is the safe way round, not a bug: the
-# drop waits on staging, and a signed-in browser opens the staging URL
-# perfectly well. To let the robot in, either turn Vercel Authentication off
-# for Preview in Project Settings → Deployment Protection, or create a
-# Protection Bypass for Automation token there and add it as the repository
-# secret VERCEL_PROTECTION_BYPASS.
+# answers automation with a Vercel login page, so the staging smoke test
+# cannot pass and no approval is ever requested. That is the safe way round:
+# the drop waits on staging and a signed-in browser opens the staging URL
+# fine. To let the robot in, either turn Vercel Authentication off for Preview
+# in Project Settings -> Deployment Protection, or create a Protection Bypass
+# for Automation token there and add it as the secret
+# VERCEL_PROTECTION_BYPASS.
 
 name: Upstream CRM drop
 
@@ -63,26 +77,35 @@ concurrency:
   group: upstream-drop
   cancel-in-progress: false
 
+env:
+  # Production, which main deploys to.
+  LIVE_URL: https://portabox-instant-quote-dun.vercel.app
+
+  # Vercel's stable per-branch alias is
+  #   <project>-git-<branch>-<scope>.vercel.app
+  # Taken from these rather than discovered, because what Vercel records
+  # against a commit is a link to its own dashboard, not to the deployed site.
+  # If the project or team is renamed these change with it, and until they do
+  # nothing is promoted — the staging check cannot pass against a host that
+  # does not resolve, which is the right failure.
+  VERCEL_PROJECT: portabox-instant-quote
+  VERCEL_SCOPE: lhm-edia
+
+  STAGING_BRANCH: staging
+
 jobs:
-  drop:
+  # ---------------------------------------------------------------- stage --
+  # Everything up to "the drop is on staging, deployed, and checks out".
+  # Deliberately does not touch main.
+  stage:
     runs-on: ubuntu-latest
     timeout-minutes: 30
-
-    env:
-      # Production, which main deploys to.
-      LIVE_URL: https://portabox-instant-quote-dun.vercel.app
-
-      # Vercel's stable per-branch alias is
-      #   <project>-git-<branch>-<scope>.vercel.app
-      # Taken from these rather than discovered, because what Vercel records
-      # against a commit is a link to its own dashboard, not to the deployed
-      # site. If the project or team is renamed, these change with it, and
-      # until they do nothing is promoted — the staging check cannot pass
-      # against a host that does not resolve, which is the right failure.
-      VERCEL_PROJECT: portabox-instant-quote
-      VERCEL_SCOPE: lhm-edia
-
-      STAGING_BRANCH: staging
+    outputs:
+      promotable: ${{ steps.verdict.outputs.promotable }}
+      short: ${{ steps.peek.outputs.short }}
+      subject: ${{ steps.status.outputs.subject }}
+      before: ${{ steps.before.outputs.bundle }}
+      staging_url: ${{ steps.staging_deploy.outputs.url }}
 
     steps:
       - name: Check out this repo
@@ -110,7 +133,6 @@ jobs:
           {
             echo "repo=$REPO"
             echo "ubranch=$UBRANCH"
-            echo "head=$HEADSHA"
             echo "short=$SHORT"
           } >> "$GITHUB_OUTPUT"
 
@@ -123,8 +145,9 @@ jobs:
           fi
 
       # staging is shared. If anything is on it that main does not have — a
-      # drop that stalled, or someone's own work — a drop must not be stacked
-      # on top, because promoting it would take that work to production too.
+      # drop awaiting approval, one that stalled, or someone's own work — a
+      # drop must not be stacked on top, because promoting it would take that
+      # work to production too.
       - name: Is staging clear?
         id: staging
         if: steps.peek.outputs.new == 'yes'
@@ -152,12 +175,13 @@ jobs:
               echo "Upstream has \`${{ steps.peek.outputs.short }}\` waiting, but **staging is not clear**:"
               echo "it holds ${{ steps.staging.outputs.ahead }} commit(s) that \`main\` does not."
               echo
-              echo 'Nothing has been done. Either merge staging into main, or reset it'
-              echo 'with `git push origin main:staging --force`, and the next run will'
-              echo 'pick the drop up.'
+              echo 'Most likely a drop is sitting there waiting for approval, or one'
+              echo 'stalled. Approve or reject it, merge staging into main, or reset'
+              echo 'staging with `git push origin main:staging --force`, and the next'
+              echo 'run will pick this drop up.'
               echo
-              echo 'This run is green on purpose — a drop that stalled here was already'
-              echo 'reported once, and repeating that every hour would be noise.'
+              echo 'Green on purpose — whatever is on staging was reported once already,'
+              echo 'and repeating it every hour would be noise.'
             } >> "$GITHUB_STEP_SUMMARY"
           fi
 
@@ -281,13 +305,14 @@ jobs:
             echo '---'
             echo
             echo 'Opened by `.github/workflows/upstream-drop.yml`. The drop is on'
-            echo '`staging` and deployed there. If every check passed, including a smoke'
-            echo 'test against the staging deployment, this is merged automatically and'
-            echo 'is already live. If it is still open, something stopped it — the report'
-            echo 'above says what, and production has not been touched.'
+            echo '`staging` and deployed there. If the checks and the staging smoke test'
+            echo 'passed, the run is now waiting for someone to approve the deployment to'
+            echo 'production — approve or reject it from the Actions run, the email, or'
+            echo 'the GitHub mobile app. If something stopped it, no approval was asked'
+            echo 'for and the report above says why.'
             echo
-            echo 'To undo a merged drop, press Revert. Vercel redeploys from `main`, so'
-            echo 'the revert is the rollback.'
+            echo 'To undo an approved drop, press Revert. Vercel redeploys from `main`,'
+            echo 'so the revert is the rollback.'
             echo
             echo 'The "for a person to read" section is worth reading either way: the'
             echo 'checks cannot tell whether a commit message is true, or whether a price'
@@ -367,10 +392,10 @@ jobs:
           echo "url=$FOUND" >> "$GITHUB_OUTPUT"
           if [ -z "$FOUND" ]; then
             echo "No staging deployment at $URL within about ten minutes, so the drop"
-            echo "has only been seen on a runner. It will not be promoted."
+            echo "has only been seen on a runner. No approval will be requested."
           fi
 
-      - name: Smoke-test staging, before main sees it
+      - name: Smoke-test staging
         id: staging_smoke
         if: steps.staging_deploy.outputs.url != ''
         continue-on-error: true
@@ -378,8 +403,8 @@ jobs:
           URL: ${{ steps.staging_deploy.outputs.url }}
           # Optional. Preview deployments are protected by default, and a
           # protected deployment cannot be tested from here — see the notes at
-          # the top of this file. Without it the drop stays on staging rather
-          # than being promoted, which is the safe way round.
+          # the top of this file. Without it the drop waits on staging rather
+          # than being offered for approval, which is the safe way round.
           VERCEL_PROTECTION_BYPASS: ${{ secrets.VERCEL_PROTECTION_BYPASS }}
         run: |
           set +e
@@ -398,13 +423,10 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
           exit $RC
 
-      - name: Promote staging to main
-        id: merge
+      - name: Is this worth asking anyone to approve?
+        id: verdict
         if: steps.push.outputs.pushed == 'yes'
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          SHORT: ${{ steps.peek.outputs.short }}
-          SUBJECT: ${{ steps.status.outputs.subject }}
           BLOCKERS: ${{ steps.status.outputs.blockers }}
           TSC: ${{ steps.tsc.outcome }}
           BUILD: ${{ steps.build.outcome }}
@@ -425,15 +447,78 @@ jobs:
             echo "The staging deployment did not pass its smoke test."
           fi
 
-          if [ "$NEEDS" != "0" ]; then
-            echo "merged=no" >> "$GITHUB_OUTPUT"
-            echo "Not promoting. The drop stays on staging and production is untouched."
-            gh pr edit "$STAGING_BRANCH" \
-              --title "[needs review] Upstream CRM drop $SHORT: $SUBJECT" || true
-            exit 0
+          if [ "$NEEDS" = "0" ]; then
+            echo "promotable=yes" >> "$GITHUB_OUTPUT"
+            echo "Everything passed. An approval will be requested for production."
+          else
+            echo "promotable=no" >> "$GITHUB_OUTPUT"
+            echo "Not asking for approval — there is nothing worth approving yet."
           fi
 
-          gh pr ready "$STAGING_BRANCH"
+      # Ends the run in failure when a drop is stuck, which is how the
+      # notification happens: GitHub does not email about a successful
+      # scheduled run. It fires once per drop, because while the drop sits on
+      # staging the "is staging clear?" step ends later runs quietly.
+      #
+      # A promotable drop does NOT fail here — it does not need to. The
+      # environment approval request is its own notification.
+      - name: Say if this needs a person
+        if: steps.push.outputs.pushed == 'yes' && steps.verdict.outputs.promotable == 'no'
+        env:
+          SHORT: ${{ steps.peek.outputs.short }}
+          BLOCKERS: ${{ steps.status.outputs.blockers }}
+          TSC: ${{ steps.tsc.outcome }}
+          BUILD: ${{ steps.build.outcome }}
+          GATES: ${{ steps.gates.outcome }}
+          STAGING_URL: ${{ steps.staging_deploy.outputs.url }}
+          STAGING_SMOKE: ${{ steps.staging_smoke.outcome }}
+        run: |
+          echo "Drop $SHORT is ON STAGING and was not offered for approval:"
+          echo "  blocking findings: $BLOCKERS"
+          echo "  type-check: $TSC   build: $BUILD   gate suite: $GATES"
+          if [ -z "$STAGING_URL" ]; then
+            echo "  staging deployment: none found"
+          else
+            echo "  staging smoke test: $STAGING_SMOKE"
+            echo "  staging URL: $STAGING_URL"
+          fi
+          echo
+          echo "Production is untouched. Open the staging URL to see the drop running,"
+          echo "and the pull request for what stopped it."
+          echo
+          echo "Until staging is dealt with — merged, or reset with"
+          echo "'git push origin main:staging --force' — no further drop will be taken."
+          exit 1
+
+  # -------------------------------------------------------------- promote --
+  # Guarded by the `production` environment. GitHub holds this job and asks
+  # the environment's reviewers to approve before any of it runs, so the
+  # pause happens with the drop already live on staging and tested there.
+  promote:
+    needs: stage
+    if: needs.stage.outputs.promotable == 'yes'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment:
+      name: production
+      url: https://portabox-instant-quote-dun.vercel.app
+
+    steps:
+      - name: Check out this repo
+        uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Merge staging into main
+        id: merge
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SHORT: ${{ needs.stage.outputs.short }}
+        run: |
+          echo "Approved. Promoting drop $SHORT from staging to main."
+          gh pr ready "$STAGING_BRANCH" || true
 
           # A merge commit, not a squash. Squashing would rewrite the drop as
           # a new commit on main, leaving staging permanently ahead of main
@@ -442,16 +527,14 @@ jobs:
           # lose a race with GitHub.
           for i in 1 2 3 4 5; do
             if gh pr merge "$STAGING_BRANCH" --merge; then
-              echo "merged=yes" >> "$GITHUB_OUTPUT"
-              echo "Promoted to main. Vercel deploys production from there."
+              echo "Merged. Vercel deploys production from main."
               exit 0
             fi
             echo "merge attempt $i did not take; waiting"
             sleep 15
           done
 
-          echo "merged=no" >> "$GITHUB_OUTPUT"
-          echo "Everything passed but the merge would not go through." >&2
+          echo "Approved, but the merge would not go through." >&2
           echo "Branch protection, or the repo setting that lets Actions open and" >&2
           echo "merge pull requests, is the usual reason. The pull request is open" >&2
           echo "and complete, so it can be merged by hand." >&2
@@ -459,10 +542,9 @@ jobs:
 
       - name: Wait for production, then smoke-test it
         id: smoke
-        if: steps.merge.outputs.merged == 'yes'
         continue-on-error: true
         env:
-          BEFORE: ${{ steps.before.outputs.bundle }}
+          BEFORE: ${{ needs.stage.outputs.before }}
           VERCEL_PROTECTION_BYPASS: ${{ secrets.VERCEL_PROTECTION_BYPASS }}
         run: |
           echo "waiting for Vercel to publish a new bundle (was ${BEFORE:-unknown})"
@@ -506,65 +588,20 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
           exit $RC
 
-      # Deliberately ends the run in failure when a person is needed. Not
-      # because the job broke — it is how the notification happens. GitHub
-      # does not email about a successful scheduled run, so a drop waiting on
-      # staging, or a promotion that broke production, would sit unseen.
-      # GitHub does email about a failed scheduled run, to whoever last
-      # changed the cron line.
-      #
-      # It fires once per drop, not once an hour: while a drop is stuck on
-      # staging, the "is staging clear?" step ends the run quietly.
-      #
-      # Green: it went live and production checks out, or there was nothing to
-      # do. Red: read it.
-      - name: Say if this needs a person
-        if: steps.push.outputs.pushed == 'yes'
+      - name: Report
         env:
-          SHORT: ${{ steps.peek.outputs.short }}
-          MERGED: ${{ steps.merge.outputs.merged }}
+          SHORT: ${{ needs.stage.outputs.short }}
           SMOKE: ${{ steps.smoke.outcome }}
-          BLOCKERS: ${{ steps.status.outputs.blockers }}
-          TSC: ${{ steps.tsc.outcome }}
-          BUILD: ${{ steps.build.outcome }}
-          GATES: ${{ steps.gates.outcome }}
-          STAGING_URL: ${{ steps.staging_deploy.outputs.url }}
-          STAGING_SMOKE: ${{ steps.staging_smoke.outcome }}
         run: |
-          # if-blocks rather than `[ test ] && VAR=1`. Not because the && form
-          # aborts mid-script — under bash -e it does not, the failing test is
-          # exempt as a non-final command of an && list — but because such a
-          # line becomes the step's exit status if it ever ends up last, and a
-          # false test then fails the step silently.
-
-          if [ "$MERGED" = "yes" ] && [ "$SMOKE" = "success" ]; then
-            echo "Drop $SHORT went to staging, checked out there, and is now live."
-            echo "Production is serving the quote flow with the staff gate in place."
+          if [ "$SMOKE" = "success" ]; then
+            echo "Drop $SHORT was approved and is live. Production is serving the"
+            echo "quote flow with the staff gate in place."
             exit 0
           fi
 
-          if [ "$MERGED" = "yes" ]; then
-            echo "Drop $SHORT WENT LIVE and the production smoke test did not pass."
-            echo
-            echo "It passed on staging, so this is the production deploy itself. The"
-            echo "smoke output above says which check failed. To roll back, open the"
-            echo "merged pull request and press Revert."
-            exit 1
-          fi
-
-          echo "Drop $SHORT is ON STAGING and was NOT promoted:"
-          echo "  blocking findings: $BLOCKERS"
-          echo "  type-check: $TSC   build: $BUILD   gate suite: $GATES"
-          if [ -z "$STAGING_URL" ]; then
-            echo "  staging deployment: none found"
-          else
-            echo "  staging smoke test: $STAGING_SMOKE"
-            echo "  staging URL: $STAGING_URL"
-          fi
+          echo "Drop $SHORT WENT LIVE and the production smoke test did not pass."
           echo
-          echo "Production is untouched. Open the staging URL above to see the drop"
-          echo "running, and the pull request for what stopped it."
-          echo
-          echo "Until staging is dealt with — merged, or reset with"
-          echo "'git push origin main:staging --force' — no further drop will be taken."
+          echo "It passed on staging, so this is the production deploy itself. The"
+          echo "smoke output above says which check failed. To roll back, open the"
+          echo "merged pull request and press Revert."
           exit 1
