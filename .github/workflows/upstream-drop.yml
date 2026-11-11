@@ -6,11 +6,19 @@
 # URL you can click through before merging.
 #
 # It is deliberately not auto-merge. Three of the four drops before this job
-# existed added a staff surface that opened with no password, and each was
-# found by reading the diff. tools/find-staff-surfaces.cjs now catches the
-# shape of that mistake, and tools/verify-staff-gates.cjs proves the known
-# gates still hold, but neither can judge a surface nobody has looked at. The
-# report on the PR says which checks passed and what is left for a person.
+# existed added a staff surface that opened with no password: the dispatch
+# console, the driver portal, the softphone bar. Each was found by reading the
+# diff. tools/find-staff-surfaces.cjs now catches the shape of that mistake
+# and tools/verify-staff-gates.cjs proves the known gates still hold, but
+# neither can judge a surface nobody has looked at. The report on the PR says
+# which checks passed and what is left for a person.
+#
+# Runs hourly, which the first step is built around: it reads upstream's head
+# with `git ls-remote` and stops there when nothing has changed. A full clone
+# of that repo is 64 MB, so cloning every hour to discover nothing would be
+# 1.5 GB a day. The same step also stops when the drop it finds has already
+# been offered, because otherwise an unresolved drop would rebuild itself and
+# send a failure notification every hour until someone dealt with it.
 #
 # Repo setting this needs: Settings → Actions → General → Workflow
 # permissions → "Allow GitHub Actions to create and approve pull requests".
@@ -20,20 +28,18 @@ name: Upstream CRM drop
 
 on:
   schedule:
-    # 07:00 UTC daily — mid-afternoon in South Australia, so a drop made
-    # during the client developer's working day is waiting the next morning.
-    - cron: '0 7 * * *'
+    # Hourly, at 20 past. Not on the hour: GitHub queues scheduled runs and
+    # the top of the hour is when everyone else's are queued too.
+    - cron: '20 * * * *'
   workflow_dispatch:
-    inputs:
-      force:
-        description: 'Open a PR even if the checks find blocking items'
-        type: boolean
-        default: true
 
 permissions:
   contents: write
   pull-requests: write
 
+# One at a time. A run that is still building when the next hour comes round
+# should not be raced; the queued one will see the same upstream head and
+# stop at the first step.
 concurrency:
   group: upstream-drop
   cancel-in-progress: false
@@ -49,29 +55,89 @@ jobs:
         with:
           fetch-depth: 0
 
+      # The whole point of this step is to be cheap, because at hourly it is
+      # the step that almost always runs alone. No clone, no node, no install.
+      - name: Anything new upstream?
+        id: peek
+        run: |
+          REPO=$(jq -r '.repo' .upstream-crm.json)
+          UBRANCH=$(jq -r '.branch // "main"' .upstream-crm.json)
+          HAD=$(jq -r '.sha' .upstream-crm.json)
+
+          HEADSHA=$(git ls-remote "$REPO" "refs/heads/$UBRANCH" | cut -f1)
+          if [ -z "$HEADSHA" ]; then
+            echo "Could not read $UBRANCH from $REPO. Upstream may have been" >&2
+            echo "renamed, made private, or had its default branch changed." >&2
+            exit 1
+          fi
+
+          SHORT=$(printf '%s' "$HEADSHA" | cut -c1-7)
+          PRBRANCH="upstream-drop/$SHORT"
+
+          {
+            echo "repo=$REPO"
+            echo "ubranch=$UBRANCH"
+            echo "head=$HEADSHA"
+            echo "short=$SHORT"
+            echo "prbranch=$PRBRANCH"
+          } >> "$GITHUB_OUTPUT"
+
+          if [ "$HEADSHA" = "$HAD" ]; then
+            echo "new=no" >> "$GITHUB_OUTPUT"
+            echo "Up to date with upstream at $SHORT."
+            exit 0
+          fi
+
+          # Offered before means there is a branch, and possibly someone's
+          # work on it. Stop rather than rebuild it and notify again.
+          if git ls-remote --exit-code --heads origin "$PRBRANCH" >/dev/null 2>&1; then
+            echo "new=offered" >> "$GITHUB_OUTPUT"
+            echo "Upstream $SHORT was already offered on $PRBRANCH."
+            exit 0
+          fi
+
+          echo "new=yes" >> "$GITHUB_OUTPUT"
+          echo "Upstream has moved to $SHORT, and it has not been offered yet."
+
+      - name: Nothing to do
+        if: steps.peek.outputs.new != 'yes'
+        run: |
+          if [ "${{ steps.peek.outputs.new }}" = "offered" ]; then
+            {
+              echo "Upstream \`${{ steps.peek.outputs.short }}\` is already waiting on"
+              echo "\`${{ steps.peek.outputs.prbranch }}\`. Left untouched in case it is being"
+              echo "worked on — delete that branch to have it rebuilt from scratch."
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Up to date with upstream at \`${{ steps.peek.outputs.short }}\`." \
+              >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      # Everything below runs only when a drop actually needs taking, which
+      # at hourly is a few times a month.
+
       - uses: actions/setup-node@v4
+        if: steps.peek.outputs.new == 'yes'
         with:
           node-version: '22'
 
-      - name: Read the upstream repo from .upstream-crm.json
-        id: marker
-        run: |
-          echo "repo=$(jq -r .repo .upstream-crm.json)" >> "$GITHUB_OUTPUT"
-          echo "branch=$(jq -r '.branch // "main"' .upstream-crm.json)" >> "$GITHUB_OUTPUT"
-
-      # Cloned into the runner's temp dir, not the workspace, so upstream's
-      # files never look like changes to this repo.
+      # Into the runner's temp dir, not the workspace, so upstream's files
+      # never look like changes to this repo.
       - name: Clone upstream
+        if: steps.peek.outputs.new == 'yes'
         run: |
-          git clone --quiet "${{ steps.marker.outputs.repo }}" "$RUNNER_TEMP/upstream"
-          git -C "$RUNNER_TEMP/upstream" log -1 --oneline "origin/${{ steps.marker.outputs.branch }}"
+          git clone --quiet "${{ steps.peek.outputs.repo }}" "$RUNNER_TEMP/upstream"
+          git -C "$RUNNER_TEMP/upstream" log -1 --oneline \
+            "origin/${{ steps.peek.outputs.ubranch }}"
 
       # Copies upstream in, re-extracts the API routes, re-applies the local
-      # fixes, scans for live credentials, and lists every staff surface with
-      # whether it is gated. Writes the report that becomes the PR body.
-      # Allowed to fail: a blocking finding should still produce a PR to read.
+      # fixes, scans for live credentials, diffs the prices and flag defaults,
+      # and lists every staff surface with whether it is gated. Writes the
+      # report that becomes the PR body. Allowed to fail: a blocking finding
+      # should still produce a PR to read.
       - name: Apply the drop
         id: apply
+        if: steps.peek.outputs.new == 'yes'
         continue-on-error: true
         run: |
           node tools/apply-upstream-drop.mjs \
@@ -81,6 +147,7 @@ jobs:
 
       - name: Read the status
         id: status
+        if: steps.peek.outputs.new == 'yes'
         run: |
           S="$RUNNER_TEMP/status.json"
           if [ ! -f "$S" ]; then
@@ -91,43 +158,30 @@ jobs:
           cat "$S"
           {
             echo "status=$(jq -r '.status' "$S")"
-            echo "sha=$(jq -r '.sha // ""' "$S")"
-            echo "short=$(jq -r '(.sha // "") | .[0:7]' "$S")"
             echo "blockers=$(jq -r '.blockers' "$S")"
-            # Quoted through jq so a subject containing quotes or backticks
-            # cannot break the shell or the later gh invocation.
+            # Through jq and trimmed, so a subject containing quotes or
+            # backticks cannot break the shell or the later gh invocation.
             echo "subject=$(jq -r '.subject // ""' "$S" | tr -d '\n' | cut -c1-120)"
           } >> "$GITHUB_OUTPUT"
 
-      - name: Nothing new
-        if: steps.status.outputs.status == 'none'
-        run: |
-          echo "Already at upstream ${{ steps.status.outputs.short }}. Nothing to do." \
-            >> "$GITHUB_STEP_SUMMARY"
-
-      # Everything below only runs when a drop actually arrived.
-
       - name: Install dependencies
-        if: steps.status.outputs.status != 'none'
+        if: steps.peek.outputs.new == 'yes'
         run: npm ci || npm install
 
       - name: Type-check
-        if: steps.status.outputs.status != 'none'
         id: tsc
+        if: steps.peek.outputs.new == 'yes'
         continue-on-error: true
         run: npx tsc --noEmit
 
       - name: Build
-        if: steps.status.outputs.status != 'none'
         id: build
+        if: steps.peek.outputs.new == 'yes'
         continue-on-error: true
         run: npx vite build
 
-      # The gate suite drives a real browser through upstream's own staff
-      # login for each role and checks the surface stays shut. The password is
-      # generated here and thrown away, so this needs no repository secret.
       - name: Install Playwright
-        if: steps.status.outputs.status != 'none' && steps.build.outcome == 'success'
+        if: steps.peek.outputs.new == 'yes' && steps.build.outcome == 'success'
         run: |
           # Not a dependency of the app — only the gate suite needs it, and
           # pinning it here keeps it out of everyone's install. This is the
@@ -135,9 +189,12 @@ jobs:
           npm install --no-save playwright@1.63.0
           npx playwright install --with-deps chromium
 
+      # Drives a real browser through upstream's own staff login for each
+      # role and checks the surface stays shut. The password is generated here
+      # and thrown away, so this needs no repository secret.
       - name: Verify the staff gates
-        if: steps.status.outputs.status != 'none' && steps.build.outcome == 'success'
         id: gates
+        if: steps.peek.outputs.new == 'yes' && steps.build.outcome == 'success'
         continue-on-error: true
         run: |
           PW=$(node -e 'console.log(require("crypto").randomBytes(16).toString("hex"))')
@@ -153,7 +210,7 @@ jobs:
             | tee "$RUNNER_TEMP/gates.txt"
 
       - name: Assemble the pull request body
-        if: steps.status.outputs.status != 'none'
+        if: steps.peek.outputs.new == 'yes'
         run: |
           {
             cat "$RUNNER_TEMP/report.md"
@@ -164,7 +221,7 @@ jobs:
             echo '|---|---|'
             echo "| type-check | ${{ steps.tsc.outcome }} |"
             echo "| build | ${{ steps.build.outcome }} |"
-            echo "| staff gate suite | ${{ steps.gates.outcome || 'skipped' }} |"
+            echo "| staff gate suite | ${{ steps.gates.outcome }} |"
             echo
             if [ -f "$RUNNER_TEMP/gates.txt" ]; then
               echo '<details><summary>Gate suite output</summary>'
@@ -185,15 +242,15 @@ jobs:
           cat "$RUNNER_TEMP/pr-body.md" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Push the branch and open the PR
-        if: steps.status.outputs.status != 'none'
+        if: steps.peek.outputs.new == 'yes'
         # Upstream's commit subject reaches this step. It goes through env,
         # not through ${{ }} inside the script, so a subject containing
         # quotes or backticks is a string here rather than shell.
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          SHORT: ${{ steps.status.outputs.short }}
+          SHORT: ${{ steps.peek.outputs.short }}
+          BRANCH: ${{ steps.peek.outputs.prbranch }}
           SUBJECT: ${{ steps.status.outputs.subject }}
-          BRANCH: upstream-drop/${{ steps.status.outputs.short }}
           BLOCKERS: ${{ steps.status.outputs.blockers }}
           TSC: ${{ steps.tsc.outcome }}
           BUILD: ${{ steps.build.outcome }}
@@ -211,16 +268,11 @@ jobs:
             exit 0
           fi
 
-          # If the branch is already there, this drop has been offered before
-          # and someone may be working on it. Pushing would overwrite their
-          # commits — a blocked drop is expected to be fixed up on its own
-          # branch — so leave it and say where it is.
+          # The peek step already found no such branch. Checked again because
+          # between then and now is a few minutes of building, and losing
+          # someone's commits to a force-push is not worth the risk.
           if git ls-remote --exit-code --heads origin "$BRANCH" >/dev/null 2>&1; then
-            {
-              echo "Upstream drop \`$SHORT\` was already offered on \`$BRANCH\`."
-              echo 'Left untouched, in case it is being worked on. Delete the branch'
-              echo 'to have the next run build it fresh.'
-            } >> "$GITHUB_STEP_SUMMARY"
+            echo "\`$BRANCH\` appeared while this ran. Left alone." >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
 
@@ -256,15 +308,18 @@ jobs:
       # changed the cron line, and that is the only push notification
       # available here without adding a service and a secret.
       #
+      # It fires once, not every hour: the peek step stops before any of this
+      # for a drop that has already been offered.
+      #
       # So: green run means nothing needed you. Red run means read the PR.
       - name: Say if this needs a person
-        if: steps.status.outputs.status != 'none'
+        if: steps.peek.outputs.new == 'yes'
         env:
           BLOCKERS: ${{ steps.status.outputs.blockers }}
           TSC: ${{ steps.tsc.outcome }}
           BUILD: ${{ steps.build.outcome }}
           GATES: ${{ steps.gates.outcome }}
-          SHORT: ${{ steps.status.outputs.short }}
+          SHORT: ${{ steps.peek.outputs.short }}
         run: |
           # if-blocks rather than `[ test ] && VAR=1`. Not because the && form
           # aborts mid-script — under bash -e it does not, the failing test is
