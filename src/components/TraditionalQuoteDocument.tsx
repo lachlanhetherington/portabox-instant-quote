@@ -101,6 +101,19 @@ export const TraditionalQuoteDocument: React.FC<TraditionalQuoteDocumentProps> =
   // Total Ongoing Monthly Storage (Storage + Insurance if selected)
   const recurringMonthlyTotal = monthlyStorageRate + insuranceMonthlyFee;
 
+  // Transport legs billed later (pick-up, interstate line-haul, final delivery and collection),
+  // plus the fuel levies deferred to those legs. Not part of the first payment.
+  const laterLegs = quote.legs.filter((leg) => !leg.isPayableNow);
+  const laterFuelEstimate = laterLegs.reduce(
+    (sum, leg) => sum + (leg.fuelSurchargeDeferred ? leg.fuelSurchargeEstimatedAmount || 0 : 0),
+    0,
+  );
+  const laterTransportTotal = laterLegs.reduce((sum, leg) => sum + leg.fee, 0) + laterFuelEstimate;
+
+  // Ongoing monthly billing starts after any prepaid months.
+  const prepaidMonths: Record<string, number> = { '3_months_upfront': 3, '6_months_upfront': 6, '12_months_upfront': 12 };
+  const ongoingStartsMonth = (prepaidMonths[quote.billingCycle] ?? 1) + 1;
+
   return (
     <div className="bg-white rounded-3xl border-2 border-slate-300 shadow-md p-6 sm:p-10 font-['Plus_Jakarta_Sans',sans-serif] text-slate-800 space-y-8 print:border-none print:shadow-none print:p-0 print:space-y-6 print:rounded-none">
       {/* 1. OFFICIAL QUOTATION HEADER */}
@@ -244,6 +257,72 @@ export const TraditionalQuoteDocument: React.FC<TraditionalQuoteDocumentProps> =
           </table>
         </div>
 
+        {/* GROUP 1b: TRANSPORT CHARGED LATER (pick-up, interstate line-haul, final delivery & collection) */}
+        {laterLegs.length > 0 && (
+          <div className="border border-slate-200 rounded-2xl overflow-hidden shadow-2xs">
+            <div className="bg-slate-100/90 px-4 py-2.5 border-b border-slate-200 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="min-w-5 h-5 px-1 rounded-full bg-[#15385E] text-white text-[11px] font-black flex items-center justify-center">
+                  1b
+                </span>
+                <h4 className="text-xs font-black uppercase tracking-wider text-[#15385E]">
+                  Later Transport Fees (Charged When Each Move Happens)
+                </h4>
+              </div>
+              <span className="text-[10px] font-bold text-slate-500 uppercase">Not Included In First Payment</span>
+            </div>
+
+            <table className="w-full text-xs text-left">
+              <thead className="bg-slate-50/80 text-[10px] font-bold uppercase text-slate-500 border-b border-slate-200">
+                <tr>
+                  <th className="py-2.5 px-4 font-black">Description</th>
+                  <th className="py-2.5 px-4 font-black text-center">Qty / Route</th>
+                  <th className="py-2.5 px-4 font-black text-right">Unit Rate</th>
+                  <th className="py-2.5 px-4 font-black text-right">Subtotal (AUD)</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {laterLegs.map((leg, idx) => (
+                  <tr key={`later-${idx}`} className="bg-white">
+                    <td className="py-3 px-4">
+                      <p className="font-bold text-slate-900">{leg.label}</p>
+                      <p className="text-[11px] text-slate-500 mt-0.5">{leg.description}</p>
+                    </td>
+                    <td className="py-3 px-4 text-center font-mono">
+                      {leg.containerCount || quote.containerCount} container{quote.containerCount > 1 ? 's' : ''}
+                    </td>
+                    <td className="py-3 px-4 text-right font-mono">
+                      ${formatMoney(leg.feePerContainer || leg.fee)}
+                    </td>
+                    <td className="py-3 px-4 text-right font-mono font-bold text-slate-900">
+                      ${formatMoney(leg.fee)}
+                    </td>
+                  </tr>
+                ))}
+                {laterFuelEstimate > 0 && (
+                  <tr className="bg-white">
+                    <td className="py-3 px-4" colSpan={3}>
+                      <p className="font-bold text-slate-900">Estimated fuel levies on these legs</p>
+                      <p className="text-[11px] text-slate-500 mt-0.5">Charged with each leg at the levy applying at the time.</p>
+                    </td>
+                    <td className="py-3 px-4 text-right font-mono font-bold text-slate-900">
+                      ${formatMoney(laterFuelEstimate)}
+                    </td>
+                  </tr>
+                )}
+                <tr className="bg-slate-50">
+                  <td className="py-3 px-4 font-black text-[#15385E]" colSpan={3}>
+                    Total later transport fees (estimate)
+                  </td>
+                  <td className="py-3 px-4 text-right font-mono font-black text-[#15385E]">
+                    ${formatMoney(laterTransportTotal)}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        )}
+
         {/* GROUP 2: ONGOING MONTHLY CONTAINER STORAGE */}
         <div className="border border-slate-200 rounded-2xl overflow-hidden shadow-2xs">
           <div className="bg-slate-100/90 px-4 py-2.5 border-b border-slate-200 flex items-center justify-between">
@@ -332,7 +411,7 @@ export const TraditionalQuoteDocument: React.FC<TraditionalQuoteDocumentProps> =
                   <td className="py-2.5 px-4">
                     <p className="font-bold text-slate-900">Quilted Moving Blankets (Hire)</p>
                     <p className="text-[11px] text-slate-500">
-                      First {quote.packingSupplies.freeBlanketsAllowance || 10} blankets free per container rented
+                      First {quote.packingSupplies.freeBlanketsAllowance || 10} blankets free for your booking
                     </p>
                   </td>
                   <td className="py-2.5 px-4 text-center font-mono">
@@ -432,6 +511,24 @@ export const TraditionalQuoteDocument: React.FC<TraditionalQuoteDocumentProps> =
         </div>
       </div>
 
+      {/* 3b. YOUR SAVINGS (itemised real savings on this booking) */}
+      {quote.savingsBreakdown && quote.savingsBreakdown.length > 0 && (
+        <div className="rounded-2xl border-2 border-emerald-200 bg-emerald-50/60 p-4 sm:p-5">
+          <div className="flex items-baseline justify-between gap-4 pb-2 mb-2 border-b border-emerald-200">
+            <span className="text-xs font-black uppercase tracking-wider text-emerald-900">Your savings on this booking</span>
+            <span className="font-mono text-xl font-black text-emerald-800">${formatMoney(quote.totalSavings || 0)}</span>
+          </div>
+          <ul className="space-y-1 text-xs text-emerald-900">
+            {quote.savingsBreakdown.map((s, i) => (
+              <li key={i} className="flex items-start justify-between gap-4">
+                <span>✓ {s.label}</span>
+                <span className="font-mono font-bold shrink-0">${formatMoney(s.amount)}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       {/* 4. FORMAL TAX & TOTAL LEDGER SUMMARY */}
       <div className="pt-4 border-t-2 border-slate-300">
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-end gap-6">
@@ -475,7 +572,7 @@ export const TraditionalQuoteDocument: React.FC<TraditionalQuoteDocumentProps> =
             <div className="pt-2 border-t border-sky-800 flex items-baseline justify-between text-xs">
               <div>
                 <span className="font-bold text-sky-100 block">ONGOING MONTHLY STORAGE</span>
-                <span className="text-[10px] text-slate-300">Commences month 2 (12-mo freeze)</span>
+                <span className="text-[10px] text-slate-300">Commences month {ongoingStartsMonth} (12-mo freeze)</span>
               </div>
               <span className="font-mono font-extrabold text-[#F7D347] text-base">
                 ${formatMoney(recurringMonthlyTotal, recurringMonthlyTotal % 1 !== 0)} /mo

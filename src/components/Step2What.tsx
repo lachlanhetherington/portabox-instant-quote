@@ -28,6 +28,7 @@ import {
   calculateLegFuelSurcharge,
   findClosestDepot,
 } from '../services/pricingEngine';
+import { evaluatePostcodeServiceTier } from '../services/postcodeServiceTierEngine';
 
 import { AreYouStuckBanner } from './AreYouStuckBanner';
 
@@ -122,6 +123,13 @@ export const Step2What: React.FC<Step2WhatProps> = ({
     }
 
     setDestBlockedNotice(null);
+    if (evaluatePostcodeServiceTier(record, config.postcodeServiceTiers, false).tier === 3) {
+      setValidationError(`${record.suburb} ${record.state} ${record.postcode} is outside our coverage area (we service SA, VIC, NSW/ACT and QLD). Please choose another destination or call 1800 467 637.`);
+      onSelectDestinationPostcode(null);
+      setDestQuery(`${record.postcode} ${record.suburb}`);
+      setIsDestOpen(false);
+      return;
+    }
     setValidationError(null);
     onSelectDestinationPostcode(record);
     setDestQuery(`${record.postcode} ${record.suburb}`);
@@ -226,7 +234,14 @@ export const Step2What: React.FC<Step2WhatProps> = ({
     if (isMoving && !destinationPostcode) {
       // Check if current destQuery matches any suggestion
       if (destSuggestions.length > 0) {
-        handleSelectDestination(destSuggestions[0]);
+        const first = destSuggestions[0];
+        handleSelectDestination(first);
+        if (
+          isPostcodeBlocked(first.postcode, config) ||
+          evaluatePostcodeServiceTier(first, config.postcodeServiceTiers, false).tier === 3
+        ) {
+          return;
+        }
         onContinue();
       } else {
         setValidationError('Please select your destination postcode or suburb before continuing.');

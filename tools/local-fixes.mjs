@@ -311,7 +311,10 @@ fix(
 fix(
   'firebase service: config from the environment, and never throw at import',
   'src/services/firebaseService.ts',
-  (s) => !/AIza[A-Za-z0-9_-]{20,}/.test(s) && /hasFirebaseConfig/.test(s),
+  /* signedOutAuth, not just hasFirebaseConfig: an older version of this fix
+     produced the latter without the former, and that combination is the one
+     that takes the public page down. */
+  (s) => !/AIza[A-Za-z0-9_-]{20,}/.test(s) && /signedOutAuth/.test(s),
   (s) => s.replace(
     /const firebaseConfig = \{[\s\S]*?\};\s*\n+const app = !getApps\(\)\.length \? initializeApp\(firebaseConfig\) : getApps\(\)\[0\];\s*\nexport const db = getFirestore\(app\);\s*\nexport const auth = getAuth\(app\);/,
     `/**\n` +
@@ -349,14 +352,43 @@ fix(
     `  ? (!getApps().length ? initializeApp(firebaseConfig) : getApps()[0])\n` +
     `  : null;\n\n` +
     `/* Asserted rather than typed as nullable on purpose. Around sixty call\n` +
-    `   sites across seven admin services take db and auth as given, and they\n` +
-    `   are upstream's files — widening the type here would mean editing every\n` +
-    `   one of them and re-doing it on each drop. The runtime behaviour is the\n` +
-    `   same either way: unconfigured, a call throws where it is made, so the\n` +
-    `   admin feature fails and the quote flow, which never imports this, does\n` +
-    `   not. Guard with hasFirebaseConfig before reaching for either. */\n` +
-    `export const db = (app ? getFirestore(app) : null) as Firestore;\n` +
-    `export const auth = (app ? getAuth(app) : null) as Auth;`
+    `   sites across seven admin services take db as given, and they are\n` +
+    `   upstream's files — widening the type here would mean editing every one\n` +
+    `   of them and re-doing it on each drop. Unconfigured, a call throws where\n` +
+    `   it is made, so the admin feature fails rather than the page. Guard with\n` +
+    `   hasFirebaseConfig before reaching for it. */\n` +
+    `export const db = (app ? getFirestore(app) : null) as Firestore;\n\n` +
+    `/* auth cannot be null, and that is not a style preference.\n` +
+    `   App.tsx calls onAuthStateChanged(auth, ...) as the component mounts,\n` +
+    `   so this module is now reached by the public quote flow and not only by\n` +
+    `   the admin screens. With no Firebase project configured, a null here\n` +
+    `   threw before React rendered anything: blank page, no quote form,\n` +
+    `   nothing — for every customer, not just staff.\n` +
+    `\n` +
+    `   An earlier version of this comment said the quote flow never imported\n` +
+    `   this module. That was true until the drop that moved staff login into\n` +
+    `   Firebase, and it is the assumption that broke.\n` +
+    `\n` +
+    `   So unconfigured, auth is a stand-in that answers exactly one question —\n` +
+    `   "is anyone signed in?" — with "no", and does nothing else. Any real\n` +
+    `   authentication still fails at the point of use, which is where it\n` +
+    `   should: this keeps the page up, it does not pretend to log anyone in. */\n` +
+    `const reportSignedOut = (next: unknown) => {\n` +
+    `  const cb =\n` +
+    `    typeof next === 'function'\n` +
+    `      ? (next as (u: null) => void)\n` +
+    `      : (next as { next?: (u: null) => void } | null)?.next;\n` +
+    `  if (typeof cb === 'function') cb(null);\n` +
+    `  return () => {};\n` +
+    `};\n\n` +
+    `const signedOutAuth = {\n` +
+    `  currentUser: null,\n` +
+    `  onAuthStateChanged: reportSignedOut,\n` +
+    `  onIdTokenChanged: reportSignedOut,\n` +
+    `  beforeAuthStateChanged: () => () => {},\n` +
+    `  signOut: async () => {},\n` +
+    `};\n\n` +
+    `export const auth = (app ? getAuth(app) : signedOutAuth) as unknown as Auth;`
   ).replace(
     /^import \{ getFirestore \} from 'firebase\/firestore';$/m,
     `import { getFirestore, type Firestore } from 'firebase/firestore';`
@@ -476,23 +508,22 @@ fix(
 /* -- 14. the driver portal ----------------------------------------------
    The third staff surface, and the last one that was still open.
 
-   This drop is an improvement on what came before: the header's driver
-   button now calls handleOpenStaffLogin('driver') when there is no staff
-   session, so the portal is no longer reachable in one click from a cold
-   browser. But the login it opens is decided in the browser. Six staff
-   records in src/services/adminAuthService.ts carry the password
-   'Portabox2026!' in the shipped bundle, and verifyStaffMfaCode returns
-   true for '123456', '849201' and '000000' regardless of who is signing
-   in. Inside the portal the driver PIN check also accepts '0000', and the
-   failure message prints the fallback on screen: "Try quick 1-click driver
-   login below or PIN 1234."
+   Written when the staff session was UI state rather than a credential:
+   six staff records carried the password 'Portabox2026!' in the shipped
+   bundle, verifyStaffMfaCode returned true for '123456', '849201' and
+   '000000' for anyone, and inside the portal the driver PIN check accepted
+   '0000' with the failure message printing the fallback on screen. Anyone
+   who read the public JavaScript could mint a session.
 
-   So the staff session is a UI state, not a credential — anyone who reads
-   the public JavaScript can mint one. The portal holds the day's job list
-   with customer names and delivery addresses, so it goes behind the same
-   server-checked gate as the admin portal and the dispatch console. The
-   gate's own copy has said "admin, dispatch and driver tools" since it was
-   written; this is the part that makes that true.
+   Upstream has since closed that: sign-in is a Firebase email link checked
+   on the server, the passwords and the universal codes are gone from the
+   bundle, and a session with no Firebase identity behind it is discarded.
+
+   The gate stays anyway. The portal holds the day's job list with customer
+   names and delivery addresses, it costs nothing to ask for a password the
+   server checks, and upstream's guarantees are only as old as the most
+   recent drop. The gate's own copy has said "admin, dispatch and driver
+   tools" since it was written; this is the part that makes that true.
 
    Rendered as an overlay rather than inline, because unlike the other two
    this is a modal that sits beside the quote flow rather than replacing
@@ -541,10 +572,12 @@ fix(
    This drop put the bar behind a feature flag and a permission check:
    config.enableSoftphone && staffSession && hasStaffPermission(user,
    'softphone_telephony'). The flag ships off, so nothing renders on the
-   live deployment today. But staffSession is browser state — see fix 14 —
-   so the day the CEO screen turns the flag on, anyone who read the bundle
-   can mint a session and get a live dialler on the business's Twilio
-   account. Outbound calls are billed to the client.
+   live deployment today. When this was written staffSession was browser
+   state anyone could mint — see fix 14 — so turning the flag on would have
+   handed a live dialler on the business's Twilio account to whoever asked.
+   Upstream has since closed that route, but the reasoning for the gate
+   survives it: outbound calls are billed to the client, so this is the one
+   surface where being wrong costs money rather than only exposing data.
 
    Not AdminGate: the bar is pinned beside the quote flow rather than
    replacing it, so a sign-in form here would be a password box floating

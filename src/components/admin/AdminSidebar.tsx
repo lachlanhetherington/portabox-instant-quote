@@ -391,7 +391,9 @@ export const AdminSidebar: React.FC<AdminSidebarProps> = ({
   ];
 
   const handlePersonaSelect = (member: StaffMember) => {
-    const newSession = setStaffSession(member, 'passkey');
+    // Persona preview is a CEO-only convenience; it never changes server-side access.
+    if (currentSession?.user.role !== 'ceo') return;
+    const newSession = setStaffSession(member, 'google');
     if (onSelectSession) {
       onSelectSession(newSession);
     }

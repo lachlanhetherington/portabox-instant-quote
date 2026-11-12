@@ -2,10 +2,11 @@
 import { CustomerAccount } from './customerPortalService';
 import { db } from './firebaseService';
 import { doc, updateDoc } from 'firebase/firestore';
+import { apiFetch } from './apiClient';
 
 // Helper to call server-side SMS API
 const sendSmsProxy = async (contactId: string, to: string, message: string) => {
-  const response = await fetch('/api/sms/send', {
+  const response = await apiFetch('/api/sms/send', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ contactId, to, message }),

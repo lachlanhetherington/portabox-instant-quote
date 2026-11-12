@@ -56,7 +56,6 @@ import { getMetroHubForPostcode, loadAppConfig } from '../services/pricingEngine
 import { checkQuoteExpiry } from '../services/quoteLifecycleService';
 import { BraintreePaymentSection } from './BraintreePaymentSection';
 import { BraintreePaymentResult } from '../services/braintreeService';
-import { calculateCompetitorComparison } from '../services/competitorPricingService';
 import { DeliverySlotWindow, DepotCalendarConfig, AppConfig } from '../types/quote';
 import { TraditionalStorageComparison } from './TraditionalStorageComparison';
 import { TraditionalQuoteDocument } from './TraditionalQuoteDocument';
@@ -289,50 +288,7 @@ export const Step5Quote: React.FC<Step5QuoteProps> = ({
     }
   };
 
-  // 1. Calculate Cubic Meter Volume & Savings Benchmarked against modular container competitors:
-  const selSmall = quote.containerSelections?.small_10m3 || 0;
-  const selMed = quote.containerSelections?.medium_19m3 || 0;
-  const selLrg = (quote.containerSelections?.large_25m3 || 0) + ((quote.containerSelections?.two_large_50m3 || 0) * 2);
-  const hasSelections = (selSmall + selMed + selLrg) > 0;
-
-  const totalVolumeM3 = quote.totalVolumeM3 || (
-    hasSelections
-      ? (selSmall * 10) + (selMed * 19) + (selLrg * 25)
-      : (quote.containerSize === 'small_10m3' ? 10 : quote.containerSize === 'medium_19m3' ? 19 : 25) * quote.containerCount
-  );
-
-  // Daily verified competitor comparison (Modular container competitor benchmark: $99 delivery fee per unit, 8 m³ container, $15.20/m³ storage)
-  const comp = calculateCompetitorComparison({
-    totalVolumeM3,
-    portaboxContainerCount: quote.containerCount,
-    portaboxDeliveryCost: quote.initialDeliveryFee,
-    portaboxMonthlyStorageFee: quote.monthlyStorageFee,
-  });
-
-  const competitorSmallContainersCount = comp.competitorSmallContainersCount;
-  const competitorDeliveryCost = comp.competitorDeliveryCost; // Modular container competitor $99 * count
-  const portaboxDeliveryCost = comp.portaboxDeliveryCost;
-  const excessDeliveryCharges = comp.excessDeliveryCharges;
-  const monthlyCubicSavings = comp.monthlyStorageSavings;
-  const cubicSavingsPercent = comp.storageSavingsPercent;
-  const marketMonthlyCost = comp.marketMonthlyCost;
-  const portaboxRatePerM3 = comp.portaboxRatePerM3;
-  const firstMonthTotalSavings = comp.firstMonthTotalSavings;
-
-  // 2. Billing cycle upfront savings:
-  let billingUpfrontSavings = 0;
-  if (quote.billingCycle === 'monthly') {
-    billingUpfrontSavings = Math.round(quote.weeklyStorageFee * (52 / 12)) - quote.monthlyStorageFee;
-  } else if (quote.billingCycle === '3_months_upfront') {
-    billingUpfrontSavings = (quote.weeklyStorageFee * 13) - quote.currentPeriodicStorageFee;
-  } else if (quote.billingCycle === '6_months_upfront') {
-    billingUpfrontSavings = (quote.weeklyStorageFee * 26) - quote.currentPeriodicStorageFee;
-  } else if (quote.billingCycle === '12_months_upfront') {
-    billingUpfrontSavings = (quote.weeklyStorageFee * 52) - quote.currentPeriodicStorageFee;
-  }
-
-  // 3. Total Combined Savings (Includes storage savings, excess delivery avoided, and any promo code discount):
-  const totalSavedDisplay = (billingUpfrontSavings > 0 ? billingUpfrontSavings : monthlyCubicSavings) + excessDeliveryCharges + (quote.totalDiscount || 0);
+  // Savings shown on the quote come from quote.savingsBreakdown (see TraditionalQuoteDocument).
 
   return (
     <div className="final-quote-container bg-white rounded-2xl sm:rounded-3xl p-4 sm:p-8 lg:p-10 shadow-xs border-2 border-[#DAD7D1] animate-in fade-in duration-200">

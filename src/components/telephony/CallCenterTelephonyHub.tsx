@@ -892,8 +892,6 @@ export const CallCenterTelephonyHub: React.FC = () => {
                   <div className="text-xl font-extrabold text-white">
                     {clicksendAccount?.balance !== undefined && clicksendAccount?.balance !== null
                       ? `$${clicksendAccount.balance.toFixed(2)} ${clicksendAccount.currency || 'AUD'}`
-                      : clicksendConfig.username && clicksendConfig.apiKey
-                      ? 'Live Active'
                       : '$0.00 AUD (Sandbox)'}
                   </div>
                   <span className="text-[10px] text-emerald-300 block mt-0.5 font-medium">
@@ -919,30 +917,9 @@ export const CallCenterTelephonyHub: React.FC = () => {
                   </div>
 
                   <form onSubmit={handleSaveClickSendConfig} className="space-y-4 text-xs">
-                    <div>
-                      <label className="block text-slate-600 font-bold mb-1">ClickSend Username / Email</label>
-                      <input
-                        type="text"
-                        value={clicksendConfig.username}
-                        onChange={(e) => setClicksendConfig({ ...clicksendConfig, username: e.target.value })}
-                        placeholder="e.g. accounts@portabox.com.au or clicksend_username"
-                        className="w-full p-2.5 rounded-xl border border-slate-200 font-mono text-xs focus:ring-2 focus:ring-[#00c0f3] outline-hidden"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-slate-600 font-bold mb-1">ClickSend API Key</label>
-                      <input
-                        type="password"
-                        value={clicksendConfig.apiKey}
-                        onChange={(e) => setClicksendConfig({ ...clicksendConfig, apiKey: e.target.value })}
-                        placeholder="e.g. 55B5A245-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
-                        className="w-full p-2.5 rounded-xl border border-slate-200 font-mono text-xs focus:ring-2 focus:ring-[#00c0f3] outline-hidden"
-                      />
-                      <p className="text-[10px] text-slate-400 mt-1">
-                        Obtained from ClickSend Dashboard &gt; Developers &gt; API Credentials.
-                      </p>
-                    </div>
+                    <p className="p-3 rounded-xl bg-slate-50 border border-slate-200 text-slate-600">
+                      ClickSend username and API key are configured on the server (CLICKSEND_USERNAME / CLICKSEND_API_KEY) and are never entered or stored in the browser.
+                    </p>
 
                     <div className="grid grid-cols-2 gap-3">
                       <div>

@@ -18,6 +18,7 @@ import {
   saveCustomerLeads,
 } from './pricingEngine';
 import { MetroHub } from '../types/quote';
+import { apiFetch } from './apiClient';
 
 export type YardReviewStatus =
   | 'Pending Inspection'
@@ -794,7 +795,7 @@ export const SEED_TRUCK_FLEET: TruckFleetAsset[] = [
 ];
 
 const DEFAULT_SMARTSHEET_CONFIG: SmartsheetConfig = {
-  apiToken: 'F3CVVuJ7Gh8ozrm11WDnIsTL1ZYpRKADmNtAX',
+  apiToken: '', // server-side only (SMARTSHEET_API_TOKEN)
   tokenName: 'New CRM - Phase I',
   workspaceName: 'New CRM - Porta',
   sheetName: 'CRM-Phase I (Quotezilla - QZ4)',
@@ -835,7 +836,7 @@ export function loadSmartsheetConfig(): SmartsheetConfig {
     parsed.sheetId = '3517583962886020';
     parsed.sheetName = 'CRM-Phase I (Quotezilla - QZ4)';
     parsed.tokenName = 'New CRM - Phase I';
-    parsed.apiToken = parsed.apiToken || 'F3CVVuJ7Gh8ozrm11WDnIsTL1ZYpRKADmNtAX';
+    parsed.apiToken = ''; // never keep a Smartsheet token in the browser
     return { ...DEFAULT_SMARTSHEET_CONFIG, ...parsed };
   } catch (err) {
     console.error('Error loading smartsheet config:', err);
@@ -3675,7 +3676,6 @@ export function recordContainerQrScan(params: {
  * via the backend /api/smartsheet/create-sheet proxy.
  */
 export async function createSmartsheetInUserAccount(params: {
-  apiToken: string;
   sheetName?: string;
 }): Promise<{
   success: boolean;
@@ -3685,7 +3685,7 @@ export async function createSmartsheetInUserAccount(params: {
   error?: string;
 }> {
   try {
-    const res = await fetch('/api/smartsheet/create-sheet', {
+    const res = await apiFetch('/api/smartsheet/create-sheet', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(params),
@@ -3697,7 +3697,6 @@ export async function createSmartsheetInUserAccount(params: {
 
     // Auto-update local config with new sheet ID
     const cfg = loadSmartsheetConfig();
-    cfg.apiToken = params.apiToken;
     cfg.sheetId = data.sheetId;
     cfg.sheetName = data.name || params.sheetName || 'CRM-Phase I (Quotezilla - QZ4)';
     cfg.connected = true;
@@ -3752,7 +3751,6 @@ export async function syncWithDanSmartsheet(options?: {
   rows?: SmartsheetRow[];
   error?: string;
 }> {
-  const token = options?.apiToken || 'F3CVVuJ7Gh8ozrm11WDnIsTL1ZYpRKADmNtAX';
   const name = options?.sheetName || 'CRM-Phase I (Quotezilla - QZ4)';
   const ws = options?.workspaceName || 'New CRM - Porta';
   const targetSheetId = options?.sheetId;
@@ -3767,11 +3765,10 @@ export async function syncWithDanSmartsheet(options?: {
     let data: any = null;
 
     try {
-      res = await fetch('/api/smartsheet/sync-dan-rows', {
+      res = await apiFetch('/api/smartsheet/sync-dan-rows', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          apiToken: token,
           sheetName: name,
           sheetId: targetSheetId,
           rows: localRows,
@@ -3783,12 +3780,11 @@ export async function syncWithDanSmartsheet(options?: {
       } catch {
         // If server was temporarily rebooting or returned HTML, wait 1.2s and retry once
         await new Promise((r) => setTimeout(r, 1200));
-        res = await fetch('/api/smartsheet/sync-dan-rows', {
+        res = await apiFetch('/api/smartsheet/sync-dan-rows', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            apiToken: token,
-            sheetName: name,
+              sheetName: name,
             sheetId: targetSheetId,
             rows: localRows,
           }),
@@ -3817,7 +3813,6 @@ export async function syncWithDanSmartsheet(options?: {
     }
 
     const cfg = loadSmartsheetConfig();
-    cfg.apiToken = token;
     cfg.tokenName = 'New CRM - Phase I';
     cfg.workspaceName = ws;
     cfg.sheetName = data.sheetName || name;
@@ -3861,15 +3856,13 @@ export async function syncWithDanSmartsheet(options?: {
  */
 export async function pushQuoteToLiveSmartsheet(row: Partial<SmartsheetRow>): Promise<{ success: boolean; insertedRowId?: string; error?: string }> {
   const cfg = loadSmartsheetConfig();
-  const token = cfg.apiToken || 'F3CVVuJ7Gh8ozrm11WDnIsTL1ZYpRKADmNtAX';
   const sheetId = cfg.sheetId || '3517583962886020';
 
   try {
-    const res = await fetch('/api/smartsheet/push-row', {
+    const res = await apiFetch('/api/smartsheet/push-row', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        apiToken: token,
         sheetId,
         row,
       }),
@@ -3890,15 +3883,13 @@ export async function pushQuoteToLiveSmartsheet(row: Partial<SmartsheetRow>): Pr
  */
 export async function updateRowInLiveSmartsheet(rowId: string, updates: Partial<SmartsheetRow>): Promise<{ success: boolean; error?: string }> {
   const cfg = loadSmartsheetConfig();
-  const token = cfg.apiToken || 'F3CVVuJ7Gh8ozrm11WDnIsTL1ZYpRKADmNtAX';
   const sheetId = cfg.sheetId || '3517583962886020';
 
   try {
-    const res = await fetch('/api/smartsheet/update-row', {
+    const res = await apiFetch('/api/smartsheet/update-row', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        apiToken: token,
         sheetId,
         rowId,
         updates,

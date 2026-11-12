@@ -44,6 +44,7 @@ import {
   LocationHoursStatus,
   saveAfterHoursMessage,
 } from '../services/businessHoursService';
+import { publicEnv } from '../utils/publicEnv';
 
 interface CoverageAreaMapModalProps {
   isOpen: boolean;
@@ -60,7 +61,7 @@ const ACTIVE_DEPOTS: DepotLocation[] = PORTABOX_DEPOTS.filter(
 );
 
 const GOOGLE_MAPS_API_KEY =
-  (import.meta.env.VITE_GOOGLE_MAPS_API_KEY as string) || '';
+  publicEnv('VITE_GOOGLE_MAPS_API_KEY'); // browser key, restricted by HTTP referrer
 
 // National center of Australia overview
 const AUSTRALIA_NATIONAL_CENTER: google.maps.LatLngLiteral = {

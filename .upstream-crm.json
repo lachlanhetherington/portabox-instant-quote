@@ -17,7 +17,7 @@
   ],
   "repo": "https://github.com/ahammo67/portabox-CRM.git",
   "branch": "main",
-  "sha": "a581d0eb3e3a30efa156d52c5da24c856a4fb46d",
-  "subject": "feat: gate softphone feature and remove dev auth bypass",
-  "applied": "2026-11-11"
+  "sha": "d76b9756b74140ce23a84d67e33f9960459f3303",
+  "subject": "Merge pull request #12 from ahammo67/claude/pricing-tests",
+  "applied": "2026-11-12"
 }

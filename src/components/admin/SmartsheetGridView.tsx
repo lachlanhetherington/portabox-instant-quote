@@ -330,19 +330,11 @@ export const SmartsheetGridView: React.FC<SmartsheetGridViewProps> = ({
 
   // Programmatic Smartsheet Account Creation
   const handleCreateSmartsheet = async () => {
-    if (!smartsheetToken.trim()) {
-      setCreateResult({
-        success: false,
-        error: 'Please enter your Smartsheet Personal Access Token to create the sheet in your account.',
-      });
-      return;
-    }
 
     setIsCreatingSheet(true);
     setCreateResult(null);
 
     const result = await createSmartsheetInUserAccount({
-      apiToken: smartsheetToken.trim(),
       sheetName: newSheetName.trim() || 'CRM-Phase I (Quotezilla - QZ4)',
     });
 
@@ -1180,24 +1172,9 @@ export const SmartsheetGridView: React.FC<SmartsheetGridViewProps> = ({
                     />
                   </div>
 
-                  <div>
-                    <label className="block text-xs font-extrabold text-slate-700 mb-1">
-                      Smartsheet Personal Access Token
-                    </label>
-                    <div className="relative">
-                      <Key className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
-                      <input
-                        type="password"
-                        value={smartsheetToken}
-                        onChange={(e) => setSmartsheetToken(e.target.value)}
-                        placeholder="e.g. 1a2b3c4d5e6f7g8h9i0j..."
-                        className="w-full pl-9 pr-3 py-2 rounded-xl border border-slate-200 text-xs font-mono focus:ring-2 focus:ring-[#00c0f3] focus:outline-none"
-                      />
-                    </div>
-                    <p className="text-[10px] text-slate-500 mt-1">
-                      Tokens are processed securely via server-side proxy and never stored publicly.
-                    </p>
-                  </div>
+                  <p className="text-[10px] text-slate-500">
+                    Uses the Smartsheet API token configured on the server (SMARTSHEET_API_TOKEN). Tokens are never entered or stored in the browser.
+                  </p>
                 </div>
 
                 {/* Result Message */}
@@ -1259,7 +1236,7 @@ export const SmartsheetGridView: React.FC<SmartsheetGridViewProps> = ({
                   <button
                     type="button"
                     onClick={handleCreateSmartsheet}
-                    disabled={isCreatingSheet || !smartsheetToken.trim()}
+                    disabled={isCreatingSheet}
                     className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-extrabold transition-colors cursor-pointer disabled:opacity-50 flex items-center gap-1.5 shadow-xs"
                   >
                     {isCreatingSheet ? (

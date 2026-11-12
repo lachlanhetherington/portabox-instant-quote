@@ -49,10 +49,12 @@ const ALLOWED = {
   StaffOnly:
     'the other gate',
   AdminLoginModal:
-    "upstream's own staff login. It is not a credential check — six staff " +
-    'records in services/adminAuthService carry the password in the shipped ' +
-    'bundle and the 2FA accepts 123456 — so it is a UI step, and the real ' +
-    'check is the gate it leads to. Nothing behind it opens without that.',
+    "upstream's own staff login, which is a sign-in form rather than a " +
+    'staff surface — it exposes nothing by rendering. It used to be a UI ' +
+    'step with no real check behind it (the passwords were in the bundle ' +
+    'and the 2FA accepted 123456); since drop d76b975 it is a Firebase ' +
+    'email link verified on the server. Either way what it leads to is ' +
+    'gated, which is what this file is checking.',
   CustomerPortal:
     'customer-facing by design, behind the enableCustomerPortal flag. It ' +
     'shows a customer their own quote, not staff tooling.',

@@ -49,6 +49,7 @@ import {
   DEFAULT_DISCOUNT_MATRIX_RULES,
   evaluateDiscountMatrix,
   calculateEarlyTerminationClawback,
+  getLockUnitValue,
 } from '../../services/pricingEngine';
 
 const METRO_HUBS: MetroHub[] = ['Adelaide', 'Sydney', 'Melbourne', 'Brisbane'];
@@ -320,6 +321,7 @@ export const DurationDiscountsAdminWorkspace: React.FC<DurationDiscountsAdminWor
     freeBlanketsProvided: simBlanketsProvided,
     freeLockProvided: simLockProvided,
     milestoneDiscountApplied: simMilestoneCredit,
+    suppliesConfig: config.packingSupplies,
   });
 
   return (
@@ -881,7 +883,7 @@ export const DurationDiscountsAdminWorkspace: React.FC<DurationDiscountsAdminWor
                 onChange={(e) => setSimLockProvided(e.target.checked)}
                 className="w-4 h-4 rounded text-[#15385E]"
               />
-              <span>Free Lock Received ($35)</span>
+              <span>Free Lock Received (${getLockUnitValue(config.packingSupplies)})</span>
             </label>
           </div>
         </div>

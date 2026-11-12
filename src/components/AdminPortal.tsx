@@ -65,15 +65,12 @@ import {
   authenticateWithPasskey,
   generateTwoFactorChallenge,
   verifyTwoFactorCode,
-  getAdminAuthSession,
-  setAdminAuthSession,
-  clearAdminAuthSession,
-  AdminAuthSession,
   TwoFactorChallenge,
 } from '../services/authSecurityService';
 import { AppConfig, BlockedPostcode, ContainerPriceConfig, CustomerLead, DeliveryZoneSettings, LocationPricingConfig, MetroHub, PromotionRule, PromoLocationScope, PromoServiceScope, PromoContainerSizeScope, QuoteDropOffRecord, FuelSurchargeModel, FuelSurchargeZoneRates } from '../types/quote';
 import { PORTABOX_DEPOTS } from '../data/australianPostcodes';
 import { DEFAULT_DELIVERY_ZONES, DEFAULT_LOCATION_PRICING, DEFAULT_FUEL_SURCHARGE_ZONE_RATES, getLocationPricingForHub, loadDropOffRecords, saveAppConfig } from '../services/pricingEngine';
+import { apiFetch } from '../services/apiClient';
 import {
   ZeptoEftInstruction,
   loadZeptoEftRecords,
@@ -193,10 +190,9 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
   const [staffSession, setStaffSessionState] = useState<StaffSession | null>(getStaffSession());
 
   const handleSwitchToCeoSession = () => {
-    const staff = loadStaffMembers();
-    const ceo = staff.find((s) => s.role === 'ceo') || INITIAL_STAFF_MEMBERS[0];
-    const newSession = setStaffSession(ceo, 'passkey');
-    setStaffSessionState(newSession);
+    // Role elevation from the browser is not allowed: the role comes from the
+    // server-verified sign-in. Sign in with a CEO account instead.
+    return;
   };
 
   const getRequiredPermissionForTab = (tab: AdminTabId): StaffPermissionKey | null => {
@@ -263,76 +259,8 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
   const requiredPermissionForCurrentTab = getRequiredPermissionForTab(activeTab);
   const isCurrentTabAuthorized =
     !requiredPermissionForCurrentTab ||
-    (staffSession?.user ? hasStaffPermission(staffSession.user, requiredPermissionForCurrentTab) : true);
-  const isDailyOpsAuthorized = staffSession?.user ? hasStaffPermission(staffSession.user, 'daily_operations') : true;
-
-  // Admin Enterprise Security Gate (Passkey & 2FA)
-  const [adminAuthSession, setAdminAuthSessionState] = useState<AdminAuthSession | null>(getAdminAuthSession());
-  const [adminAuthStep, setAdminAuthStep] = useState<'credentials' | '2fa'>('credentials');
-  const [adminEmail, setAdminEmail] = useState('admin@portabox.com.au');
-  const [adminPassword, setAdminPassword] = useState('••••••••••••');
-  const [admin2FaCode, setAdmin2FaCode] = useState('');
-  const [admin2FaMethod, setAdmin2FaMethod] = useState<'sms' | 'authenticator'>('sms');
-  const [admin2FaChallenge, setAdmin2FaChallenge] = useState<TwoFactorChallenge | null>(null);
-  const [adminAuthError, setAdminAuthError] = useState<string | null>(null);
-  const [isAdminPasskeyLoading, setIsAdminPasskeyLoading] = useState(false);
-  const [rememberAdminDevice, setRememberAdminDevice] = useState(true);
-
-  const handleAdminPasskeySignIn = async () => {
-    setAdminAuthError(null);
-    setIsAdminPasskeyLoading(true);
-    try {
-      const res = await authenticateWithPasskey('admin', adminEmail);
-      if (res.success) {
-        setAdminAuthSession('passkey', rememberAdminDevice);
-        setAdminAuthSessionState(getAdminAuthSession());
-      } else {
-        setAdminAuthError(res.error || 'Hardware Key / Passkey verification failed. Use 2FA credentials below.');
-      }
-    } catch (err: any) {
-      setAdminAuthError(err?.message || 'Biometric passkey prompt bypassed or unsupported. Use 2FA credentials below.');
-    } finally {
-      setIsAdminPasskeyLoading(false);
-    }
-  };
-
-  const handleAdminCredentialsSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    setAdminAuthError(null);
-    if (!adminEmail.trim()) {
-      setAdminAuthError('Enter your operations admin email');
-      return;
-    }
-    const dest = admin2FaMethod === 'sms' ? 'Operations Dispatch Mobile (0488 123 456)' : 'Authenticator App (TOTP)';
-    const challenge = generateTwoFactorChallenge(admin2FaMethod, dest);
-    setAdmin2FaChallenge(challenge);
-    setAdmin2FaCode(challenge.code); // Pre-filled for demo convenience
-    setAdminAuthStep('2fa');
-  };
-
-  const handleAdminVerify2Fa = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!verifyTwoFactorCode(admin2FaCode, admin2FaChallenge)) {
-      setAdminAuthError('Invalid 2FA code. Enter 123456 or the code shown.');
-      return;
-    }
-    setAdminAuthSession('password_2fa', rememberAdminDevice);
-    setAdminAuthSessionState(getAdminAuthSession());
-    setAdminAuthStep('credentials');
-    setAdmin2FaCode('');
-  };
-
-  const handleAdminQuickBypass = () => {
-    setAdminAuthSession('passkey', rememberAdminDevice);
-    setAdminAuthSessionState(getAdminAuthSession());
-    setAdminAuthError(null);
-  };
-
-  const handleLockAdminSession = () => {
-    clearAdminAuthSession();
-    setAdminAuthSessionState(null);
-    setAdminAuthStep('credentials');
-  };
+    (staffSession?.user ? hasStaffPermission(staffSession.user, requiredPermissionForCurrentTab) : false);
+  const isDailyOpsAuthorized = staffSession?.user ? hasStaffPermission(staffSession.user, 'daily_operations') : false;
 
   const [currentConfig, setCurrentConfig] = useState<AppConfig>(config);
   const [saveSuccess, setSaveSuccess] = useState(false);
@@ -487,7 +415,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
     setGeminiPromoMessage(null);
 
     try {
-      const res = await fetch('/api/gemini/generate-discount', {
+      const res = await apiFetch('/api/gemini/generate-discount', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ prompt: promptToUse }),
@@ -2873,13 +2801,8 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                   </div>
 
                   <div>
-                    <label className="block text-slate-700 font-bold mb-1">API Access Token (Bearer)</label>
-                    <input
-                      type="password"
-                      value={smartsheetConfig.apiToken}
-                      onChange={(e) => setSmartsheetConfig({ ...smartsheetConfig, apiToken: e.target.value })}
-                      className="w-full px-3 py-2 rounded-xl border border-slate-200 bg-white font-mono focus:ring-2 focus:ring-[#00c0f3]"
-                    />
+                    <label className="block text-slate-700 font-bold mb-1">API Access Token</label>
+                    <p className="text-slate-500">Configured on the server (SMARTSHEET_API_TOKEN). It is never entered or stored in the browser.</p>
                   </div>
 
                   <div>

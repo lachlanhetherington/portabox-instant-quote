@@ -7,6 +7,8 @@ import {
   getMetroHubForPostcode,
   getDurationDiscount,
   evaluateDiscountMatrix,
+  getBlanketUnitValue,
+  getLockUnitValue,
 } from '../services/pricingEngine';
 import { formatMoney } from '../utils/currency';
 import { AreYouStuckBanner } from './AreYouStuckBanner';
@@ -122,9 +124,10 @@ export const Step4When: React.FC<Step4WhenProps> = ({
   // Duration in months for discount engine:
   const effectiveMonths = isTwoWeeksSelected ? 0.5 : customDurationVal;
 
+  // Must match calculateQuote: interstate means origin and destination are served by different depot hubs
   const isInterstateMove = Boolean(
     destinationPostcode &&
-    originPostcode.state !== destinationPostcode.state
+    getMetroHubForPostcode(originPostcode) !== getMetroHubForPostcode(destinationPostcode)
   );
 
   // Evaluate the Admin Discount Matrix based on exact business logic (image-2.jpg)
@@ -140,7 +143,8 @@ export const Step4When: React.FC<Step4WhenProps> = ({
       billingCycle,
       baseMonthlyRate: monthlyRate,
     },
-    config.discountMatrixRules
+    config.discountMatrixRules,
+    config.packingSupplies
   );
 
   const durationDiscountInfo = getDurationDiscount(
@@ -152,28 +156,38 @@ export const Step4When: React.FC<Step4WhenProps> = ({
     },
     config.durationDiscounts
   );
-  const durationDiscountPct = Math.max(durationDiscountInfo.discountPercent, matrixEvaluation.discountPercent);
+  // Must match calculateQuote: the duration discount comes from the duration discount table only,
+  // and 10 m³-only bookings are exempt. It is applied to the monthly rate before any upfront discount.
+  const isSmallOnlyBooking = (() => {
+    const sel = containerSelections;
+    if (sel && Object.values(sel).some((n) => (n || 0) > 0)) {
+      return (sel.small_10m3 || 0) > 0 && !(sel.medium_19m3 || 0) && !(sel.large_25m3 || 0) && !(sel.two_large_50m3 || 0);
+    }
+    return containerSize === 'small_10m3';
+  })();
+  const durationDiscountPct = isSmallOnlyBooking ? 0 : durationDiscountInfo.discountPercent;
   const isCompletionDurationDiscount = durationDiscountInfo.applyMode === 'on_completion_remaining_charges';
   const durationDiscountDollars = Math.round(monthlyRate * (durationDiscountPct / 100));
-  const discountedMonthlyRate = isCompletionDurationDiscount
+  const discountedMonthlyRate = isCompletionDurationDiscount || durationDiscountPct <= 0
     ? monthlyRate
     : Math.max(0, monthlyRate - durationDiscountDollars);
 
   // Weekly equivalent for monthly comparison:
   const monthlyCostOnWeeklyRate = Math.round(weeklyRate * (52 / 12));
 
-  // Upfront calculations incorporating 1st month free and upfront stacking (5% for 6m, 10% for 12m):
-  // 6 months upfront: If 1st month is free, customer only pays 5 months at 5% off!
+  // Upfront prices stack the prepayment discount on the duration-discounted rate, exactly as the quote does.
+  // Savings are measured against the list rate, so they include the duration discount.
+  // 6 months upfront: if 1st month is free, the customer pays 5 months at 5% off.
   const sixMonthsStandardCost = monthlyRate * 6;
   const sixMonthsUpfrontTotal = matrixEvaluation.firstMonthFree
-    ? Math.round(monthlyRate * 5 * 0.95)
-    : Math.round(monthlyRate * 6 * 0.95);
+    ? Math.round(discountedMonthlyRate * 5 * 0.95)
+    : Math.round(discountedMonthlyRate * 6 * 0.95);
   const sixMonthsSavings = sixMonthsStandardCost - sixMonthsUpfrontTotal;
   const sixMonthsSavingsPercent = Math.round((sixMonthsSavings / sixMonthsStandardCost) * 100);
 
   // 12 months upfront: 10% off
   const twelveMonthsStandardCost = monthlyRate * 12;
-  const twelveMonthsUpfrontTotal = Math.round(monthlyRate * 12 * 0.90);
+  const twelveMonthsUpfrontTotal = Math.round(discountedMonthlyRate * 12 * 0.90);
   const twelveMonthsSavings = twelveMonthsStandardCost - twelveMonthsUpfrontTotal;
   const twelveMonthsSavingsPercent = Math.round((twelveMonthsSavings / twelveMonthsStandardCost) * 100);
 
@@ -347,7 +361,11 @@ export const Step4When: React.FC<Step4WhenProps> = ({
                   </span>
                 </div>
                 <span className="text-[10px] font-black uppercase tracking-wider text-emerald-800 bg-emerald-100 px-2.5 py-0.5 rounded-full border border-emerald-300">
-                  {effectiveMonths >= 12 ? '$460+ TOTAL VALUE' : matrixEvaluation.firstMonthFree ? 'SAVE $' + monthlyRate + '+' : '$60 VALUE'}
+                  {effectiveMonths >= 12
+                    ? `$${formatMoney(matrixEvaluation.milestoneDiscountAmount + matrixEvaluation.freeSuppliesRetailValue)}+ TOTAL VALUE`
+                    : matrixEvaluation.firstMonthFree
+                    ? 'SAVE $' + monthlyRate + '+'
+                    : `$${formatMoney(matrixEvaluation.freeSuppliesRetailValue)} VALUE`}
                 </span>
               </div>
 
@@ -362,13 +380,13 @@ export const Step4When: React.FC<Step4WhenProps> = ({
                 {matrixEvaluation.freeBlanketsCount > 0 && (
                   <div className="flex items-center gap-2 p-2 bg-white rounded-xl border border-emerald-200 font-bold text-emerald-900">
                     <Gift className="w-4 h-4 text-emerald-600 shrink-0" />
-                    <span>{matrixEvaluation.freeBlanketsCount} Free Blankets ({formatMoney(matrixEvaluation.freeBlanketsCount * 2.5 * 10, false)} value)</span>
+                    <span>{matrixEvaluation.freeBlanketsCount} Free Blankets (${formatMoney(matrixEvaluation.freeBlanketsCount * getBlanketUnitValue(config.packingSupplies))}/mo value)</span>
                   </div>
                 )}
                 {matrixEvaluation.freeLockIncluded && (
                   <div className="flex items-center gap-2 p-2 bg-white rounded-xl border border-emerald-200 font-bold text-emerald-900">
                     <Lock className="w-4 h-4 text-emerald-600 shrink-0" />
-                    <span>Free Heavy-Duty Disc Lock ($35 value)</span>
+                    <span>Free Heavy-Duty Disc Lock (${formatMoney(getLockUnitValue(config.packingSupplies))} value)</span>
                   </div>
                 )}
               </div>
@@ -506,7 +524,14 @@ export const Step4When: React.FC<Step4WhenProps> = ({
                       $0
                     </span>
                     <span className="text-xs font-normal text-slate-500"> 1st mo</span>
-                    <span className="text-xs text-slate-400 ml-1 font-mono">(${formatMoney(monthlyRate)}/mo after)</span>
+                    <span className="text-xs text-slate-400 ml-1 font-mono">(${formatMoney(discountedMonthlyRate)}/mo after)</span>
+                  </>
+                ) : discountedMonthlyRate < monthlyRate ? (
+                  <>
+                    <span className="line-through text-slate-400 text-xs font-normal mr-1.5 font-mono">
+                      ${formatMoney(monthlyRate)}
+                    </span>
+                    ${formatMoney(discountedMonthlyRate)}<span className="text-xs font-normal text-slate-500">/mo</span>
                   </>
                 ) : (
                   <>

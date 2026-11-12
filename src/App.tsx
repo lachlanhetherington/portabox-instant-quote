@@ -59,8 +59,19 @@ import {
 } from './types/quote';
 import { applyLanguageToDOM, getSavedLanguage } from './services/translationService';
 import { AdminLoginModal } from './components/auth/AdminLoginModal';
+
+// Friendly names for the "Required for:" line on the staff sign-in modal.
+const STAFF_FEATURE_LABELS: Record<string, string> = {
+  admin: 'Admin Portal',
+  dispatch: 'Dispatch Calendar',
+  driver: 'Driver Portal',
+  telephony: 'Phone System',
+};
 import { StaffSession } from './types/adminAuth';
 import { getStaffSession, clearStaffSession, hasStaffPermission } from './services/adminAuthService';
+import { auth as firebaseAuth } from './services/firebaseService';
+import { onAuthStateChanged } from 'firebase/auth';
+import { isStaffSignInLink, finishStaffEmailLinkSignIn, completeStaffLogin } from './services/staffLogin';
 
 /**
  * The website's postcode boxes hand off here as ?postcode=3000.
@@ -114,14 +125,44 @@ export default function App() {
       setIsAdminOpen(true);
     } else if (session.user.role === 'driver') {
       setIsDriverPortalOpen(true);
-    } else if (session.user.role === 'call_center') {
+    } else if (session.user.role === 'call_center' || session.user.role === 'call_centre_supervisor') {
       setIsCallCenterOpen(true);
     } else {
       setIsAdminOpen(true);
     }
   };
 
+  // A staff session is only valid while the Firebase identity behind it is signed in.
+  useEffect(() => {
+    return onAuthStateChanged(firebaseAuth, (user) => {
+      if (!user) {
+        clearStaffSession();
+        setStaffSessionState(null);
+      }
+    });
+  }, []);
+
+  // Returning from the emailed sign-in link
+  useEffect(() => {
+    if (!isStaffSignInLink()) return;
+    (async () => {
+      try {
+        const user = await finishStaffEmailLinkSignIn(() =>
+          window.prompt('Confirm your work email to finish signing in'),
+        );
+        const session = await completeStaffLogin(user, 'email_link');
+        window.history.replaceState({}, '', window.location.pathname);
+        handleStaffLoginSuccess(session);
+      } catch (err: any) {
+        window.history.replaceState({}, '', window.location.pathname);
+        window.alert(err?.message || 'Sign-in failed. Please request a new link.');
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const handleStaffLogout = () => {
+    firebaseAuth.signOut().catch(() => {});
     clearStaffSession();
     setStaffSessionState(null);
     setIsAdminOpen(false);
@@ -1218,7 +1259,11 @@ export default function App() {
         isOpen={isAdminLoginModalOpen}
         onClose={() => setIsAdminLoginModalOpen(false)}
         onLoginSuccess={handleStaffLoginSuccess}
-        targetFeatureLabel={targetFeatureAfterLogin}
+        targetFeatureLabel={
+          targetFeatureAfterLogin
+            ? STAFF_FEATURE_LABELS[targetFeatureAfterLogin] ?? targetFeatureAfterLogin
+            : undefined
+        }
       />
     </div>
   );

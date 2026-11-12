@@ -441,6 +441,8 @@ export interface QuoteBreakdown {
   destinationLogisticsMethod?: LogisticsMethod;
   legsSavedCount?: number;
   legsSavedDollarTotal?: number;
+  savingsBreakdown?: { label: string; amount: number }[]; // Itemised real savings on this booking
+  totalSavings?: number; // Sum of savingsBreakdown
   totalLegsCount?: number;
   requiredAddressesCount?: number;
   initialDeliveryFee: number;

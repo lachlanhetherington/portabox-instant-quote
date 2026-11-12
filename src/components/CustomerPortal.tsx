@@ -378,7 +378,7 @@ export const CustomerPortal: React.FC<CustomerPortalProps> = ({
 
     const isValid = verifyTwoFactorCode(otpCode, active2FaChallenge);
     if (!isValid) {
-      setLoginError('Invalid verification code. Enter 849201 or the code sent to your device.');
+      setLoginError('Invalid verification code. Enter the code sent to your device.');
       return;
     }
 
@@ -855,7 +855,7 @@ export const CustomerPortal: React.FC<CustomerPortalProps> = ({
                         type="text"
                         value={otpCode}
                         onChange={(e) => setOtpCode(e.target.value)}
-                        placeholder="849201"
+                        placeholder="6-digit code"
                         maxLength={6}
                         className="w-full px-4 py-3 rounded-2xl border border-slate-200 bg-slate-50 text-center font-mono text-xl tracking-widest font-black focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#5CC1EF]"
                       />

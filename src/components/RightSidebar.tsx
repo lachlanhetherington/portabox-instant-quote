@@ -313,7 +313,7 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({
                                   Interstate freight: <span className="font-mono text-[#15385E]">${formatMoney(interstateFeePerContainer)}/container</span>
                                 </div>
                               )}
-                              {movingKmCharge !== undefined && movingKmCharge > 0 && (
+                              {!isInterstate && movingKmCharge !== undefined && movingKmCharge > 0 && (
                                 <div className="text-[#15385E] font-bold text-[10px]">
                                   +${formatMoney(movingKmCharge, true)} extra delivery charge {containerCount > 1 ? `(${containerCount} containers)` : ''}
                                 </div>
@@ -352,7 +352,7 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({
                                   Interstate freight: <span className="font-mono text-[#15385E]">${formatMoney(interstateFeePerContainer)}/container</span>
                                 </div>
                               )}
-                              {movingKmCharge !== undefined && movingKmCharge > 0 && (
+                              {!isInterstate && movingKmCharge !== undefined && movingKmCharge > 0 && (
                                 <div className="text-[#15385E] font-bold text-[10px]">
                                   +${formatMoney(movingKmCharge, true)} extra delivery charge {containerCount > 1 ? `(${containerCount} containers)` : ''}
                                 </div>

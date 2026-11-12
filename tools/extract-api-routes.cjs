@@ -45,12 +45,21 @@ if (end <= start) throw new Error('the route body markers are out of order');
 
 /* One level of indentation comes off, since the body was inside
    createServer() and is now inside registerApiRoutes(). Blank lines stay
-   blank. Then both kinds of path get rewritten for the new location:
-   src/server/apiRoutes.ts is two levels down, so './src/x' is '../x'. This
-   covers inline `await import('./src/...')` as well as the top-level
-   imports — missing those is a type error at best and a runtime failure in
-   the one route that needs them at worst. */
-const rewrite = (s) => s.replace(/(['"])\.\/src\//g, '$1../');
+   blank. Then relative paths get rewritten for the new location, since
+   server.ts sits at the repo root and src/server/apiRoutes.ts is two levels
+   down:
+
+     './src/x'  ->  '../x'        a file under src/
+     './x'      ->  '../../x'     a file at the root, such as ./serverAuth
+
+   Both forms matter, and both appear as inline `await import()` as well as
+   top-level imports. Missing one is a type error at best and, in a route
+   that only loads its dependency when called, a runtime failure in
+   production at worst. The root-level case arrived with the drop that added
+   serverAuth.ts and was not handled before. */
+const rewrite = (s) => s
+  .replace(/(['"])\.\/src\//g, '$1../')
+  .replace(/(['"])\.\/(?!src\/)/g, '$1../../');
 
 const body = rewrite(
   src.slice(start, end)
@@ -60,10 +69,28 @@ const body = rewrite(
 
 /* Upstream's own imports, minus the ones that belong to the server shell
    rather than the routes. */
-const SHELL = /from '(express|http|vite|path)'/;
+const SHELL = /from '(express|http|vite|path|fs)'/;
 const upstreamImports = src.slice(0, start)
   .filter((l) => /^import /.test(l) && !SHELL.test(l))
   .map(rewrite);
+
+/* Anything declared at module scope between the imports and createServer().
+   The routes close over it, so leaving it behind compiles to "Cannot find
+   name" — which is how this was found: the drop that moved the Smartsheet
+   token server-side put SMARTSHEET_NOT_CONFIGURED and smartsheetToken()
+   here, and five routes stopped resolving.
+   Taken verbatim, at its original indentation, since it is already at
+   module scope in both files. */
+const SHELL_START = /^\s*(async\s+)?function createServer\s*\(/;
+const shellAt = src.findIndex((l) => SHELL_START.test(l));
+const lastImport = src.reduce((acc, l, i) => (/^import /.test(l) && i < start ? i : acc), -1);
+
+let preamble = '';
+if (shellAt > 0 && lastImport >= 0 && shellAt > lastImport) {
+  preamble = rewrite(src.slice(lastImport + 1, shellAt).join('\n'))
+    .replace(/^\s*\n/, '')
+    .replace(/\s+$/, '');
+}
 
 /* Keep imports static — do not be tempted to make these lazy.
  *
@@ -112,7 +139,7 @@ const header = `/* The API surface, lifted out of server.ts so one definition se
 import express from 'express';
 ${eagerImports.join('\n')}
 import type { Express } from 'express';
-${lazyBlocks.length ? '\n' + lazyBlocks.join('\n\n') + '\n' : ''}
+${preamble ? '\n' + preamble + '\n' : ''}${lazyBlocks.length ? '\n' + lazyBlocks.join('\n\n') + '\n' : ''}
 export function registerApiRoutes(app: Express) {
 
 `;

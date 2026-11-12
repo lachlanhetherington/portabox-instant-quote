@@ -1,12 +1,19 @@
 /* A real check behind the admin door.
  *
- * What shipped was a demonstration of a login rather than a login: the
- * password box is pre-filled with bullet characters and never compared to
- * anything, handleAdminCredentialsSubmit only checks the email field is
- * non-empty, the 2FA code is generated in the browser and typed into the box
- * for you, and verifyTwoFactorCode accepts 123456, 849201 or 000000 from
- * anyone. Wiring that up as the gate would have looked like security while
- * admitting every visitor.
+ * What shipped at the time was a demonstration of a login rather than a
+ * login: the password box was pre-filled with bullet characters and never
+ * compared to anything, handleAdminCredentialsSubmit only checked the email
+ * field was non-empty, the 2FA code was generated in the browser and typed
+ * into the box for you, and verifyTwoFactorCode accepted 123456, 849201 or
+ * 000000 from anyone. Wiring that up as the gate would have looked like
+ * security while admitting every visitor.
+ *
+ * Upstream has since replaced all of that: staff sign in with a Firebase
+ * email link verified on the server, verifyStaffMfaCode is gone, and the
+ * plaintext passwords are gone from the bundle. None of the codes above
+ * still work. This stays as a second, independent check that does not
+ * depend on Firebase being configured, and as what holds the door while a
+ * new drop is being reviewed.
  *
  * So the password is checked here instead, in a function, against a secret
  * that is only ever on the server. ADMIN_PASSWORD never reaches the bundle.

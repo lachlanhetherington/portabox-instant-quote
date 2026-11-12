@@ -2,6 +2,7 @@ export type StaffRole =
   | 'ceo'
   | 'manager'
   | 'call_center'
+  | 'call_centre_supervisor'
   | 'driver'
   | 'admin_pricing'
   | 'warehouse';
@@ -120,7 +121,6 @@ export interface StaffMember {
   name: string;
   email: string;
   username?: string;
-  password?: string;
   role: StaffRole;
   title: string;
   mobile: string;
@@ -137,7 +137,7 @@ export interface StaffMember {
 export interface StaffSession {
   user: StaffMember;
   token: string;
-  verifiedVia: '2fa_sms' | '2fa_totp' | 'passkey';
+  verifiedVia: 'google' | '2fa_sms' | '2fa_totp' | 'passkey';
   loginTime: string;
   expiresAt: number;
 }
@@ -154,7 +154,7 @@ export interface MfaAuditLogEntry {
   staffEmail: string;
   staffRole: StaffRole;
   maskedMobile: string;
-  method: 'sms' | 'passkey';
+  method: 'sms' | 'passkey' | 'google';
   status: 'success' | 'failed' | 'dispatched';
   failureReason?: string;
   messageId?: string;

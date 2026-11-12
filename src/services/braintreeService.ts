@@ -1,3 +1,4 @@
+import { publicEnv } from '../utils/publicEnv';
 /**
  * Braintree Payment Gateway Integration Service
  * Powered by Braintree (a PayPal service)
@@ -6,11 +7,11 @@
  */
 
 export const DEFAULT_BRAINTREE_TOKENIZATION_KEY =
-  (import.meta.env.VITE_BRAINTREE_TOKENIZATION_KEY as string) ||
+  publicEnv('VITE_BRAINTREE_TOKENIZATION_KEY') ||
   'sandbox_93k82m9x_portabox_braintree_vault_key';
 
 export const DEFAULT_BRAINTREE_MERCHANT_ID =
-  (import.meta.env.VITE_BRAINTREE_MERCHANT_ID as string) || 'portabox_au_braintree';
+  publicEnv('VITE_BRAINTREE_MERCHANT_ID') || 'portabox_au_braintree';
 
 export type BraintreePaymentMethodType =
   | 'credit_card'

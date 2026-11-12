@@ -71,6 +71,18 @@ export const DEFAULT_PACKING_SUPPLIES: PackingSuppliesConfig = {
   isLockFreePromo: false, // Admin toggle: offer free padlock to incentivise sales
 };
 
+/** Monthly hire value of one blanket, from the price list ($25 per 10-blanket block = $2.50). */
+export function getBlanketUnitValue(config?: PackingSuppliesConfig): number {
+  const blockPrice = config?.blanketBlockPriceMonthly ?? DEFAULT_PACKING_SUPPLIES.blanketBlockPriceMonthly ?? 25;
+  const blockSize = config?.blanketBlockSize ?? DEFAULT_PACKING_SUPPLIES.blanketBlockSize ?? 10;
+  return blockSize > 0 ? blockPrice / blockSize : 0;
+}
+
+/** Sale price of one disc padlock, from the price list. */
+export function getLockUnitValue(config?: PackingSuppliesConfig): number {
+  return config?.lockPrice ?? DEFAULT_PACKING_SUPPLIES.lockPrice ?? 22;
+}
+
 export const DEFAULT_DELIVERY_ZONES: DeliveryZoneSettings = {
   zoneAMaxKm: 25,
   zoneABaseFee: 149,
@@ -268,7 +280,8 @@ export interface DiscountMatrixEvaluationResult {
 
 export function evaluateDiscountMatrix(
   criteria: DiscountMatrixCriteria,
-  rules: DiscountMatrixRule[] = DEFAULT_DISCOUNT_MATRIX_RULES
+  rules: DiscountMatrixRule[] = DEFAULT_DISCOUNT_MATRIX_RULES,
+  suppliesConfig?: PackingSuppliesConfig
 ): DiscountMatrixEvaluationResult {
   const {
     months,
@@ -314,9 +327,10 @@ export function evaluateDiscountMatrix(
   const matchingRules = effectiveRules.filter((r) => {
     if (r.active === false) return false;
 
-    // Container size match
+    // Container size match (2 x 25 m³ bundle is matched as large_25m3)
     if (r.containerSizes && r.containerSizes.length > 0) {
-      if (!r.containerSizes.includes(containerSize as any)) {
+      const sizeForMatch = containerSize === 'two_large_50m3' ? 'large_25m3' : containerSize;
+      if (!r.containerSizes.includes(sizeForMatch as any)) {
         return false;
       }
     }
@@ -373,7 +387,10 @@ export function evaluateDiscountMatrix(
   const firstMonthSavings = firstMonthFree ? baseMonthlyRate : 0;
   const freeBlanketsCount = matchedRule?.freeBlanketsCount || 0;
   const freeLockIncluded = Boolean(matchedRule?.freeLockIncluded);
-  const freeSuppliesRetailValue = (freeBlanketsCount * 15) + (freeLockIncluded ? 35 : 0);
+  // Valued at the price list (blanket hire per month, padlock sale price), not fixed $15/$35
+  const freeSuppliesRetailValue = Math.round(
+    (freeBlanketsCount * getBlanketUnitValue(suppliesConfig)) + (freeLockIncluded ? getLockUnitValue(suppliesConfig) : 0)
+  );
 
   let milestoneDiscountAmount = 0;
   let milestoneDiscountOption: AnnualMilestoneOption | undefined = undefined;
@@ -431,6 +448,7 @@ export function calculateEarlyTerminationClawback(params: {
   freeBlanketsProvided?: number;
   freeLockProvided?: boolean;
   milestoneDiscountApplied?: number;
+  suppliesConfig?: PackingSuppliesConfig;
 }): EarlyTerminationResult {
   const {
     committedMonths,
@@ -470,7 +488,7 @@ export function calculateEarlyTerminationClawback(params: {
   // 2. Free supplies retail adjustment if vacated under 1 month
   if (actualMonthsCompleted < 1) {
     if (freeBlanketsProvided > 0) {
-      const val = freeBlanketsProvided * 15;
+      const val = Math.round(freeBlanketsProvided * getBlanketUnitValue(params.suppliesConfig) * 100) / 100;
       itemizedClawbacks.push({
         item: `Complimentary Furniture Blankets (${freeBlanketsProvided} units)`,
         waivedValue: val,
@@ -479,12 +497,13 @@ export function calculateEarlyTerminationClawback(params: {
       totalClawback += val;
     }
     if (freeLockProvided) {
+      const lockValue = getLockUnitValue(params.suppliesConfig);
       itemizedClawbacks.push({
         item: 'Complimentary Heavy-Duty Disc Padlock',
-        waivedValue: 35,
+        waivedValue: lockValue,
         reason: 'Terminated storage prior to minimum 1 month duration.',
       });
-      totalClawback += 35;
+      totalClawback += lockValue;
     }
   }
 
@@ -631,11 +650,16 @@ export function getDurationDiscount(
 
   // Sort matching tiers by:
   // 1. Highest months threshold (closest to custom duration associated with shorter time period)
-  // 2. Highest discountPercent (best savings for customer)
+  // 2. Upfront monthly discounts before on-completion rewards, so a completion reward never
+  //    replaces an immediate discount at the same threshold (which raised the monthly rate)
+  // 3. Highest discountPercent (best savings for customer)
   matchingTiers.sort((a, b) => {
     if (b.months !== a.months) {
       return b.months - a.months;
     }
+    const aCompletion = a.applyMode === 'on_completion_remaining_charges' ? 1 : 0;
+    const bCompletion = b.applyMode === 'on_completion_remaining_charges' ? 1 : 0;
+    if (aCompletion !== bCompletion) return aCompletion - bCompletion;
     return b.discountPercent - a.discountPercent;
   });
 
@@ -980,6 +1004,9 @@ export const DEFAULT_CONFIG: AppConfig = {
     { postcode: '5222', suburb: 'Kingscote (Kangaroo Island)', reason: 'Ferry required; contact special transport logistics.' },
     { postcode: '2899', suburb: 'Norfolk Island', reason: 'Offshore territory not serviced by road freight.' },
     { postcode: '7151', suburb: 'Southport TAS', reason: 'Tasmania service pending depot launch.' },
+    { postcode: '6947', suburb: 'Wangara DC (WA)', reason: 'PO box / mail-centre postcode; no street delivery address.' },
+    { postcode: '6958', suburb: 'Royal Australian Navy Warships (WA)', reason: 'Defence vessel mail postcode; not a deliverable address.' },
+    { postcode: '6965', suburb: 'Bibra Lake DC (WA)', reason: 'PO box / mail-centre postcode; residential Bibra Lake is 6163.' },
   ],
   depotCalendars: DEFAULT_DEPOT_CALENDARS,
   // 9 Staged Features (Off by default, CEO controlled)
@@ -1164,8 +1191,11 @@ export function calculateBlanketRentalPrice(
 } {
   const freePerContainer = config?.freeBlanketsPerContainer ?? 10;
   const standardFreeAllowance = freePerContainer * Math.max(1, containerCount);
-  const bonusFreeCount = Math.max(0, extraFreeAllowance || 0);
-  const freeAllowance = standardFreeAllowance + bonusFreeCount;
+  // The promotional "Free Blankets" (e.g. 10 with the 1st-month-free package) are the same blankets as the
+  // standard per-container allowance, not extra ones; only a promo allowance larger than the standard adds blankets.
+  const promoAllowance = Math.max(0, extraFreeAllowance || 0);
+  const freeAllowance = Math.max(standardFreeAllowance, promoAllowance);
+  const bonusFreeCount = freeAllowance - standardFreeAllowance;
 
   if (config?.isAllBlanketsFreePromo) {
     return {
@@ -2251,7 +2281,8 @@ export function calculateQuote(params: {
       billingCycle,
       baseMonthlyRate: monthlyContainerRate,
     },
-    config.discountMatrixRules
+    config.discountMatrixRules,
+    config.packingSupplies
   );
 
   const durationFreeBlanketsCount = Math.max(
@@ -3066,10 +3097,16 @@ export function calculateQuote(params: {
 
   // 8b. Tiered Duration Discount Engine (Configurable tiers with shorter-period fallback)
   const durationDiscountApplyMode = rawDurationDiscount.applyMode;
-  const durationDiscountPercent = isExclusivePromoApplied ? 0 : rawDurationDiscount.discountPercent;
+  // 10 m³ (7') containers are exempt from duration discounts (matches the discount matrix exemption)
+  const isSmallOnlyBooking = hasMixedOrSpecificSelections
+    ? selSmall > 0 && selMedium === 0 && selLarge === 0
+    : containerSize === 'small_10m3';
+  const durationDiscountPercent = isExclusivePromoApplied || isSmallOnlyBooking ? 0 : rawDurationDiscount.discountPercent;
   const durationDiscountReason = isExclusivePromoApplied
     ? `Replaced by exclusive code ${appliedPromoCode}`
-    : rawDurationDiscount.reason;
+    : isSmallOnlyBooking
+      ? "7' containers: Standard rate (exempt from duration discounts)"
+      : rawDurationDiscount.reason;
 
   const baseMonthlyContainerRate = monthlyContainerRate;
   const isCompletionDiscount = durationDiscountApplyMode === 'on_completion_remaining_charges';
@@ -3133,28 +3170,39 @@ export function calculateQuote(params: {
       billingCycleSavingsText = `${Math.round((threeMonthsSavings / threeMonthsWeeklyTotal) * 100)}% savings`;
       break;
 
-    case '6_months_upfront':
+    // Upfront prepayment discounts stack on top of the duration-discounted monthly rate,
+    // so prepaying is never more expensive than paying the same months monthly.
+    case '6_months_upfront': {
       upfrontMonths = 6;
       upfrontDiscountPercent = 5;
+      const durationText = durationDiscountAmount > 0 ? ` + ${durationDiscountPercent}% Duration Discount` : '';
+      billingCycleLabel = '6 Months Upfront then Monthly';
       if (matrixResult.firstMonthFree) {
-        currentPeriodicStorageFee = Math.round(baseMonthlyContainerRate * 5 * 0.95);
-        billingCycleLabel = '6 Months Upfront then Monthly';
-        billingCycleSavingsText = '1st Month Free + 5% Upfront Prepayment Discount';
+        currentPeriodicStorageFee = Math.round(effectiveMonthlyContainerRate * 5 * 0.95);
+        billingCycleSavingsText = `1st Month Free + 5% Upfront Prepayment Discount${durationText}`;
       } else {
-        currentPeriodicStorageFee = Math.round(baseMonthlyContainerRate * 6 * 0.95);
-        billingCycleLabel = '6 Months Upfront then Monthly';
-        billingCycleSavingsText = '5% Upfront Prepayment Discount';
+        currentPeriodicStorageFee = Math.round(effectiveMonthlyContainerRate * 6 * 0.95);
+        billingCycleSavingsText = `5% Upfront Prepayment Discount${durationText}`;
       }
       break;
+    }
 
-    case '12_months_upfront':
+    case '12_months_upfront': {
       upfrontMonths = 12;
       upfrontDiscountPercent = 10;
-      currentPeriodicStorageFee = Math.round(baseMonthlyContainerRate * 12 * 0.90);
+      const durationText = durationDiscountAmount > 0 ? ` + ${durationDiscountPercent}% Duration Discount` : '';
+      currentPeriodicStorageFee = Math.round(effectiveMonthlyContainerRate * 12 * 0.90);
       billingCycleLabel = '12 Months Paid Upfront then Monthly';
-      billingCycleSavingsText = '10% Upfront Prepayment Discount';
+      billingCycleSavingsText = `10% Upfront Prepayment Discount${durationText}`;
       break;
+    }
   }
+
+  // Storage actually charged in the first payment (0 when the matrix gives 1st month free on monthly billing).
+  // First-period storage promos are based on this so they can't double-dip with 1st month free.
+  const payableStorageFirstMonth = (matrixResult.firstMonthFree && billingCycle === 'monthly')
+    ? 0
+    : currentPeriodicStorageFee;
 
   // 9. Promotions (Strictly ONE promo/discount applied at a time, including Eco Discount)
   interface PromoCandidate {
@@ -3175,7 +3223,7 @@ export function calculateQuote(params: {
 
       if (isExplicitCode) {
         isEligible = !promoCodeError;
-      } else if (promo.autoApply && !promo.code) {
+      } else if (promo.autoApply) {
         // If an exclusive discount code is applied, all auto-applied promos are suppressed
         if (!isExclusivePromoApplied) {
           isEligible = true;
@@ -3222,10 +3270,8 @@ export function calculateQuote(params: {
         }
       }
 
-      if (promo.minDurationMonths) {
-        if (storageDuration === '2_weeks' && promo.minDurationMonths > 0.5) isEligible = false;
-        if (storageDuration === '1_to_3_months' && promo.minDurationMonths > 3) isEligible = false;
-        if (storageDuration === '4_to_11_months' && promo.minDurationMonths > 11) isEligible = false;
+      if (promo.minDurationMonths && durationMonths < promo.minDurationMonths) {
+        isEligible = false;
       }
 
       if (isEligible) {
@@ -3234,12 +3280,12 @@ export function calculateQuote(params: {
 
         if (promo.type === 'free_initial_delivery') {
           discount = initialDeliveryFee;
-          desc = 'Free initial delivery ($149 saving)';
+          desc = `Free initial delivery ($${initialDeliveryFee} saving)`;
         } else if (promo.type === 'percent_off_first_month') {
-          discount = Math.round((currentPeriodicStorageFee * promo.value) / 100);
+          discount = Math.round((payableStorageFirstMonth * promo.value) / 100);
           desc = `${promo.value}% off first period storage ($${discount} saving)`;
         } else if (promo.type === 'free_first_month') {
-          discount = currentPeriodicStorageFee;
+          discount = payableStorageFirstMonth;
           desc = `First period storage free ($${discount} saving)`;
         } else if (promo.type === 'percent_off_interstate' && isInterstate && interstateFee > 0) {
           discount = Math.round((interstateFee * promo.value) / 100);
@@ -3263,114 +3309,25 @@ export function calculateQuote(params: {
       }
     });
 
-  // Dynamic & Standard Promo Code recognition (if code not already matched in config.promotions)
-  if (appliedPromoCode && appliedPromoCode.trim() && !candidates.some((c) => c.isExplicitCode)) {
+  // Entered codes must exist in config.promotions and be eligible for this booking.
+  // (Previously any unknown code was turned into a discount, e.g. HELLO = $50 off.)
+  if (appliedPromoCode && appliedPromoCode.trim() && !promoCodeError && !candidates.some((c) => c.isExplicitCode)) {
     const rawCode = appliedPromoCode.trim().toUpperCase();
-    let dynamicRule: PromotionRule | null = null;
-    let dynamicDiscount = 0;
-    let dynamicDesc = '';
-
-    // 1. Matches like SAVE50, DISCOUNT20, PROMO30, VOUCHER100, BONUS25, DEAL15, VIP50, PORTABOX20
-    const prefixNumMatch = rawCode.match(/^(?:SAVE|DISCOUNT|PROMO|VOUCHER|BONUS|DEAL|VIP|SPECIAL|PORTABOX|BOX|MOVE|COUPON)(\d+)$/);
-    // 2. Matches like 20OFF, 15PERCENT, 10%
-    const offMatch = rawCode.match(/^(\d+)(?:OFF|PERCENT|PCT|%)$/) || rawCode.match(/^(?:OFF|PERCENT)(\d+)$/);
-    // 3. Matches like 50SAVE, 20DISCOUNT, 100PROMO
-    const suffixNumMatch = rawCode.match(/^(\d+)(?:SAVE|DISCOUNT|PROMO|VOUCHER|BONUS|DEAL|OFF)$/);
-    // 4. Free delivery keywords
-    const isFreeDel =
-      rawCode === 'FREEDEL' ||
-      rawCode === 'FREEDELIVERY' ||
-      rawCode === 'FREE-DEL' ||
-      rawCode === 'DELIVERYFREE' ||
-      rawCode === 'FREESHIP' ||
-      rawCode === 'ZERODELIVERY';
-    // 5. Half price keywords
-    const isHalfPrice =
-      rawCode === 'HALFPRICE' ||
-      rawCode === 'HALF-PRICE' ||
-      rawCode === '50PERCENT' ||
-      rawCode === '50OFF';
-
-    if (isFreeDel) {
-      dynamicDiscount = initialDeliveryFee;
-      dynamicDesc = `Free Initial Delivery ($${initialDeliveryFee} saving)`;
-      dynamicRule = {
-        id: `promo-${rawCode.toLowerCase()}`,
-        name: `Free Delivery Promo (${rawCode})`,
-        code: rawCode,
-        description: dynamicDesc,
-        type: 'free_initial_delivery',
-        value: 100,
-        active: true,
-        autoApply: false,
-      };
-    } else if (isHalfPrice) {
-      dynamicDiscount = Math.round(currentPeriodicStorageFee * 0.5);
-      dynamicDesc = `50% Off First Period Storage ($${dynamicDiscount} saving)`;
-      dynamicRule = {
-        id: `promo-${rawCode.toLowerCase()}`,
-        name: `Half Price Promo (${rawCode})`,
-        code: rawCode,
-        description: dynamicDesc,
-        type: 'percent_off_first_month',
-        value: 50,
-        active: true,
-        autoApply: false,
-      };
-    } else if (offMatch) {
-      const pct = Math.min(100, Math.max(5, parseInt(offMatch[1], 10)));
-      dynamicDiscount = Math.round((currentPeriodicStorageFee * pct) / 100);
-      dynamicDesc = `${pct}% Off First Period Storage ($${dynamicDiscount} saving)`;
-      dynamicRule = {
-        id: `promo-${rawCode.toLowerCase()}`,
-        name: `${pct}% Off Promo (${rawCode})`,
-        code: rawCode,
-        description: dynamicDesc,
-        type: 'percent_off_first_month',
-        value: pct,
-        active: true,
-        autoApply: false,
-      };
-    } else if (prefixNumMatch || suffixNumMatch) {
-      const numStr = prefixNumMatch ? prefixNumMatch[1] : suffixNumMatch![1];
-      const val = parseInt(numStr, 10);
-      dynamicDiscount = Math.min(val, currentPeriodicStorageFee + initialDeliveryFee + totalSuppliesPrice);
-      dynamicDesc = `$${val} Promotional Voucher Discount`;
-      dynamicRule = {
-        id: `promo-${rawCode.toLowerCase()}`,
-        name: `$${val} Discount Code (${rawCode})`,
-        code: rawCode,
-        description: dynamicDesc,
-        type: 'fixed_discount',
-        value: val,
-        active: true,
-        autoApply: false,
-      };
+    const configured = config.promotions.find((p) => p.code && p.code.trim().toUpperCase() === rawCode);
+    if (!configured) {
+      promoCodeError = `Discount code "${appliedPromoCode}" is not recognised.`;
+    } else if (configured.minDurationMonths && durationMonths < configured.minDurationMonths) {
+      promoCodeError = `Discount code "${appliedPromoCode}" requires a booking of at least ${configured.minDurationMonths} months.`;
+    } else if (
+      matrixResult.firstMonthFree &&
+      billingCycle === 'monthly' &&
+      (configured.type === 'percent_off_first_month' || configured.type === 'free_first_month')
+    ) {
+      promoCodeError = `Discount code "${appliedPromoCode}" can't be combined with your 1st Month Free offer.`;
     } else {
-      // Any other promo code provided (e.g. WELCOME, PORTABOX, VIP, SPECIAL, SUMMER, PROMO, etc.)
-      // Guarantees that ANY promo code given adjusts the quote and is itemised
-      dynamicDiscount = 50;
-      dynamicDesc = `$50 Promotional Voucher Discount`;
-      dynamicRule = {
-        id: `promo-${rawCode.toLowerCase()}`,
-        name: `Promotional Code (${rawCode})`,
-        code: rawCode,
-        description: dynamicDesc,
-        type: 'fixed_discount',
-        value: 50,
-        active: true,
-        autoApply: false,
-      };
+      promoCodeError = `Discount code "${appliedPromoCode}" is not valid for this booking.`;
     }
-
-    if (dynamicRule && dynamicDiscount > 0) {
-      candidates.push({
-        rule: dynamicRule,
-        discountAmount: dynamicDiscount,
-        description: dynamicDesc,
-        isExplicitCode: true,
-      });
-    }
+    promoCodeSuccessMessage = undefined;
   }
 
   // 9b. Routing Efficiency & CO2 Emissions Calculation (Controlled by enableEcoEfficiencyIncentive feature flag)
@@ -3425,9 +3382,11 @@ export function calculateQuote(params: {
     description: string;
   }[] = [];
 
-  if (candidates.length > 0 && !promoCodeError) {
+  // An invalid code only removes that code; auto-applied promotions still apply.
+  const validCandidates = promoCodeError ? candidates.filter((c) => !c.isExplicitCode) : candidates;
+  if (validCandidates.length > 0) {
     // If an exclusive candidate was matched
-    const exclusiveCandidate = candidates.find((c) => c.rule.isExclusive && c.isExplicitCode);
+    const exclusiveCandidate = validCandidates.find((c) => c.rule.isExclusive && c.isExplicitCode);
     if (exclusiveCandidate) {
       appliedPromotions.push({
         rule: exclusiveCandidate.rule,
@@ -3436,8 +3395,8 @@ export function calculateQuote(params: {
       });
     } else {
       // Non-exclusive promo codes: Allow explicit promo code AND other non-exclusive auto-applied discounts (e.g. eco route) to stack!
-      const explicitCandidates = candidates.filter((c) => c.isExplicitCode);
-      const autoCandidates = candidates.filter((c) => !c.isExplicitCode);
+      const explicitCandidates = validCandidates.filter((c) => c.isExplicitCode);
+      const autoCandidates = validCandidates.filter((c) => !c.isExplicitCode);
 
       if (explicitCandidates.length > 0) {
         explicitCandidates.forEach((c) => {
@@ -3470,7 +3429,45 @@ export function calculateQuote(params: {
     }
   }
 
+  // Interstate line-haul discounts (e.g. QLD50) reduce the line-haul leg, which is paid later,
+  // not the first payment (where they were previously floored at $0 and mostly lost).
+  const interstateLegDiscount = Math.min(
+    interstateFee,
+    appliedPromotions
+      .filter((p) => p.rule.type === 'percent_off_interstate')
+      .reduce((sum, p) => sum + p.discountAmount, 0)
+  );
+  if (interstateLegDiscount > 0) {
+    const lineHaulLeg = legs.find((l) => l.label.startsWith('Interstate transport'));
+    if (lineHaulLeg) {
+      lineHaulLeg.fee = Math.max(0, lineHaulLeg.fee - interstateLegDiscount);
+      lineHaulLeg.description += ` · Promotional discount -$${interstateLegDiscount}`;
+    }
+  }
+
+  // First-payment discounts can't exceed what is actually payable now; cap each promo so the
+  // quoted discount (and savings) equals the money the customer really saves.
+  const firstPaymentSubtotal =
+    payableStorageFirstMonth + initialDeliveryFee + (payableNowLeg?.fuelSurcharge || 0) + totalSuppliesPrice + (insurance.selected ? insurance.totalMonthlyInsuranceFee : 0);
+  let remainingPayable = firstPaymentSubtotal;
+  for (let i = appliedPromotions.length - 1; i >= 0; i--) {
+    const p = appliedPromotions[i];
+    if (p.rule.type === 'percent_off_interstate') continue;
+    const capped = Math.min(p.discountAmount, Math.max(0, remainingPayable));
+    remainingPayable -= capped;
+    if (capped <= 0) {
+      appliedPromotions.splice(i, 1);
+      if (appliedPromoCode && p.rule.code && p.rule.code.toUpperCase() === appliedPromoCode.trim().toUpperCase()) {
+        promoCodeError = `Discount code "${appliedPromoCode}" can't be used: there is nothing payable at booking to discount.`;
+        promoCodeSuccessMessage = undefined;
+      }
+    } else if (capped < p.discountAmount) {
+      p.discountAmount = capped;
+      p.description = `${p.description} (limited to $${capped} payable at booking)`;
+    }
+  }
   const totalDiscount = appliedPromotions.reduce((sum, p) => sum + p.discountAmount, 0);
+  const firstPaymentDiscount = totalDiscount - interstateLegDiscount;
 
   const deferredFuelSurchargeAmount = legs.reduce(
     (sum, leg) => sum + (leg.fuelSurchargeDeferred ? (leg.fuelSurchargeEstimatedAmount || 0) : 0),
@@ -3479,13 +3476,52 @@ export function calculateQuote(params: {
   const totalEstimatedFuelSurcharge = fuelSurchargeAmount + deferredFuelSurchargeAmount;
 
   // 10. First Payment Total: Periodic rent + initial delivery + packing supplies + insurance (if selected) - discounts
-  const payableStorageFirstMonth = (matrixResult.firstMonthFree && billingCycle === 'monthly')
-    ? 0
-    : currentPeriodicStorageFee;
-
-  let firstPaymentTotal =
-    payableStorageFirstMonth + initialDeliveryFee + (payableNowLeg?.fuelSurcharge || 0) + totalSuppliesPrice + (insurance.selected ? insurance.totalMonthlyInsuranceFee : 0) - totalDiscount;
+  let firstPaymentTotal = firstPaymentSubtotal - firstPaymentDiscount;
   if (firstPaymentTotal < 0) firstPaymentTotal = 0;
+
+  // 10b. Itemised customer savings (real money off this booking only; competitor comparisons are shown separately)
+  const savingsBreakdown: { label: string; amount: number }[] = [];
+  if (legsSavedDollarTotal > 0) {
+    savingsBreakdown.push({
+      label: `Loading/unloading at Portabox Location (${legsSavedCount} transport leg${legsSavedCount === 1 ? '' : 's'} waived)`,
+      amount: Math.round(legsSavedDollarTotal),
+    });
+  }
+  const isFreeMonthBilled = billingCycle === 'monthly' || billingCycle === '6_months_upfront';
+  if (matrixResult.firstMonthFree && isFreeMonthBilled && storageDuration !== '2_weeks') {
+    // Valued at the full rate; the duration/upfront items below cover the paid months only, so the items sum exactly
+    savingsBreakdown.push({ label: '1st month storage free', amount: baseMonthlyContainerRate });
+  }
+  const committedMonths = Math.round(durationMonths);
+  if (durationDiscountAmount > 0 && !isWeekly && committedMonths > 0) {
+    const paidMonths = Math.max(0, committedMonths - (matrixResult.firstMonthFree && isFreeMonthBilled ? 1 : 0));
+    if (paidMonths > 0) {
+      savingsBreakdown.push({
+        label: `${durationDiscountPercent}% duration discount ($${durationDiscountAmount}/mo × ${paidMonths} month${paidMonths === 1 ? '' : 's'})`,
+        amount: durationDiscountAmount * paidMonths,
+      });
+    }
+  }
+  if (upfrontMonths) {
+    const prepaidMonths = upfrontMonths - (matrixResult.firstMonthFree && billingCycle === '6_months_upfront' ? 1 : 0);
+    const upfrontSaving = Math.round(effectiveMonthlyContainerRate * prepaidMonths - currentPeriodicStorageFee);
+    if (upfrontSaving > 0) {
+      savingsBreakdown.push({ label: `${upfrontDiscountPercent}% upfront prepayment discount`, amount: upfrontSaving });
+    }
+  }
+  appliedPromotions.forEach((p) => {
+    if (p.discountAmount > 0) savingsBreakdown.push({ label: p.description, amount: p.discountAmount });
+  });
+  if ((packingSupplies.locksCount ?? 0) > 0 && packingSupplies.locksSavings && packingSupplies.locksSavings > 0) {
+    savingsBreakdown.push({ label: 'Free disc padlock', amount: packingSupplies.locksSavings });
+  }
+  if (matrixResult.milestoneDiscountAmount > 0) {
+    savingsBreakdown.push({ label: 'Milestone credit (credited during your 12+ month booking)', amount: matrixResult.milestoneDiscountAmount });
+  }
+  if (durationCompletionBonusDollars > 0) {
+    savingsBreakdown.push({ label: `Completion reward (credited on completing ${committedMonths} months)`, amount: durationCompletionBonusDollars });
+  }
+  const totalSavings = savingsBreakdown.reduce((sum, s) => sum + s.amount, 0);
 
   const collectionFeeEstimate = legs[legs.length - 1]?.fee || legBaseFee;
 
@@ -3577,6 +3613,8 @@ export function calculateQuote(params: {
     destinationLogisticsMethod,
     legsSavedCount,
     legsSavedDollarTotal,
+    savingsBreakdown,
+    totalSavings,
     totalLegsCount,
     requiredAddressesCount,
     initialDeliveryFee,

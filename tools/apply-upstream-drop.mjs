@@ -178,18 +178,55 @@ const routesBefore = routesOf(path.join(ROOT, 'src/server/apiRoutes.ts'));
 
 /* -------------------------------------------------------------- the copy */
 
-console.log('copying upstream\'s tracked files in');
-const tracked = git(['ls-files'], upstream).split('\n').filter(Boolean);
-let copied = 0;
-for (const rel of tracked) {
-  const from = path.join(upstream, rel);
-  const to = path.join(ROOT, rel);
-  if (!fs.existsSync(from)) continue;
-  fs.mkdirSync(path.dirname(to), { recursive: true });
-  fs.copyFileSync(from, to);
-  copied++;
+/* Copied from the revision this run decided to take, materialised in a
+   throwaway worktree — NOT from whatever the clone happens to have checked
+   out.
+ *
+ * This read from the clone's working tree once, which is correct only when
+ * the clone is fresh. Given an existing clone that had been fetched but not
+ * checked out, it copied the OLD files, reported success, and advanced
+ * .upstream-crm.json to the new revision — so the drop was recorded as taken
+ * without any of it arriving, and the next run would have skipped it for
+ * good. The scheduled job never saw this because it clones fresh each time;
+ * it only showed up running the tool by hand, against the clone that was
+ * already on disk.
+ *
+ * A worktree is used rather than checking the clone out, because --upstream
+ * may point at a clone someone is working in, and moving their HEAD would be
+ * a rude surprise. */
+const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'crm-tree-'));
+fs.rmSync(worktree, { recursive: true, force: true }); // git wants to create it
+git(['worktree', 'add', '--detach', '--quiet', worktree, head], upstream);
+
+const upstreamServer = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'crm-srv-')), 'server.ts');
+
+try {
+  const at = git(['rev-parse', 'HEAD'], worktree);
+  if (at !== head) throw new Error(`worktree is at ${at}, expected ${head}`);
+
+  console.log(`copying upstream's tracked files in, from ${head.slice(0, 7)}`);
+  const tracked = git(['ls-files'], worktree).split('\n').filter(Boolean);
+  let copied = 0;
+  for (const rel of tracked) {
+    const from = path.join(worktree, rel);
+    const to = path.join(ROOT, rel);
+    if (!fs.existsSync(from)) continue;
+    fs.mkdirSync(path.dirname(to), { recursive: true });
+    fs.copyFileSync(from, to);
+    copied++;
+  }
+  console.log(`  ${copied} files`);
+
+  /* server.ts has to be read from the same revision as everything else.
+     Kept outside the repo so it cannot be committed by accident. */
+  fs.copyFileSync(path.join(worktree, 'server.ts'), upstreamServer);
+} finally {
+  try {
+    git(['worktree', 'remove', '--force', worktree], upstream);
+  } catch {
+    fs.rmSync(worktree, { recursive: true, force: true });
+  }
 }
-console.log(`  ${copied} files`);
 
 /* ------------------------------------------------- re-extract the routes */
 
@@ -197,7 +234,9 @@ say('## The API surface');
 say('');
 let extractOut = '';
 try {
-  extractOut = run('node', [path.join(ROOT, 'tools/extract-api-routes.cjs'), path.join(upstream, 'server.ts')], { cwd: ROOT });
+  /* upstreamServer, not upstream/server.ts: the clone's checkout may be at
+     a different revision than the one being taken. */
+  extractOut = run('node', [path.join(ROOT, 'tools/extract-api-routes.cjs'), upstreamServer], { cwd: ROOT });
   console.log('re-extracted the API routes');
 } catch (e) {
   const msg = (e.stderr || e.stdout || e.message || '').toString().trim();

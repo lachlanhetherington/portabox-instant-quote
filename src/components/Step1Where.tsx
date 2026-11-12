@@ -89,6 +89,9 @@ export const Step1Where: React.FC<Step1WhereProps> = ({
     onSelectPostcode(record);
   };
 
+  const isOutsideCoverage = (record: PostcodeRecord) =>
+    evaluatePostcodeServiceTier(record, config.postcodeServiceTiers, false).tier === 3;
+
   const handleContinueClick = () => {
     if (selected) {
       const blocked = isPostcodeBlocked(selected.postcode, config);
@@ -96,10 +99,13 @@ export const Step1Where: React.FC<Step1WhereProps> = ({
         setBlockedNotice(blocked);
         return;
       }
+      if (isOutsideCoverage(selected)) return;
       onSelectPostcode(selected);
       onContinue();
     } else if (suggestions.length > 0) {
-      handleSelect(suggestions[0]);
+      const first = suggestions[0];
+      handleSelect(first);
+      if (isPostcodeBlocked(first.postcode, config) || isOutsideCoverage(first)) return;
       onContinue();
     }
   };
@@ -236,7 +242,7 @@ export const Step1Where: React.FC<Step1WhereProps> = ({
             {/* CTA Continue Button: #F7D347 Vibrant Gold / Yellow with #1A1A1A Soft Black / Charcoal Text */}
             <button
               onClick={handleContinueClick}
-              disabled={!selected && suggestions.length === 0}
+              disabled={(!selected && suggestions.length === 0) || selectedTierEval?.tier === 3}
               className="px-8 py-3.5 bg-[#F7D347] hover:bg-[#eed235] disabled:bg-slate-200 text-[#1A1A1A] disabled:text-slate-400 font-black rounded-2xl border-2 border-[#e6c338] disabled:border-slate-300 flex items-center justify-center gap-2 transition-all cursor-pointer shadow-sm hover:shadow-md active:scale-98"
             >
               <span>Continue</span>
