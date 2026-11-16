@@ -204,10 +204,26 @@ try {
   const at = git(['rev-parse', 'HEAD'], worktree);
   if (at !== head) throw new Error(`worktree is at ${at}, expected ${head}`);
 
+  /* Upstream's GitHub Actions config is theirs, not ours.
+   *
+   * Their checks.yml installs with `bun install --frozen-lockfile`, and
+   * package.json here is patched by the local fixes, so it no longer
+   * matches their bun.lock — the job fails in about ten seconds and emails
+   * the repository owner, on every push to main, for a check that was never
+   * meant to run in this repo. Their deployment is Cloud Run and ours is
+   * Vercel, so none of their workflow config applies here.
+   *
+   * Skipped rather than deleted afterwards, so it does not reappear with
+   * every drop. Everything their CI would run — the type check, their test
+   * suite, the gate suite — is in tools/ and listed in tools/README.md. */
+  const SKIP = [/^\.github\//];
+
   console.log(`copying upstream's tracked files in, from ${head.slice(0, 7)}`);
   const tracked = git(['ls-files'], worktree).split('\n').filter(Boolean);
   let copied = 0;
+  let skipped = 0;
   for (const rel of tracked) {
+    if (SKIP.some((re) => re.test(rel))) { skipped++; continue; }
     const from = path.join(worktree, rel);
     const to = path.join(ROOT, rel);
     if (!fs.existsSync(from)) continue;
@@ -215,7 +231,7 @@ try {
     fs.copyFileSync(from, to);
     copied++;
   }
-  console.log(`  ${copied} files`);
+  console.log(`  ${copied} files${skipped ? `, ${skipped} skipped (upstream's own CI config)` : ''}`);
 
   /* server.ts has to be read from the same revision as everything else.
      Kept outside the repo so it cannot be committed by accident. */
