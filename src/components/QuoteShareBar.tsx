@@ -1,24 +1,11 @@
 import React, { useState } from 'react';
-import {
-  Share2,
-  MessageCircle,
-  Smartphone,
-  Mail,
-  Printer,
-  Copy,
-  Check,
-  Download,
-  Sparkles,
-  Link as LinkIcon,
-  Send,
-  PhoneCall,
-} from 'lucide-react';
+import { Share2, MessageCircle, Smartphone, Mail, Printer, Copy, Check } from 'lucide-react';
 import { QuoteBreakdown } from '../types/quote';
-import {
-  isValidAustralianMobile,
-  getAustralianMobileValidationError,
-  formatAustralianMobile,
-} from '../utils/phoneValidation';
+import { formatMoney } from '../utils/currency';
+import { useQuoteNumber, usePublicSettings } from '../services/quoteNumberService';
+import { SALES_EMAIL } from '../utils/contact';
+import { getQuoteDurationLabel } from '../services/pricingEngine';
+import { getQuoteCostSections, CostLine, INITIAL_PAYMENT_DISCLAIMER } from '../services/quoteCostSections';
 
 interface QuoteShareBarProps {
   quote: QuoteBreakdown;
@@ -36,16 +23,11 @@ export const QuoteShareBar: React.FC<QuoteShareBarProps> = ({
   phone = '1800 467 637',
 }) => {
   const [copied, setCopied] = useState(false);
-  const [magicCopied, setMagicCopied] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
-  const [isMagicModalOpen, setIsMagicModalOpen] = useState(false);
-  const [magicMobileInput, setMagicMobileInput] = useState(customerData?.mobile || '');
-  const [magicSentSuccess, setMagicSentSuccess] = useState(false);
 
-  const quoteRef = `Q-${(quote.quoteCreatedAt ? new Date(quote.quoteCreatedAt).getTime() : Date.now()).toString().slice(-6)}`;
+  const quoteRef = useQuoteNumber() || 'Q-…';
+  const { showDeliveryWindowNote } = usePublicSettings();
   const customerName = customerData?.firstName || 'Valued Customer';
-  const customerMobile = customerData?.mobile || '';
-  const customerEmail = customerData?.email || '';
 
   const validityDateStr = quote.quoteExpiresAt
     ? new Date(quote.quoteExpiresAt).toLocaleDateString('en-AU', {
@@ -55,44 +37,47 @@ export const QuoteShareBar: React.FC<QuoteShareBarProps> = ({
       })
     : '30 Days from issue';
 
-  // Construct clear, structured text summary
+  // Plain-text summary for WhatsApp, SMS, email and copy. Mirrors the quote document.
   const generateShareText = () => {
-    const isMulti = quote.containerCount > 1;
+    const money = (n: number) => `$${formatMoney(n)}`;
+    const legTotal = (leg: QuoteBreakdown['legs'][number]) =>
+      leg.fee + (leg.fuelSurchargeDeferred ? leg.fuelSurchargeEstimatedAmount || 0 : 0);
+    const laterTransport = quote.legs.filter((l) => !l.isPayableNow).reduce((sum, l) => sum + legTotal(l), 0);
+    // Same sections as the quote document (Dan, 16 Nov)
+    const { upfront, ongoing } = getQuoteCostSections(quote);
+    const lineText = (l: CostLine) =>
+      `   - ${l.label}: ${l.amount < 0 ? `-${money(-l.amount)}` : money(l.amount)}${l.detail ? ` (${l.detail})` : ''}`;
+
     const lines = [
-      `📦 PORTABOX AUSTRALIA - OFFICIAL QUOTATION #${quoteRef}`,
+      `📦 PORTABOX - QUOTATION ${quoteRef}`,
       `Customer: ${customerName}`,
-      `Container: ${isMulti ? `${quote.containerCount} × ` : ''}${quote.containerName} (${quote.containerVolume})`,
+      // containerName already includes the count for multi-container quotes (e.g. "2 x 25 m³ Portabox").
+      `Container: ${quote.containerName} (${quote.containerVolume})`,
       `Delivery To: ${quote.originPostcode.suburb} ${quote.originPostcode.state} ${quote.originPostcode.postcode}`,
-      `Delivery Window: Selected during booking in Next Steps`,
+      `Storage Duration: ${getQuoteDurationLabel(quote)}`,
+      ...(showDeliveryWindowNote ? [`Delivery Window: Selected during booking in Next Steps`] : []),
       ``,
-      `--- FINANCIAL BREAKDOWN (AUD, GST INCL) ---`,
-      `1. INITIAL MOVE-IN & DELIVERY: $${quote.initialDeliveryFee}`,
-      `2. ONGOING MONTHLY STORAGE: $${quote.monthlyStorageFee}/month (1-Year Booking Price Guarantee)`,
+      `--- PRICES (AUD, GST INCL) ---`,
+      `1. Initial upfront payment: ${money(upfront.total)}`,
+      ...upfront.lines.map((l) => (l.key.startsWith('leg-') ? `   - ${l.label} (incl. fuel levy): ${money(l.amount)}` : lineText(l))),
+      `   ${INITIAL_PAYMENT_DISCLAIMER}`,
+      ...(laterTransport > 0 ? [`1b. Later transport fees (incl. fuel levy), charged when each move happens: ${money(laterTransport)}`] : []),
+      `2. Ongoing monthly costs: ${money(ongoing.total)}/month`,
+      ...ongoing.lines.map(lineText),
     ];
 
-    if (quote.packingSupplies?.totalSuppliesPrice > 0) {
-      lines.push(
-        `3. SUPPLIES: $${quote.packingSupplies.totalSuppliesPrice} (${[
-          quote.packingSupplies.blanketsCount > 0 ? `${quote.packingSupplies.blanketsCount} Blankets (${quote.packingSupplies.freeBlanketsAllowance || 10} Free)` : null,
-          quote.packingSupplies.locksCount ? `${quote.packingSupplies.locksCount} Padlock` : null,
-          quote.packingSupplies.boxesCount ? `${quote.packingSupplies.boxesCount} Boxes` : null,
-        ].filter(Boolean).join(', ')})`
-      );
-    }
-
-    if (quote.insurance?.selected) {
-      lines.push(
-        `4. CPO INSURANCE: ${quote.insurance.isFreePromo ? '$0/mo (Free Promo)' : `$${quote.insurance.totalMonthlyInsuranceFee}/mo`} (Up to $${(quote.insurance.coverageAmount || 10000).toLocaleString()} cover)`
-      );
+    if (quote.savingsBreakdown?.length) {
+      lines.push(``, `Your savings on this quote: ${money(quote.totalSavings || 0)}`);
+      quote.savingsBreakdown.forEach((item) => lines.push(`  ✓ ${item.label}: ${money(item.amount)}`));
     }
 
     lines.push(
       ``,
-      `TOTAL PAYABLE UPFRONT: $${quote.firstPaymentTotal}`,
-      `ONGOING MONTHLY BILL: $${quote.monthlyStorageFee + (quote.insurance?.selected && !quote.insurance.isFreePromo ? quote.insurance.totalMonthlyInsuranceFee : 0)}/month`,
+      `FIRST PAYMENT TOTAL: ${money(quote.firstPaymentTotal)}`,
+      `ONGOING MONTHLY COSTS: ${money(ongoing.total)}/month`,
       ``,
-      `🔒 30-Day Quote Price Guarantee: Held until ${validityDateStr}`,
-      `📞 Questions or to Book: Call ${phone} or email quotes@portabox.au (www.portabox.au).`
+      `🔒 30-Day Quote Price Guarantee: held until ${validityDateStr}`,
+      `📞 Questions or to book: call ${phone} or email ${SALES_EMAIL} (www.portabox.au).`
     );
 
     return lines.join('\n');
@@ -155,59 +140,6 @@ export const QuoteShareBar: React.FC<QuoteShareBarProps> = ({
       setTimeout(() => setCopied(false), 3000);
     } catch (err) {
       showToast('Unable to copy automatically.');
-    }
-  };
-
-  // Generate Magic Resume Link preserving quote configuration
-  const generateMagicLink = () => {
-    try {
-      const resumePayload = {
-        ref: quoteRef,
-        originSuburb: quote.originPostcode.suburb,
-        originPostcode: quote.originPostcode.postcode,
-        containerSize: quote.containerSize,
-        containerCount: quote.containerCount,
-        billingCycle: quote.billingCycle,
-        storageDuration: quote.storageDuration,
-        preferredDate: quote.preferredDate,
-        customerName: customerName,
-        customerEmail: customerEmail,
-        customerMobile: magicMobileInput || customerMobile,
-        savedAt: new Date().toISOString(),
-      };
-      localStorage.setItem('portabox_magic_quote', JSON.stringify(resumePayload));
-      return `${window.location.origin}${window.location.pathname}?magicQuote=${encodeURIComponent(quoteRef)}`;
-    } catch {
-      return window.location.href;
-    }
-  };
-
-  const handleSendMagicSms = () => {
-    const mobileToUse = magicMobileInput || customerMobile;
-    if (!mobileToUse || !isValidAustralianMobile(mobileToUse)) {
-      showToast(getAustralianMobileValidationError(mobileToUse) || 'Please enter a valid Australian mobile number (e.g. 0412 345 678)');
-      return;
-    }
-    const formatted = formatAustralianMobile(mobileToUse);
-    setMagicMobileInput(formatted);
-    generateMagicLink();
-    setMagicSentSuccess(true);
-    showToast(`✓ Magic link simulated to ${formatted}! You can resume this quote anytime.`);
-    setTimeout(() => {
-      setIsMagicModalOpen(false);
-      setMagicSentSuccess(false);
-    }, 2800);
-  };
-
-  const handleCopyMagicLink = async () => {
-    const link = generateMagicLink();
-    try {
-      await navigator.clipboard.writeText(link);
-      setMagicCopied(true);
-      showToast('✓ Magic Resume link copied to clipboard!');
-      setTimeout(() => setMagicCopied(false), 2500);
-    } catch {
-      showToast('Unable to copy link.');
     }
   };
 
@@ -274,7 +206,7 @@ export const QuoteShareBar: React.FC<QuoteShareBarProps> = ({
             title="Open phone share menu (AirDrop, Messages, etc.)"
           >
             <Share2 className="w-3.5 h-3.5" />
-            <span className="hidden xs:inline">Share</span>
+            <span className="hidden sm:inline">Share</span>
           </button>
 
           {/* Copy to Clipboard Button */}
@@ -299,87 +231,6 @@ export const QuoteShareBar: React.FC<QuoteShareBarProps> = ({
           </button>
         </div>
       </div>
-
-      {/* Magic Resume Link Modal / Drawer */}
-      {isMagicModalOpen && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in">
-          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border-2 border-[#DAD7D1] space-y-4">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <div className="w-8 h-8 rounded-xl bg-[#F7D347] flex items-center justify-center text-[#1A1A1A] font-black">
-                  <Sparkles className="w-4 h-4" />
-                </div>
-                <div>
-                  <h4 className="font-black text-[#15385E] text-sm">
-                    Magic Resume Link (No Login Needed)
-                  </h4>
-                  <p className="text-[11px] text-slate-500">
-                    Quote #{quoteRef} · Locked for 30 days
-                  </p>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => setIsMagicModalOpen(false)}
-                className="w-7 h-7 rounded-full bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-500 text-xs font-bold"
-              >
-                ✕
-              </button>
-            </div>
-
-            <p className="text-xs text-slate-600 leading-relaxed">
-              We'll send an authenticated magic link directly to your mobile. Click it anytime to reopen this exact quote configuration on your phone with all rates and discounts intact.
-            </p>
-
-            {magicSentSuccess ? (
-              <div className="p-3.5 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-2xl text-xs font-bold flex items-center gap-2 animate-in fade-in">
-                <Check className="w-4 h-4 text-emerald-600 stroke-[3] shrink-0" />
-                <span>Magic Link sent to {magicMobileInput || customerMobile}! Check your messages.</span>
-              </div>
-            ) : (
-              <div className="space-y-3">
-                <div>
-                  <label className="block text-[11px] font-bold text-slate-700 uppercase mb-1">
-                    Your Mobile Number
-                  </label>
-                  <input
-                    type="tel"
-                    value={magicMobileInput}
-                    onChange={(e) => setMagicMobileInput(e.target.value)}
-                    placeholder="e.g. 0412 345 678"
-                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-xs font-bold text-[#15385E] focus:outline-none focus:ring-2 focus:ring-[#5CC1EF]"
-                  />
-                </div>
-
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={handleSendMagicSms}
-                    className="flex-1 py-2.5 bg-[#15385E] hover:bg-[#112F4F] text-[#F7D347] font-black rounded-xl text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
-                  >
-                    <Send className="w-3.5 h-3.5" />
-                    <span>Send SMS Magic Link</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={handleCopyMagicLink}
-                    className="px-3.5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs flex items-center gap-1.5 transition-colors cursor-pointer border border-slate-200"
-                    title="Copy Magic URL"
-                  >
-                    {magicCopied ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <LinkIcon className="w-3.5 h-3.5" />}
-                    <span>{magicCopied ? 'Copied' : 'Copy Link'}</span>
-                  </button>
-                </div>
-              </div>
-            )}
-
-            <div className="p-2.5 bg-slate-50 rounded-xl text-[10px] text-slate-500 flex items-center gap-1.5">
-              <span>🔒 100% Spam-Free: Used exclusively for sending your Portabox quote link.</span>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Floating feedback toast */}
       {toastMessage && (

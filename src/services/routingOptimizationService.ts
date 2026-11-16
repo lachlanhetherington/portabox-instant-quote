@@ -14,16 +14,10 @@
 
 import { PORTABOX_DEPOTS } from '../data/australianPostcodes';
 import { DeliverySlotWindow, MetroHub } from '../types/quote';
+import { publicEnv } from '../utils/publicEnv';
 
-/**
- * Supplied with a live key hardcoded as the fallback. A Maps Platform key
- * is billable, so a public repository is the last place for one — and it
- * belonged to the original developer's Google Cloud project rather than
- * Portabox's. Read from the environment only.
- */
 export const GOOGLE_MAPS_API_KEY =
-  ((import.meta as unknown as { env?: Record<string, string> }).env
-    ?.VITE_GOOGLE_MAPS_API_KEY) || '';
+  publicEnv('VITE_GOOGLE_MAPS_API_KEY'); // browser key, restricted by HTTP referrer
 
 export interface RouteStop {
   id: string;

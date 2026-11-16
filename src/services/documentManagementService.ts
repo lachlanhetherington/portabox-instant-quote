@@ -1,5 +1,6 @@
 import { db } from './firebaseService';
 import { collection, addDoc, getDocs, query, where, deleteDoc, doc } from 'firebase/firestore';
+import { apiFetch } from './apiClient';
 
 export interface DocumentMetadata {
   id?: string;
@@ -37,7 +38,7 @@ export const uploadFileToDrive = async (file: File, accessToken: string) => {
   form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
   form.append('file', file);
   
-  const res = await fetch('/api/drive/upload/drive/v3/files?uploadType=multipart', {
+  const res = await apiFetch('/api/drive/upload/drive/v3/files?uploadType=multipart', {
     method: 'POST',
     headers: { Authorization: `Bearer ${accessToken}` },
     body: form,

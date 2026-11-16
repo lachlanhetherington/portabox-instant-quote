@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { AgentAlertItem, markAgentAlertResolved } from '../../services/notificationAlertService';
 import { updateSmartsheetRowInline } from '../../services/smartsheetService';
+import { apiFetch } from '../../services/apiClient';
 
 interface AdminMessageResponseModalProps {
   isOpen: boolean;
@@ -56,7 +57,7 @@ export const AdminMessageResponseModal: React.FC<AdminMessageResponseModalProps>
     let isMounted = true;
     setIsLoadingAi(true);
 
-    fetch('/api/gemini/suggest-replies', {
+    apiFetch('/api/gemini/suggest-replies', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -120,7 +121,7 @@ export const AdminMessageResponseModal: React.FC<AdminMessageResponseModalProps>
     try {
       // 1. Send SMS if checked
       if (sendViaSms && alert.customerMobile) {
-        await fetch('/api/sms/send', {
+        await apiFetch('/api/sms/send', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({

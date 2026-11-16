@@ -6,12 +6,225 @@
    routes themselves are upstream's, moved unchanged. */
 import express from 'express';
 import { sendSms, logInboundSms } from '../services/smsService';
+import rateLimit from 'express-rate-limit';
+import { APP_ENV, IS_PRODUCTION, securityHeaders, requestLogging, installStructuredLogging } from '../../serverRuntime';
+import { requireStaff, requireRole, requireWebhookSecret, requireTwilioSignature, microsoftSignInConfig } from '../../serverAuth';
+import { nextQuoteNumber, getPublicSettings, updatePublicSettings, DEFAULT_PUBLIC_SETTINGS, getQuoteRecord, saveQuoteRecord, getAdminSettings, saveAdminSettings, SETTINGS_ENV, FIRESTORE_DATABASE_ID, listAdminSettingsHistory, restoreAdminSettingsVersion, listFrozenQuotes, listSavedQuotes, updateQuoteFollowUp, type QuoteRecord } from '../../serverStore';
+import { cleanFollowUpUpdate } from '../services/quoteFollowUp';
+import { normalizeAppConfig } from '../services/pricingEngine';
+import { buildQuoteSheetRows, type QuoteCustomer } from '../services/quoteSheetRows';
+import {
+  BOOKING_FREEZE_MONTHS,
+  QUOTE_STATUS_LABEL,
+  addDays,
+  addMonths,
+  cleanQuoteInputs,
+  currentStatus,
+  normalizeContact,
+  priceQuoteInputs,
+  quoteTotals,
+  sameTotals,
+  type FrozenQuoteStatus,
+} from '../services/quoteFreeze';
 import type { Express } from 'express';
+
+installStructuredLogging();
+
+// Smartsheet API token lives only on the server (never accepted from the browser).
+const SMARTSHEET_NOT_CONFIGURED = 'Smartsheet is not configured on the server (set SMARTSHEET_API_TOKEN).';
+function smartsheetToken(): string {
+  return (process.env.SMARTSHEET_API_TOKEN || '').trim();
+}
 
 export function registerApiRoutes(app: Express) {
 
-app.use(express.json({ limit: '50mb' }));
-app.use(express.urlencoded({ limit: '50mb', extended: true }));
+app.use(express.json({ limit: '5mb' }));
+app.use(express.urlencoded({ limit: '5mb', extended: true }));
+
+// Behind one reverse proxy (Cloud Run) so req.ip is the real client.
+// Override with TRUST_PROXY (number of hops) if the hosting differs.
+app.set('trust proxy', Number(process.env.TRUST_PROXY ?? 1));
+
+// Rate limits. Per-IP limit runs before auth so token checks can't be flooded;
+// per-user limits on the costly routes (SMS, AI) run after auth.
+const limitMessage = { error: 'Too many requests. Please slow down and try again shortly.' };
+app.use('/api', rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: Number(process.env.RATE_LIMIT_API_PER_15MIN ?? 600),
+  standardHeaders: 'draft-8',
+  legacyHeaders: false,
+  message: limitMessage,
+}));
+const perUser = (name: string, windowMs: number, limit: number) => rateLimit({
+  windowMs,
+  limit,
+  standardHeaders: 'draft-8',
+  legacyHeaders: false,
+  message: limitMessage,
+  // Runs after requireStaff, so the verified staff email is available
+  keyGenerator: (req) => `${name}:${(req as any).staffUser?.email || req.ip}`,
+  validate: { keyGeneratorIpFallback: false },
+});
+const smsLimiter = perUser('sms', 10 * 60 * 1000, Number(process.env.RATE_LIMIT_SMS_PER_10MIN ?? 30));
+const aiLimiter = perUser('ai', 10 * 60 * 1000, Number(process.env.RATE_LIMIT_AI_PER_10MIN ?? 60));
+
+// Everything under /api requires an authenticated staff user, except
+// provider webhooks which are verified by signature / shared secret.
+const webhookAuth: Record<string, any> = {
+  '/api/sms/inbound': requireTwilioSignature,
+  '/api/twilio/voice/stream': requireTwilioSignature,
+  '/api/twilio/transcription': requireTwilioSignature,
+  '/api/clicksend/inbound': requireWebhookSecret,
+  '/api/smartsheet/webhook': requireWebhookSecret,
+  // Public: tells the sign-in box which sign-in options are switched on. Holds no secrets.
+  '/api/auth/providers': (_req: any, _res: any, next: any) => next(),
+  // Public: customers' quote pages need a quote number and the display settings.
+  '/api/public/settings': (_req: any, _res: any, next: any) => next(),
+  // Public: prices, discounts and switches every quote page needs (admin-entered, no secrets).
+  '/api/public/admin-settings': (_req: any, _res: any, next: any) => next(),
+  '/api/public/quote-number': (_req: any, _res: any, next: any) => next(),
+  // Public: a finished quote is recorded and added to the quotes sheet. Only server-issued numbers are accepted.
+  '/api/public/quotes': (_req: any, _res: any, next: any) => next(),
+  // Public: a customer reopens their own quote with its number + the email or mobile they gave.
+  '/api/public/quotes/open': (_req: any, _res: any, next: any) => next(),
+};
+app.use('/api', (req, res, next) => {
+  const guard = webhookAuth[req.baseUrl + req.path];
+  return guard ? guard(req, res, next) : requireStaff(req, res, next);
+});
+
+// Which staff sign-in options are switched on (public; the tenant ID is not secret).
+app.get('/api/auth/providers', (_req, res) => {
+  const microsoft = microsoftSignInConfig();
+  res.json({ microsoft: microsoft ? { tenantId: microsoft.tenantId } : null });
+});
+
+// Returns the verified identity and role for the signed-in staff user.
+app.get('/api/auth/me', (req, res) => {
+  res.json((req as any).staffUser);
+});
+
+// Quote display settings every visitor's page reads (no secrets). Falls back to defaults if the store is unreachable.
+app.get('/api/public/settings', async (_req, res) => {
+  try {
+    res.json(await getPublicSettings());
+  } catch (err) {
+    console.error('Public settings unavailable:', err);
+    res.json(DEFAULT_PUBLIC_SETTINGS);
+  }
+});
+
+// Only the CEO can change them.
+app.put('/api/settings/public', requireRole(), async (req, res) => {
+  const patch: Record<string, unknown> = {};
+  if (typeof req.body?.showDeliveryWindowNote === 'boolean') patch.showDeliveryWindowNote = req.body.showDeliveryWindowNote;
+  if (Object.keys(patch).length === 0) return res.status(400).json({ error: 'Nothing to update' });
+  try {
+    res.json(await updatePublicSettings(patch, (req as any).staffUser.email));
+  } catch (err) {
+    console.error('Saving public settings failed:', err);
+    res.status(503).json({ error: 'Settings could not be saved' });
+  }
+});
+
+// Admin settings (full pricing config + competitor benchmark) for this environment.
+// Everyone's quote page reads them; null means nothing saved yet, so the page keeps its defaults.
+app.get('/api/public/admin-settings', async (_req, res) => {
+  try {
+    const s = await getAdminSettings();
+    res.set('Cache-Control', 'no-store');
+    res.json({ env: SETTINGS_ENV, ...s });
+  } catch (err) {
+    console.error('Admin settings unavailable:', err);
+    res.status(503).json({ error: 'Settings unavailable' });
+  }
+});
+
+// Only the CEO and pricing admins can save them.
+const MAX_SETTINGS_BYTES = 800 * 1024; // Firestore documents are capped at 1 MiB
+const isPlainObject = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
+app.put('/api/settings/admin', requireRole('admin_pricing'), async (req, res) => {
+  const { appConfig, competitorBenchmark } = req.body || {};
+  const patch: { appConfig?: Record<string, unknown>; competitorBenchmark?: Record<string, unknown> } = {};
+  if (appConfig !== undefined) {
+    if (!isPlainObject(appConfig) || !isPlainObject(appConfig.locationPricing) || !isPlainObject(appConfig.containerPrices)) {
+      return res.status(400).json({ error: 'Invalid pricing settings' });
+    }
+    patch.appConfig = appConfig;
+  }
+  if (competitorBenchmark !== undefined) {
+    if (!isPlainObject(competitorBenchmark) || typeof competitorBenchmark.deliveryFeePerContainer !== 'number') {
+      return res.status(400).json({ error: 'Invalid competitor pricing' });
+    }
+    patch.competitorBenchmark = competitorBenchmark;
+  }
+  if (!patch.appConfig && !patch.competitorBenchmark) return res.status(400).json({ error: 'Nothing to update' });
+  if (JSON.stringify(patch).length > MAX_SETTINGS_BYTES) return res.status(413).json({ error: 'Settings too large' });
+  try {
+    const saved = await saveAdminSettings(patch, (req as any).staffUser.email);
+    res.json({ env: SETTINGS_ENV, updatedAt: saved.updatedAt, updatedBy: saved.updatedBy });
+  } catch (err) {
+    console.error('Saving admin settings failed:', err);
+    res.status(503).json({ error: 'Settings could not be saved' });
+  }
+});
+
+// History of admin settings saves (CEO and pricing admins), newest first.
+app.get('/api/settings/admin/history', requireRole('admin_pricing'), async (_req, res) => {
+  try {
+    res.json({ env: SETTINGS_ENV, versions: await listAdminSettingsHistory() });
+  } catch (err) {
+    console.error('Settings history unavailable:', err);
+    res.status(503).json({ error: 'History unavailable' });
+  }
+});
+
+// Make an earlier save the current settings again. Recorded as a new save, so it can be undone too.
+app.post('/api/settings/admin/history/:id/restore', requireRole('admin_pricing'), async (req, res) => {
+  try {
+    const saved = await restoreAdminSettingsVersion(String(req.params.id || ''), (req as any).staffUser.email);
+    if (!saved) return res.status(404).json({ error: 'That saved version was not found' });
+    res.json({ env: SETTINGS_ENV, updatedAt: saved.updatedAt, updatedBy: saved.updatedBy });
+  } catch (err) {
+    console.error('Restoring settings failed:', err);
+    res.status(503).json({ error: 'The settings could not be restored' });
+  }
+});
+
+// Sequential quote numbers (Q-100001, ...). Each quote asks once; a per-IP limit stops number-burning.
+const quoteNumberLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  limit: Number(process.env.RATE_LIMIT_QUOTE_NUMBERS_PER_10MIN ?? 30),
+  standardHeaders: 'draft-8',
+  legacyHeaders: false,
+  message: limitMessage,
+});
+app.post('/api/public/quote-number', quoteNumberLimiter, async (_req, res) => {
+  try {
+    res.json({ quoteNumber: await nextQuoteNumber() });
+  } catch (err) {
+    console.error('Quote number unavailable:', err);
+    res.status(503).json({ error: 'Quote number unavailable' });
+  }
+});
+
+// Staging can hold the Smartsheet token just to add test quotes to a copy of the sheet.
+// SMARTSHEET_QUOTES_ONLY=true turns off the staff Smartsheet tools there, which default to the live sheet.
+if (process.env.SMARTSHEET_QUOTES_ONLY === 'true') {
+  app.use('/api/smartsheet', (_req, res) => {
+    res.status(403).json({ success: false, error: 'Smartsheet tools are turned off here (quotes only).' });
+  });
+}
+
+app.use(['/api/sms/send', '/api/clicksend/sms/send'], smsLimiter);
+app.use(['/api/gemini', '/api/twilio/summarize'], aiLimiter);
+
+// Role-restricted admin routes (CEO always allowed).
+app.use('/api/gemini/admin-chat', requireRole('admin_pricing'));
+app.use('/api/gemini/generate-discount', requireRole('admin_pricing'));
+app.use('/api/smartsheet/create-sheet', requireRole());
+app.use('/api/smartsheet/connect-dan-sheet', requireRole('manager'));
+app.use('/api/clicksend/account', requireRole('manager'));
 
 // Proxy for Google Drive API
 app.use('/api/drive', async (req, res) => {
@@ -20,7 +233,11 @@ app.use('/api/drive', async (req, res) => {
     return res.status(401).json({ error: 'Unauthorized' });
   }
 
-  const url = `https://www.googleapis.com${req.url.replace('/api/drive', '')}`;
+  const subPath = req.url.replace('/api/drive', '');
+  if (!/^\/(upload\/)?drive\/v3\/files(\/[A-Za-z0-9_-]+)?(\?|$)/.test(subPath)) {
+    return res.status(403).json({ error: 'Path not allowed' });
+  }
+  const url = `https://www.googleapis.com${subPath}`;
   
   try {
     const fetchOptions: RequestInit = {
@@ -55,12 +272,10 @@ app.use('/api/drive', async (req, res) => {
 
 // Create real Smartsheet in user's Smartsheet account via Smartsheet REST API
 app.post('/api/smartsheet/create-sheet', async (req, res) => {
-  const { apiToken, sheetName = 'CRM-Phase I (Quotezilla - QZ4)' } = req.body;
+  const { sheetName = 'CRM-Phase I (Quotezilla - QZ4)' } = req.body;
+  const apiToken = smartsheetToken();
   if (!apiToken) {
-    return res.status(400).json({
-      success: false,
-      error: 'Smartsheet API Access Token is required to create a sheet in your account.',
-    });
+    return res.status(503).json({ success: false, error: SMARTSHEET_NOT_CONFIGURED });
   }
 
   const columns = [
@@ -201,7 +416,8 @@ app.post('/api/smartsheet/create-sheet', async (req, res) => {
 
 // Connect directly to CEO Dan Harrington's Smartsheet: CRM-Phase I (Quotezilla - QZ4) [ID: 3517583962886020]
 app.post('/api/smartsheet/connect-dan-sheet', async (req, res) => {
-  const apiToken = req.body.apiToken || 'F3CVVuJ7Gh8ozrm11WDnIsTL1ZYpRKADmNtAX';
+  const apiToken = smartsheetToken();
+  if (!apiToken) return res.status(503).json({ success: false, error: SMARTSHEET_NOT_CONFIGURED });
   const DAN_SHEET_ID = '3517583962886020';
   const targetSheetName = 'CRM-Phase I (Quotezilla - QZ4)';
   const workspaceName = req.body.workspaceName || 'New CRM - Porta';
@@ -639,7 +855,8 @@ function mapAppRowToSmartsheetCells(
 // True Two-Way Sync Endpoint: Pulls latest rows from Smartsheet & Pushes unwritten rows from App
 // Strictly locked to Dan Harrington's Phase I Sheet [ID: 3517583962886020]
 app.post('/api/smartsheet/sync-dan-rows', async (req, res) => {
-  const apiToken = (req.body.apiToken || 'F3CVVuJ7Gh8ozrm11WDnIsTL1ZYpRKADmNtAX').trim();
+  const apiToken = smartsheetToken();
+  if (!apiToken) return res.status(503).json({ success: false, error: SMARTSHEET_NOT_CONFIGURED });
   const targetSheetId = '3517583962886020';
   const incomingAppRows = Array.isArray(req.body.rows) ? req.body.rows : [];
 
@@ -736,7 +953,8 @@ app.post('/api/smartsheet/sync-dan-rows', async (req, res) => {
 
 // Push a single row or quote immediately to Smartsheet
 app.post('/api/smartsheet/push-row', async (req, res) => {
-  const apiToken = (req.body.apiToken || 'F3CVVuJ7Gh8ozrm11WDnIsTL1ZYpRKADmNtAX').trim();
+  const apiToken = smartsheetToken();
+  if (!apiToken) return res.status(503).json({ success: false, error: SMARTSHEET_NOT_CONFIGURED });
   const targetSheetId = req.body.sheetId || '3517583962886020';
   const row = req.body.row;
 
@@ -782,9 +1000,444 @@ app.post('/api/smartsheet/push-row', async (req, res) => {
   }
 });
 
+// ---- Finished quotes: saved in Firestore and added (or updated) as a row on the quotes sheet ----
+// Text fields the quote form may send, and number fields (fees). Anything else is dropped.
+/** Quote-sheet columns a new quote leaves blank for Dan's team (his 16 Nov email). */
+const QUOTE_ROW_BLANK_COLUMNS = [
+  'Send Quote Confirmation to Customer',
+  'FOLLOW UP - Customer Status',
+  'Contact Me this way please',
+  'Send Booking Form to our Customers',
+  'Book (Move to Ozilla)',
+];
+const QUOTE_ROW_TEXT_FIELDS = [
+  'quoteDate', 'containerSize', 'firstName', 'lastName', 'companyName', 'customerEmail',
+  'customerPhone', 'moveStoreScenario', 'location', 'postalCodeSuburbFrom', 'postalCodeSuburbTo', 'interstateYn',
+  'quotingAgent', 'sidYn', 'sfpuYn', 'protectionPlanCpoCoo', 'supplies', 'discountOffered', 'typeOfBilling',
+];
+const QUOTE_ROW_NUMBER_FIELDS = [
+  'durationMonths', 'monthlyRentalRate', 'initialDeliveryFee', 'idFuelLevy', 'returnToPortaboxFee', 'wrtFuelLevy',
+  'relocationFeeMove', 'moveFuelLevy', 'interstateRelocationFee', 'interstateRelocationFuelLevy', 'redeliveryFee',
+  'redelFuelLevy', 'finalPickUpFee', 'fpuFuelLevy',
+];
+function cleanQuoteRow(raw: any, quoteNumber: string, index: number, total: number): Record<string, unknown> {
+  // One row per container: the first is the Parent row, the rest are Child rows ("2 of 3").
+  const row: Record<string, unknown> = {
+    quoteId: quoteNumber,
+    orderNumber: quoteNumber,
+    prim: index === 0 ? 'Parent' : 'Child',
+    containerNumber: `${index + 1} of ${total}`,
+  };
+  for (const key of QUOTE_ROW_TEXT_FIELDS) {
+    const v = raw?.[key];
+    if (typeof v === 'string' && v.trim()) row[key] = v.trim().slice(0, 200);
+  }
+  for (const key of QUOTE_ROW_NUMBER_FIELDS) {
+    const v = Number(raw?.[key]);
+    if (Number.isFinite(v) && v >= 0 && v <= 1_000_000) row[key] = Math.round(v * 100) / 100;
+  }
+  return row;
+}
+
+async function smartsheetColumns(sheetId: string, apiToken: string) {
+  const r = await fetch(`https://api.smartsheet.com/2.0/sheets/${sheetId}/columns?includeAll=true`, {
+    headers: { Authorization: `Bearer ${apiToken}` },
+  });
+  if (!r.ok) throw new Error(`Smartsheet columns ${r.status}`);
+  const data: any = await r.json();
+  const colMap = new Map<string, number>();
+  const colTypeMap = new Map<number, string>();
+  (data.data || []).forEach((col: any) => {
+    colMap.set(String(col.title).toLowerCase().trim(), col.id);
+    colTypeMap.set(col.id, col.type);
+  });
+  return { colMap, colTypeMap };
+}
+
+const quoteSubmitLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  limit: Number(process.env.RATE_LIMIT_QUOTE_SUBMIT_PER_10MIN ?? 20),
+  standardHeaders: 'draft-8',
+  legacyHeaders: false,
+  message: limitMessage,
+});
+
+/** Pricing the server uses for quotes: the saved admin settings for this environment, else the defaults. */
+async function serverPricingConfig() {
+  return normalizeAppConfig((await getAdminSettings()).appConfig);
+}
+
+const cleanText = (v: unknown, max: number) => (typeof v === 'string' && v.trim() ? v.trim().slice(0, max) : undefined);
+
+// A finished quote: the server prices the customer's choices itself (never trusting prices from the
+// browser), freezes them for 30 days, and adds one row per container to the quotes sheet.
+app.post('/api/public/quotes', quoteSubmitLimiter, async (req, res) => {
+  const quoteNumber = String(req.body?.quoteNumber || '');
+  if (!/^Q-\d{6,9}$/.test(quoteNumber)) return res.status(400).json({ error: 'Invalid quote number' });
+
+  let record;
+  try {
+    record = await getQuoteRecord(quoteNumber);
+  } catch (err) {
+    console.error('Quote store unavailable:', err);
+    return res.status(503).json({ error: 'Quote could not be saved' });
+  }
+  if (!record) return res.status(404).json({ error: 'Unknown quote number' });
+  if (record.status === 'booked') return res.status(409).json({ error: 'This quote is already booked' });
+
+  const inputs = cleanQuoteInputs(req.body?.inputs);
+  if (!inputs) return res.status(400).json({ error: 'Invalid quote' });
+
+  let quote;
+  let validityDays = 30;
+  try {
+    const config = await serverPricingConfig();
+    validityDays = Number(config.quoteValidityDays) || 30;
+    quote = priceQuoteInputs(inputs, config);
+  } catch (err) {
+    console.error('Quote pricing failed:', err);
+    return res.status(503).json({ error: 'Quote could not be priced' });
+  }
+
+  const c = req.body?.customer || {};
+  const customer: QuoteCustomer = {
+    name: cleanText(c.name, 80) || 'Customer',
+    companyName: cleanText(c.companyName, 120),
+    email: cleanText(c.email, 200),
+    mobile: cleanText(c.mobile, 40),
+    agentName: cleanText(c.agentName, 80),
+    channels: { email: c.channels?.email === true, sms: c.channels?.sms === true, portal: c.channels?.portal === true },
+  };
+  const sheetRows = buildQuoteSheetRows(quote, customer);
+  const rows = sheetRows.slice(0, 20).map((r: any, i: number, all: any[]) => cleanQuoteRow(r, quoteNumber, i, all.length));
+  const now = new Date().toISOString();
+  const expiresAt = addDays(now, validityDays);
+  try {
+    await saveQuoteRecord(quoteNumber, {
+      status: 'frozen',
+      submittedAt: now,
+      frozenAt: now,
+      expiresAt,
+      rows,
+      inputsJson: JSON.stringify(inputs),
+      quoteJson: JSON.stringify(quote),
+      customerName: customer.name,
+      contactEmail: customer.email ? normalizeContact(customer.email) : '',
+      contactMobile: customer.mobile ? normalizeContact(customer.mobile) : '',
+    });
+  } catch (err) {
+    console.error('Quote store unavailable:', err);
+    return res.status(503).json({ error: 'Quote could not be saved' });
+  }
+
+  // Did the browser show the same prices? If Dan changed pricing while the page was open, it didn't.
+  const shown = req.body?.shownTotals;
+  const pricesUpdated = Boolean(
+    shown &&
+      !sameTotals(quoteTotals(quote), {
+        monthlyStorageFee: Math.round(Number(shown.monthlyStorageFee) || 0),
+        currentPeriodicStorageFee: Math.round(Number(shown.currentPeriodicStorageFee) || 0),
+        firstPaymentTotal: Math.round(Number(shown.firstPaymentTotal) || 0),
+      })
+  );
+  const frozen = { saved: true, status: 'frozen', frozenAt: now, expiresAt, pricesUpdated };
+
+  const apiToken = smartsheetToken();
+  const sheetId = (process.env.SMARTSHEET_QUOTES_SHEET_ID || '3517583962886020').trim();
+  if (!apiToken) return res.json({ ...frozen, smartsheet: 'not_configured' });
+
+  const ss = (path: string, init: RequestInit = {}) =>
+    fetch(`https://api.smartsheet.com/2.0/sheets/${sheetId}${path}`, {
+      ...init,
+      headers: { Authorization: `Bearer ${apiToken}`, 'Content-Type': 'application/json', ...(init.headers || {}) },
+    });
+
+  try {
+    const { colMap, colTypeMap } = await smartsheetColumns(sheetId, apiToken);
+    // Dan's team fills these in themselves, so a new quote leaves them blank (the shared mapper would default them)
+    const leftBlank = new Set(
+      QUOTE_ROW_BLANK_COLUMNS.map((t) => colMap.get(t.toLowerCase())).filter((id): id is number => id !== undefined)
+    );
+    const cells = rows.map((row: Record<string, unknown>) =>
+      mapAppRowToSmartsheetCells(row, colMap, colTypeMap).filter((cell: any) => !leftBlank.has(cell.columnId))
+    );
+    // Same quote sent again (e.g. after an edit): update its rows, add any new containers, remove dropped ones.
+    const existing: number[] = record.smartsheetSheetId === sheetId ? record.smartsheetRowIds || [] : [];
+    const toUpdate = cells.slice(0, existing.length).map((c: any[], i: number) => ({ id: existing[i], cells: c }));
+    const toAdd = cells.slice(existing.length).map((c: any[]) => ({ toBottom: true, cells: c }));
+    const toDelete = existing.slice(cells.length);
+
+    if (toUpdate.length) {
+      const r = await ss('/rows', { method: 'PUT', body: JSON.stringify(toUpdate) });
+      if (!r.ok) throw new Error(`update ${r.status}: ${(await r.json().catch(() => ({})))?.message || ''}`);
+    }
+    let added: number[] = [];
+    if (toAdd.length) {
+      const r = await ss('/rows', { method: 'POST', body: JSON.stringify(toAdd) });
+      const data: any = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(`add ${r.status}: ${data?.message || ''}`);
+      added = (Array.isArray(data?.result) ? data.result : [data?.result]).map((x: any) => x?.id).filter(Boolean);
+    }
+    if (toDelete.length) {
+      const r = await ss(`/rows?ids=${toDelete.join(',')}`, { method: 'DELETE' });
+      if (!r.ok) console.error('Smartsheet: removing dropped container rows failed', r.status);
+    }
+    const rowIds = [...existing.slice(0, toUpdate.length), ...added];
+    await saveQuoteRecord(quoteNumber, { smartsheetRowIds: rowIds, smartsheetSheetId: sheetId });
+    return res.json({ ...frozen, smartsheet: existing.length ? 'updated' : 'added', rows: rowIds.length });
+  } catch (err) {
+    console.error('Smartsheet quote rows failed:', err);
+    return res.status(502).json({ ...frozen, smartsheet: 'failed' });
+  }
+});
+
+// ---- Frozen quotes: reopen by number, expiry after 30 days, booking at the frozen price ----
+
+/** Writes only the given sheet columns on a quote's rows (other columns are left as they are). */
+async function setQuoteSheetCells(record: QuoteRecord, values: Record<string, unknown>) {
+  const apiToken = smartsheetToken();
+  const sheetId = (process.env.SMARTSHEET_QUOTES_SHEET_ID || '3517583962886020').trim();
+  const rowIds = record.smartsheetSheetId === sheetId ? record.smartsheetRowIds || [] : [];
+  if (!apiToken || rowIds.length === 0) return;
+  try {
+    const { colMap, colTypeMap } = await smartsheetColumns(sheetId, apiToken);
+    const cells: any[] = [];
+    for (const [title, value] of Object.entries(values)) {
+      const id = colMap.get(title.toLowerCase().trim());
+      if (id === undefined || value === undefined || value === null || value === '') continue;
+      const type = colTypeMap.get(id);
+      if (type === 'DATE') {
+        const d = formatSmartsheetDate(value);
+        if (d) cells.push({ columnId: id, value: d });
+      } else {
+        cells.push({ columnId: id, value });
+      }
+    }
+    if (cells.length === 0) return;
+    const r = await fetch(`https://api.smartsheet.com/2.0/sheets/${sheetId}/rows`, {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${apiToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(rowIds.map((id) => ({ id, cells }))),
+    });
+    if (!r.ok) console.error('Smartsheet quote status update failed', r.status);
+  } catch (err) {
+    console.error('Smartsheet quote status update failed:', err);
+  }
+}
+
+/** Marks a frozen quote expired once its 30 days are up (in Firestore and the sheet). */
+async function refreshQuoteStatus(record: QuoteRecord): Promise<QuoteRecord> {
+  if (record.status !== 'frozen') return record;
+  if (currentStatus('frozen', record.expiresAt) !== 'expired') return record;
+  const expiredAt = new Date().toISOString();
+  await saveQuoteRecord(record.quoteNumber, { status: 'expired', expiredAt });
+  return { ...record, status: 'expired', expiredAt };
+}
+
+function quoteView(record: QuoteRecord) {
+  const status = record.status as FrozenQuoteStatus;
+  const parse = (t?: string) => {
+    try {
+      return t ? JSON.parse(t) : null;
+    } catch {
+      return null;
+    }
+  };
+  return {
+    quoteNumber: record.quoteNumber,
+    status,
+    statusLabel: QUOTE_STATUS_LABEL[status] || status,
+    frozenAt: record.frozenAt,
+    expiresAt: record.expiresAt,
+    bookedAt: record.bookedAt,
+    bookingFrozenUntil: record.bookingFrozenUntil,
+    quote: parse(record.quoteJson),
+    inputs: parse(record.inputsJson),
+  };
+}
+
+const isFrozenQuoteRecord = (r: QuoteRecord | null): r is QuoteRecord =>
+  Boolean(r && r.quoteJson && ['frozen', 'expired', 'booked'].includes(r.status));
+
+const quoteOpenLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  limit: Number(process.env.RATE_LIMIT_QUOTE_OPEN_PER_10MIN ?? 20),
+  standardHeaders: 'draft-8',
+  legacyHeaders: false,
+  message: limitMessage,
+});
+
+// Customer: reopen a quote with its number and the email or mobile given when quoting.
+// The same answer for "no such quote" and "details don't match", so numbers can't be probed.
+app.post('/api/public/quotes/open', quoteOpenLimiter, async (req, res) => {
+  const quoteNumber = String(req.body?.quoteNumber || '').trim().toUpperCase();
+  const contact = normalizeContact(req.body?.contact);
+  const notFound = () => res.status(404).json({ error: "We couldn't find a quote with those details" });
+  if (!/^Q-\d{6,9}$/.test(quoteNumber) || contact.length < 6) return notFound();
+  try {
+    const record = await getQuoteRecord(quoteNumber);
+    if (!isFrozenQuoteRecord(record)) return notFound();
+    const matches = (record.contactEmail && record.contactEmail === contact) || (record.contactMobile && record.contactMobile === contact);
+    if (!matches) return notFound();
+    // They've shown it's their quote, so their own name and contact go on the quote document
+    const r = await refreshQuoteStatus(record);
+    return res.json({ ...quoteView(r), customerName: r.customerName, contactEmail: r.contactEmail, contactMobile: r.contactMobile });
+  } catch (err) {
+    console.error('Quote lookup failed:', err);
+    return res.status(503).json({ error: 'Quotes are unavailable right now' });
+  }
+});
+
+// Staff: every saved quote, newest first (summary only; open one by number for the full quote).
+// Status is shown as it is now (a frozen quote past its 30 days reads Expired) without writing anything.
+app.get('/api/quotes', async (req, res) => {
+  const limit = Math.min(500, Math.max(1, Number(req.query.limit) || 200));
+  try {
+    const records = await listSavedQuotes(limit);
+    const quotes = records.filter(isFrozenQuoteRecord).map((r) => {
+      let q: any = null;
+      try {
+        q = JSON.parse(r.quoteJson || 'null');
+      } catch {
+        q = null;
+      }
+      const status = currentStatus(r.status as FrozenQuoteStatus, r.expiresAt);
+      return {
+        quoteNumber: r.quoteNumber,
+        status,
+        statusLabel: QUOTE_STATUS_LABEL[status],
+        frozenAt: r.frozenAt,
+        expiresAt: r.expiresAt,
+        bookedAt: r.bookedAt,
+        bookingFrozenUntil: r.bookingFrozenUntil,
+        customerName: r.customerName,
+        contactEmail: r.contactEmail,
+        contactMobile: r.contactMobile,
+        origin: q?.originPostcode ? `${q.originPostcode.suburb}, ${q.originPostcode.state} ${q.originPostcode.postcode}` : '',
+        destination: q?.destinationPostcode ? `${q.destinationPostcode.suburb}, ${q.destinationPostcode.state} ${q.destinationPostcode.postcode}` : '',
+        containerName: q?.containerName || '',
+        serviceType: q?.serviceType || '',
+        durationMonths: q?.storageDurationMonths || null,
+        firstPaymentTotal: typeof q?.firstPaymentTotal === 'number' ? q.firstPaymentTotal : null,
+        monthlyStorageFee: typeof q?.monthlyStorageFee === 'number' ? q.monthlyStorageFee : null,
+        followUpStatus: r.followUpStatus || 'New',
+        followUpNotes: r.followUpNotes || [],
+      };
+    });
+    res.json({ quotes });
+  } catch (err) {
+    console.error('Quote list failed:', err);
+    res.status(503).json({ error: 'Quotes are unavailable right now' });
+  }
+});
+
+// Staff: follow-up status and notes on a sent quote (Dan, 16 Nov: All Quotes is the only list).
+app.patch('/api/quotes/:quoteNumber/follow-up', requireRole(), async (req, res) => {
+  const quoteNumber = String(req.params.quoteNumber || '').trim().toUpperCase();
+  if (!/^Q-\d{6,9}$/.test(quoteNumber)) return res.status(400).json({ error: 'Invalid quote number' });
+  const update = cleanFollowUpUpdate(req.body);
+  if (!update) return res.status(400).json({ error: 'Nothing to save' });
+  try {
+    const staff = (req as any).staffUser || {};
+    const saved = await updateQuoteFollowUp(quoteNumber, update, staff.name || staff.email || 'Staff');
+    if (!saved) return res.status(404).json({ error: 'No saved quote with that number' });
+    return res.json({ quoteNumber, ...saved });
+  } catch (err) {
+    console.error('Quote follow-up failed:', err);
+    return res.status(503).json({ error: 'The follow-up could not be saved' });
+  }
+});
+
+// Staff: open any quote by number.
+app.get('/api/quotes/:quoteNumber', async (req, res) => {
+  const quoteNumber = String(req.params.quoteNumber || '').trim().toUpperCase();
+  if (!/^Q-\d{6,9}$/.test(quoteNumber)) return res.status(400).json({ error: 'Invalid quote number' });
+  try {
+    const record = await getQuoteRecord(quoteNumber);
+    if (!isFrozenQuoteRecord(record)) return res.status(404).json({ error: 'No saved quote with that number' });
+    const r = await refreshQuoteStatus(record);
+    return res.json({
+      ...quoteView(r),
+      customerName: r.customerName,
+      contactEmail: r.contactEmail,
+      contactMobile: r.contactMobile,
+      bookedBy: r.bookedBy,
+    });
+  } catch (err) {
+    console.error('Quote lookup failed:', err);
+    return res.status(503).json({ error: 'Quotes are unavailable right now' });
+  }
+});
+
+// Staff: begin a booking at the frozen quote prices. The frozen price becomes the Booking Frozen
+// Price for 12 months. Only while the quote is frozen, and only when booking is switched on.
+app.post(
+  '/api/quotes/:quoteNumber/book',
+  requireRole('manager', 'call_centre_supervisor', 'call_center', 'admin_pricing'),
+  async (req, res) => {
+    const quoteNumber = String(req.params.quoteNumber || '').trim().toUpperCase();
+    if (!/^Q-\d{6,9}$/.test(quoteNumber)) return res.status(400).json({ error: 'Invalid quote number' });
+    try {
+      const config = await serverPricingConfig();
+      if (!config.enableQuoteBooking) return res.status(403).json({ error: 'Booking is switched off' });
+      const record = await getQuoteRecord(quoteNumber);
+      if (!isFrozenQuoteRecord(record)) return res.status(404).json({ error: 'No saved quote with that number' });
+      const r = await refreshQuoteStatus(record);
+      if (r.status === 'booked') return res.status(409).json({ error: 'This quote is already booked' });
+      if (r.status === 'expired') {
+        return res.status(409).json({ error: "This quote has expired. Re-quote at today's prices first." });
+      }
+      const staff = (req as any).staffUser;
+      const bookedAt = new Date().toISOString();
+      const bookingFrozenUntil = addMonths(bookedAt, BOOKING_FREEZE_MONTHS);
+      await saveQuoteRecord(quoteNumber, { status: 'booked', bookedAt, bookedBy: staff.email, bookingFrozenUntil });
+      await setQuoteSheetCells(r, {
+        'Booking Date': bookedAt,
+        'Booking Agent': staff.name || staff.email,
+      });
+      return res.json({
+        ...quoteView({ ...r, status: 'booked', bookedAt, bookedBy: staff.email, bookingFrozenUntil }),
+        customerName: r.customerName,
+        contactEmail: r.contactEmail,
+        contactMobile: r.contactMobile,
+        bookedBy: staff.email,
+      });
+    } catch (err) {
+      console.error('Booking failed:', err);
+      return res.status(503).json({ error: 'The booking could not be saved' });
+    }
+  }
+);
+
+/** Marks every frozen quote past its 30 days as expired. */
+async function expireDueQuotes(): Promise<number> {
+  let expired = 0;
+  for (const record of await listFrozenQuotes()) {
+    const r = await refreshQuoteStatus(record);
+    if (r.status === 'expired') expired += 1;
+  }
+  return expired;
+}
+
+// Staff (or a scheduled job signed in as staff) can run the expiry check on demand.
+app.post('/api/quotes/expire-due', requireRole('manager', 'admin_pricing'), async (_req, res) => {
+  try {
+    res.json({ expired: await expireDueQuotes() });
+  } catch (err) {
+    console.error('Quote expiry check failed:', err);
+    res.status(503).json({ error: 'Expiry check failed' });
+  }
+});
+
+// Also checked hourly while the server runs, and whenever a quote is opened.
+const runExpiry = () => expireDueQuotes().catch((err) => console.error('Quote expiry check failed:', err));
+setTimeout(runExpiry, 60 * 1000).unref?.();
+setInterval(runExpiry, 60 * 60 * 1000).unref?.();
+
 // Update a single cell or row in Smartsheet
 app.post('/api/smartsheet/update-row', async (req, res) => {
-  const apiToken = (req.body.apiToken || 'F3CVVuJ7Gh8ozrm11WDnIsTL1ZYpRKADmNtAX').trim();
+  const apiToken = smartsheetToken();
+  if (!apiToken) return res.status(503).json({ success: false, error: SMARTSHEET_NOT_CONFIGURED });
   const targetSheetId = req.body.sheetId || '3517583962886020';
   const { rowId, updates } = req.body;
 
@@ -835,6 +1488,7 @@ app.post('/api/sms/send', async (req, res) => {
     res.json({ success: true, sid });
   } catch (error: any) {
     console.error('Failed to send SMS endpoint error:', error);
+    if (IS_PRODUCTION) return res.status(502).json({ success: false, error: error?.message || 'SMS not sent.' });
     res.json({ success: true, sid: `SM_FALLBACK_${Date.now()}`, simulated: true });
   }
 });
@@ -849,15 +1503,19 @@ app.post('/api/sms/inbound', async (req, res) => {
   }
 });
 
+// Production never pretends a text was sent.
+const smsNotSent = (res: express.Response, error: string) =>
+  res.status(502).json({ success: false, status: 'NOT_SENT', error: `SMS not sent: ${error}` });
+
 // ClickSend Australian SMS Proxy Endpoint
 app.post('/api/clicksend/sms/send', async (req, res) => {
-  const { to, message, from = 'Portabox', username, apiKey, contactId, customString } = req.body;
+  const { to, message, from = 'Portabox', contactId, customString } = req.body;
   if (!to || !message) {
     return res.status(400).json({ success: false, error: 'Recipient phone number (to) and message are required' });
   }
 
-  const clicksendUser = username || process.env.CLICKSEND_USERNAME;
-  const clicksendKey = apiKey || process.env.CLICKSEND_API_KEY;
+  const clicksendUser = process.env.CLICKSEND_USERNAME; // credentials are server-side only
+  const clicksendKey = process.env.CLICKSEND_API_KEY;
 
   if (clicksendUser && clicksendKey) {
     try {
@@ -894,6 +1552,7 @@ app.post('/api/clicksend/sms/send', async (req, res) => {
         });
       } else {
         console.warn('[ClickSend API returned non-success]', data?.response_msg || data);
+        if (IS_PRODUCTION) return smsNotSent(res, `ClickSend refused the message: ${data?.response_msg || 'unknown error'}`);
         return res.json({
           success: true,
           messageId: `CS_SIM_${Date.now()}`,
@@ -904,6 +1563,7 @@ app.post('/api/clicksend/sms/send', async (req, res) => {
       }
     } catch (err: any) {
       console.error('[ClickSend Network Error]', err.message);
+      if (IS_PRODUCTION) return smsNotSent(res, 'Could not reach ClickSend.');
       return res.json({
         success: true,
         messageId: `CS_SIM_${Date.now()}`,
@@ -913,7 +1573,8 @@ app.post('/api/clicksend/sms/send', async (req, res) => {
       });
     }
   } else {
-    console.log(`[ClickSend Sandbox/Simulated] To: ${to} | From: ${from} | Msg: "${message.slice(0, 50)}..."`);
+    if (IS_PRODUCTION) return smsNotSent(res, 'ClickSend is not configured on the server.');
+    console.log(`[ClickSend Sandbox/Simulated] To: ${to} | From: ${from} (${message.length} chars)`);
     return res.json({
       success: true,
       messageId: `CS_SIM_${Date.now()}`,
@@ -926,8 +1587,8 @@ app.post('/api/clicksend/sms/send', async (req, res) => {
 
 // ClickSend Account Balance Query Endpoint
 app.get('/api/clicksend/account', async (req, res) => {
-  const username = (req.query.username as string) || process.env.CLICKSEND_USERNAME;
-  const apiKey = (req.query.apiKey as string) || process.env.CLICKSEND_API_KEY;
+  const username = process.env.CLICKSEND_USERNAME; // credentials are server-side only
+  const apiKey = process.env.CLICKSEND_API_KEY;
 
   if (!username || !apiKey) {
     return res.json({ configured: false, balance: 0, currency: 'AUD' });

@@ -1,6 +1,7 @@
 import { TranscriptTurn, StreamActionItem, StreamSummaryData, TwilioStreamPreset } from '../types/twilioStream';
 import { CustomerAccount, loadCustomerAccounts } from './customerPortalService';
 import { TelephonyCall, getActiveCall, loadTelephonyCalls, saveTelephonyCalls, notifyTelephonyUpdate } from './telephonyService';
+import { apiFetch } from './apiClient';
 
 const STREAM_STORAGE_PREFIX = 'portabox_stream_summary_';
 const ACTIVE_STREAM_KEY = 'portabox_active_stream_session';
@@ -914,7 +915,7 @@ export async function generateAiSummaryForTranscript(
   customerInfo?: { name: string; email?: string; phone?: string; orders?: any[] }
 ): Promise<Partial<StreamSummaryData>> {
   try {
-    const response = await fetch('/api/twilio/summarize', {
+    const response = await apiFetch('/api/twilio/summarize', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({

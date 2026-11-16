@@ -311,9 +311,17 @@ fix(
 fix(
   'firebase service: config from the environment, and never throw at import',
   'src/services/firebaseService.ts',
-  (s) => !/AIza[A-Za-z0-9_-]{20,}/.test(s) && /hasFirebaseConfig/.test(s),
+  /* signedOutAuth, not just hasFirebaseConfig: an older version of this fix
+     produced the latter without the former, and that combination is the one
+     that takes the public page down. */
+  (s) => !/AIza[A-Za-z0-9_-]{20,}/.test(s) && /signedOutAuth/.test(s),
   (s) => s.replace(
-    /const firebaseConfig = \{[\s\S]*?\};\s*\n+const app = !getApps\(\)\.length \? initializeApp\(firebaseConfig\) : getApps\(\)\[0\];\s*\nexport const db = getFirestore\(app\);\s*\nexport const auth = getAuth\(app\);/,
+    /* The whole span from the config literal to the auth export, rather
+       than each line. Upstream rearranges the middle of this block most
+       drops — it has gained a Firestore database id and a Microsoft
+       provider since this was written — and matching the ends survives
+       that where matching every line did not. */
+    /const firebaseConfig = \{[\s\S]*?export const auth = getAuth\(app\);/,
     `/**\n` +
     ` * Shipped with the original developer's own Firebase project hardcoded,\n` +
     ` * key and all. Two problems: the credentials are not Portabox's, and\n` +
@@ -349,20 +357,70 @@ fix(
     `  ? (!getApps().length ? initializeApp(firebaseConfig) : getApps()[0])\n` +
     `  : null;\n\n` +
     `/* Asserted rather than typed as nullable on purpose. Around sixty call\n` +
-    `   sites across seven admin services take db and auth as given, and they\n` +
-    `   are upstream's files — widening the type here would mean editing every\n` +
-    `   one of them and re-doing it on each drop. The runtime behaviour is the\n` +
-    `   same either way: unconfigured, a call throws where it is made, so the\n` +
-    `   admin feature fails and the quote flow, which never imports this, does\n` +
-    `   not. Guard with hasFirebaseConfig before reaching for either. */\n` +
-    `export const db = (app ? getFirestore(app) : null) as Firestore;\n` +
-    `export const auth = (app ? getAuth(app) : null) as Auth;`
+    `   sites across seven admin services take db as given, and they are\n` +
+    `   upstream's files — widening the type here would mean editing every one\n` +
+    `   of them and re-doing it on each drop. Unconfigured, a call throws where\n` +
+    `   it is made, so the admin feature fails rather than the page. Guard with\n` +
+    `   hasFirebaseConfig before reaching for it. */\n` +
+    `/* Upstream's own choice of database, kept: "(default)" in production,\n` +
+    `   "staging" otherwise, so local work never reads or writes production\n` +
+    `   data. Only the guard against an uninitialised app is added. */\n` +
+    `const firestoreDatabaseId =\n` +
+    `  envVar('VITE_FIRESTORE_DATABASE_ID') ||\n` +
+    `  (typeof process !== 'undefined' ? process.env?.FIRESTORE_DATABASE_ID : '') ||\n` +
+    `  'staging';\n\n` +
+    `export const db = (\n` +
+    `  app\n` +
+    `    ? firestoreDatabaseId === '(default)'\n` +
+    `      ? getFirestore(app)\n` +
+    `      : getFirestore(app, firestoreDatabaseId)\n` +
+    `    : null\n` +
+    `) as Firestore;\n\n` +
+    `/* auth cannot be null, and that is not a style preference.\n` +
+    `   App.tsx calls onAuthStateChanged(auth, ...) as the component mounts,\n` +
+    `   so this module is now reached by the public quote flow and not only by\n` +
+    `   the admin screens. With no Firebase project configured, a null here\n` +
+    `   threw before React rendered anything: blank page, no quote form,\n` +
+    `   nothing — for every customer, not just staff.\n` +
+    `\n` +
+    `   An earlier version of this comment said the quote flow never imported\n` +
+    `   this module. That was true until the drop that moved staff login into\n` +
+    `   Firebase, and it is the assumption that broke.\n` +
+    `\n` +
+    `   So unconfigured, auth is a stand-in that answers exactly one question —\n` +
+    `   "is anyone signed in?" — with "no", and does nothing else. Any real\n` +
+    `   authentication still fails at the point of use, which is where it\n` +
+    `   should: this keeps the page up, it does not pretend to log anyone in. */\n` +
+    `const reportSignedOut = (next: unknown) => {\n` +
+    `  const cb =\n` +
+    `    typeof next === 'function'\n` +
+    `      ? (next as (u: null) => void)\n` +
+    `      : (next as { next?: (u: null) => void } | null)?.next;\n` +
+    `  if (typeof cb === 'function') cb(null);\n` +
+    `  return () => {};\n` +
+    `};\n\n` +
+    `const signedOutAuth = {\n` +
+    `  currentUser: null,\n` +
+    `  onAuthStateChanged: reportSignedOut,\n` +
+    `  onIdTokenChanged: reportSignedOut,\n` +
+    `  beforeAuthStateChanged: () => () => {},\n` +
+    `  signOut: async () => {},\n` +
+    `};\n\n` +
+    `export const auth = (app ? getAuth(app) : signedOutAuth) as unknown as Auth;`
+  /* The type-only imports are added to whatever upstream's import line
+     already names, rather than by matching the exact list. That list
+     changes — OAuthProvider arrived with Microsoft sign-in — and a literal
+     match silently stopped adding the types. */
   ).replace(
-    /^import \{ getFirestore \} from 'firebase\/firestore';$/m,
-    `import { getFirestore, type Firestore } from 'firebase/firestore';`
+    /^import \{([^}]*)\} from 'firebase\/firestore';$/m,
+    (m, names) => names.includes('Firestore,') || /\bFirestore\b/.test(names.replace('getFirestore', ''))
+      ? m
+      : `import { ${names.trim()}, type Firestore } from 'firebase/firestore';`
   ).replace(
-    /^import \{ getAuth, signInWithPopup, GoogleAuthProvider, User \} from 'firebase\/auth';$/m,
-    `import { getAuth, signInWithPopup, GoogleAuthProvider, type Auth, User } from 'firebase/auth';`
+    /^import \{([^}]*)\} from 'firebase\/auth';$/m,
+    (m, names) => /\btype Auth\b/.test(names)
+      ? m
+      : `import { ${names.trim()}, type Auth } from 'firebase/auth';`
   )
 );
 
@@ -476,23 +534,22 @@ fix(
 /* -- 14. the driver portal ----------------------------------------------
    The third staff surface, and the last one that was still open.
 
-   This drop is an improvement on what came before: the header's driver
-   button now calls handleOpenStaffLogin('driver') when there is no staff
-   session, so the portal is no longer reachable in one click from a cold
-   browser. But the login it opens is decided in the browser. Six staff
-   records in src/services/adminAuthService.ts carry the password
-   'Portabox2026!' in the shipped bundle, and verifyStaffMfaCode returns
-   true for '123456', '849201' and '000000' regardless of who is signing
-   in. Inside the portal the driver PIN check also accepts '0000', and the
-   failure message prints the fallback on screen: "Try quick 1-click driver
-   login below or PIN 1234."
+   Written when the staff session was UI state rather than a credential:
+   six staff records carried the password 'Portabox2026!' in the shipped
+   bundle, verifyStaffMfaCode returned true for '123456', '849201' and
+   '000000' for anyone, and inside the portal the driver PIN check accepted
+   '0000' with the failure message printing the fallback on screen. Anyone
+   who read the public JavaScript could mint a session.
 
-   So the staff session is a UI state, not a credential — anyone who reads
-   the public JavaScript can mint one. The portal holds the day's job list
-   with customer names and delivery addresses, so it goes behind the same
-   server-checked gate as the admin portal and the dispatch console. The
-   gate's own copy has said "admin, dispatch and driver tools" since it was
-   written; this is the part that makes that true.
+   Upstream has since closed that: sign-in is a Firebase email link checked
+   on the server, the passwords and the universal codes are gone from the
+   bundle, and a session with no Firebase identity behind it is discarded.
+
+   The gate stays anyway. The portal holds the day's job list with customer
+   names and delivery addresses, it costs nothing to ask for a password the
+   server checks, and upstream's guarantees are only as old as the most
+   recent drop. The gate's own copy has said "admin, dispatch and driver
+   tools" since it was written; this is the part that makes that true.
 
    Rendered as an overlay rather than inline, because unlike the other two
    this is a modal that sits beside the quote flow rather than replacing
@@ -541,10 +598,12 @@ fix(
    This drop put the bar behind a feature flag and a permission check:
    config.enableSoftphone && staffSession && hasStaffPermission(user,
    'softphone_telephony'). The flag ships off, so nothing renders on the
-   live deployment today. But staffSession is browser state — see fix 14 —
-   so the day the CEO screen turns the flag on, anyone who read the bundle
-   can mint a session and get a live dialler on the business's Twilio
-   account. Outbound calls are billed to the client.
+   live deployment today. When this was written staffSession was browser
+   state anyone could mint — see fix 14 — so turning the flag on would have
+   handed a live dialler on the business's Twilio account to whoever asked.
+   Upstream has since closed that route, but the reasoning for the gate
+   survives it: outbound calls are billed to the client, so this is the one
+   surface where being wrong costs money rather than only exposing data.
 
    Not AdminGate: the bar is pinned beside the quote flow rather than
    replacing it, so a sign-in form here would be a password box floating
@@ -580,6 +639,37 @@ fix(
     if (!anchor.test(out)) throw new Error('the AdminGate import is not there to anchor to');
     return out.replace(anchor, `$1\nimport { StaffOnly } from './components/StaffOnly';`);
   }
+);
+
+/* -- 16. upstream's Cloud Run deploy config ------------------------------
+   The drop that split upstream's own staging from production added
+   deploy/*.env.yaml, and deploy/staging.env.yaml carries a live Google
+   Maps browser key.
+
+   Upstream's comment argues it is fine — a browser key ships in every page
+   anyway, and theirs is restricted by HTTP referrer in Google Cloud. In
+   their repository that holds: it is private. Ours is public, and a key
+   committed to a public repository is scraped within minutes and has to be
+   rotated rather than merely deleted. Three Google keys are already in this
+   history for exactly that reason.
+
+   So the value is replaced with a placeholder. The file is kept rather than
+   dropped: it is how upstream deploys, it documents their environment
+   split, and quietly discarding whole directories is how you stop noticing
+   what a drop contains.
+
+   Only the key is touched. The Smartsheet sheet ids, project ids and URLs
+   in these files are identifiers rather than credentials — they open
+   nothing without a token, and the tokens live in Secret Manager, which
+   deploy/*.secrets maps by name only. */
+fix(
+  'deploy config: placeholder the live Maps key in upstream\'s Cloud Run env',
+  'deploy/staging.env.yaml',
+  (s) => !/AIza[A-Za-z0-9_-]{30,}/.test(s),
+  (s) => s.replace(
+    /AIza[A-Za-z0-9_-]{30,}/g,
+    'REPLACE-WITH-REFERRER-RESTRICTED-MAPS-BROWSER-KEY'
+  )
 );
 
 /* -- report --------------------------------------------------------------- */

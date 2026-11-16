@@ -18,7 +18,7 @@ import { PostcodeRecord } from '../data/australianPostcodes';
 import { AppConfig, ContainerSizeId, ServiceType } from '../types/quote';
 import {
   getInterstateRatesForRoute,
-  getLocationPricingForHub,
+  getContainerRentalPrices,
   getMetroHubForPostcode,
 } from '../services/pricingEngine';
 import { formatMoney } from '../utils/currency';
@@ -61,7 +61,7 @@ const CONTAINER_DETAILS: ContainerDetail[] = [
     subtitle: '10 m³ capacity',
     idealFor: '1 bedroom, home renovation, or decluttering',
     dimensions: '2.1m (L) × 2.1m (W) × 2.4m (H)',
-    image: '/assets/aistudio/portabox-small-storage-container-couple-with-coffee_db26ca9d.jpeg',
+    image: '/images/containers/portabox-small-storage-container-couple-with-coffee_db26ca9d.jpeg',
   },
   {
     id: 'medium_19m3',
@@ -70,7 +70,7 @@ const CONTAINER_DETAILS: ContainerDetail[] = [
     subtitle: '19 m³ capacity',
     idealFor: '2 bedroom home',
     dimensions: '3.6m (L) × 2.4m (W) × 2.4m (H)',
-    image: '/assets/aistudio/portabox-storage-container-couple-home-driveway_cda49232.png',
+    image: '/images/containers/portabox-storage-container-couple-home-driveway_cda49232.png',
     imageClassName: 'scale-[1.42] origin-[50%_58%] group-hover:scale-[1.48]',
   },
   {
@@ -80,9 +80,12 @@ const CONTAINER_DETAILS: ContainerDetail[] = [
     subtitle: '25 m³ capacity',
     idealFor: '3 bedroom home',
     dimensions: '4.8m (L) × 2.4m (W) × 2.4m (H)',
-    image: '/assets/aistudio/portabox-melbourne-home-storage-container-packed-boxes-square_b7997913.jpeg',
+    image: '/images/containers/portabox-melbourne-home-storage-container-packed-boxes-square_b7997913.jpeg',
   },
 ];
+
+/** Dan: quantity counters run 0-5 per container size. */
+export const MAX_CONTAINERS_PER_SIZE = 5;
 
 export const Step3Size: React.FC<Step3SizeProps> = ({
   originPostcode,
@@ -114,15 +117,18 @@ export const Step3Size: React.FC<Step3SizeProps> = ({
     ? getInterstateRatesForRoute(config, interstateRouteKey)
     : null;
 
-  const locPricing = getLocationPricingForHub(config, activeHub);
   const isOnsite = serviceType === 'storage_at_place' || storagePlacement === 'my_place';
-  const locPrices = isOnsite
-    ? (locPricing.onsiteContainerPrices || config.onsiteContainerPrices || {
-        small_10m3: { monthlyRate: 149, weeklyRate: 49 },
-        medium_19m3: { monthlyRate: 169, weeklyRate: 59 },
-        large_25m3: { monthlyRate: 179, weeklyRate: 65 },
-      })
-    : locPricing.containerPrices;
+  // Interstate jobs use the origin depot's interstate rental rate (same rule as calculateQuote)
+  const locPrices = getContainerRentalPrices(config, activeHub, { isOnsite, isInterstate: isInterstateMove, serviceType });
+  // Label matches the rate table getContainerRentalPrices picked
+  const isDirectLocalMove = serviceType === 'moving' && !isInterstateMove;
+  const rateLabel = isOnsite
+    ? 'Onsite Storage'
+    : isInterstateMove
+    ? `${activeHub} Interstate Rate`
+    : isDirectLocalMove
+    ? 'Local Move (Onsite Rate)'
+    : 'Facility Storage';
 
   // Calculate totals across all container selections
   const smallCount = containerSelections.small_10m3 || 0;
@@ -131,22 +137,32 @@ export const Step3Size: React.FC<Step3SizeProps> = ({
   const totalContainerCount = smallCount + mediumCount + largeCount;
   const totalM3Selected = (smallCount * 10) + (mediumCount * 19) + (largeCount * 25);
 
+  // Every container-count update goes through here so no size can exceed the per-size limit,
+  // whether it comes from the +/- stepper, a card click or the space calculator.
+  const updateSelections = (selections: typeof containerSelections) => {
+    const clamped = { ...selections };
+    (Object.keys(clamped) as ContainerSizeId[]).forEach((id) => {
+      clamped[id] = Math.min(MAX_CONTAINERS_PER_SIZE, Math.max(0, clamped[id] || 0));
+    });
+    onUpdateContainerSelections(clamped);
+  };
+
   const handleContainerIncrement = (sizeId: ContainerSizeId) => {
-    const updated = {
+    const currentVal = containerSelections[sizeId] || 0;
+    if (currentVal >= MAX_CONTAINERS_PER_SIZE) return;
+    updateSelections({
       ...containerSelections,
-      [sizeId]: (containerSelections[sizeId] || 0) + 1,
-    };
-    onUpdateContainerSelections(updated);
+      [sizeId]: currentVal + 1,
+    });
   };
 
   const handleContainerDecrement = (sizeId: ContainerSizeId) => {
     const currentVal = containerSelections[sizeId] || 0;
     if (currentVal <= 0) return;
-    const updated = {
+    updateSelections({
       ...containerSelections,
       [sizeId]: Math.max(0, currentVal - 1),
-    };
-    onUpdateContainerSelections(updated);
+    });
   };
 
   const handleClearSelections = () => {
@@ -250,7 +266,7 @@ export const Step3Size: React.FC<Step3SizeProps> = ({
                 <div className="mt-3 pt-3 border-t border-slate-100 flex items-baseline justify-between">
                   <div>
                     <span className="text-xs font-bold text-slate-400 block">
-                      {isOnsite ? 'Onsite Storage' : 'Facility Storage'}
+                      {rateLabel}
                     </span>
                     <span className="text-base sm:text-lg font-black text-[#15385E]">
                       ${formatMoney(priceConfig.monthlyRate)}
@@ -305,8 +321,14 @@ export const Step3Size: React.FC<Step3SizeProps> = ({
                       e.stopPropagation();
                       handleContainerIncrement(sizeId);
                     }}
+                    disabled={count >= MAX_CONTAINERS_PER_SIZE}
                     aria-label={`Increase ${detail.name} quantity`}
-                    className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg bg-white hover:bg-[#5CC1EF] hover:text-[#15385E] text-[#15385E] shadow-2xs flex items-center justify-center font-bold text-xs sm:text-sm transition-all cursor-pointer active:scale-95"
+                    title={count >= MAX_CONTAINERS_PER_SIZE ? `Maximum ${MAX_CONTAINERS_PER_SIZE} per size` : undefined}
+                    className={`w-7 h-7 sm:w-8 sm:h-8 rounded-lg flex items-center justify-center font-bold text-xs sm:text-sm transition-all ${
+                      count < MAX_CONTAINERS_PER_SIZE
+                        ? 'bg-white hover:bg-[#5CC1EF] hover:text-[#15385E] text-[#15385E] shadow-2xs cursor-pointer active:scale-95'
+                        : 'bg-transparent text-slate-300 cursor-not-allowed'
+                    }`}
                   >
                     <Plus className="w-3.5 h-3.5" />
                   </button>
@@ -383,7 +405,7 @@ export const Step3Size: React.FC<Step3SizeProps> = ({
               </h2>
               <p className="text-xs sm:text-sm text-slate-600 max-w-2xl leading-relaxed">
                 Take the guesswork out of sizing.<br />
-                Add your furniture and boxes room by room, and watch your container recommendation adjust in real time. You get the exact space you need.
+                Add your furniture and boxes room by room, and watch your container recommendation adjust in real time.
               </p>
             </div>
           </div>
@@ -424,19 +446,18 @@ export const Step3Size: React.FC<Step3SizeProps> = ({
           <span>Previous</span>
         </button>
 
+        {totalContainerCount === 0 && (
+          <span className="text-xs font-bold text-slate-500 ml-auto mr-3">Choose at least one container to continue</span>
+        )}
         <button
           type="button"
+          disabled={totalContainerCount === 0}
           onClick={() => {
-            if (totalContainerCount === 0) {
-              // Default to 1x 25m3 if nothing selected
-              onUpdateContainerSelections({
-                ...containerSelections,
-                large_25m3: 1,
-              });
-            }
+            // Nothing is pre-selected (Dan 16 Nov), so the customer must pick at least one container
+            if (totalContainerCount === 0) return;
             onContinue();
           }}
-          className="px-8 py-3.5 bg-[#F7D347] hover:bg-[#eed235] text-[#1A1A1A] font-black text-sm rounded-2xl shadow-xs border border-[#e6c338] transition-all cursor-pointer active:scale-98 flex items-center gap-2"
+          className="px-8 py-3.5 bg-[#F7D347] hover:bg-[#eed235] disabled:opacity-50 disabled:cursor-not-allowed text-[#1A1A1A] font-black text-sm rounded-2xl shadow-xs border border-[#e6c338] transition-all cursor-pointer active:scale-98 flex items-center gap-2"
         >
           <span>Continue</span>
           <ArrowRight className="w-4 h-4 stroke-[3] text-[#1A1A1A]" />
@@ -447,9 +468,9 @@ export const Step3Size: React.FC<Step3SizeProps> = ({
       <SpaceCalculatorModal
         isOpen={isCalculatorOpen}
         onClose={() => setIsCalculatorOpen(false)}
-        onUpdateContainerSelections={onUpdateContainerSelections}
+        onUpdateContainerSelections={updateSelections}
         onSelectSize={(size, count) => {
-          onUpdateContainerSelections({
+          updateSelections({
             ...containerSelections,
             [size]: count || 1,
           });

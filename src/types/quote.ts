@@ -114,6 +114,13 @@ export interface LocationPricingConfig {
     medium_19m3: ContainerPriceConfig;
     large_25m3: ContainerPriceConfig;
   };
+  // Container rental for interstate jobs that START at this depot. The origin depot's rate applies for the
+  // whole job, wherever the container ends up. Falls back to this depot's facility rates when not set.
+  interstateContainerPrices?: {
+    small_10m3: ContainerPriceConfig;
+    medium_19m3: ContainerPriceConfig;
+    large_25m3: ContainerPriceConfig;
+  };
   deliveryZones: DeliveryZoneSettings;
 }
 
@@ -136,7 +143,8 @@ export interface PackingSuppliesConfig {
   isLockFreePromo?: boolean; // admin incentive toggle (free padlock with container rental)
 }
 
-export type ProtectionPlanType = 'cpo' | 'coo' | 'none';
+// 'cpo_coo' = both: CPO covers contents, COO covers the container. They stack.
+export type ProtectionPlanType = 'cpo' | 'coo' | 'cpo_coo' | 'none';
 
 export interface ContainerInsuranceConfig {
   enabled: boolean;
@@ -171,6 +179,11 @@ export interface InterstateRoutePricing {
   small_10m3: number;
   medium_19m3: number;
   large_25m3: number;
+}
+
+export interface UpfrontDiscountSettings {
+  sixMonthsPercent: number; // default 5
+  twelveMonthsPercent: number; // default 10
 }
 
 export type AnnualMilestoneOption = '400A' | '400B';
@@ -253,6 +266,7 @@ export interface AppConfig {
   promotions: PromotionRule[];
   durationDiscounts?: DurationDiscountTier[];
   discountMatrixRules?: DiscountMatrixRule[];
+  upfrontDiscounts?: UpfrontDiscountSettings; // CEO-editable prepayment discounts (default 5% / 10%)
   blockedPostcodes: BlockedPostcode[];
   depotCalendars?: Record<string, DepotCalendarConfig>;
   braintreeMerchantId?: string;
@@ -283,7 +297,10 @@ export interface AppConfig {
   enableDrivewayFitGuarantee?: boolean; // Feature flag: 100% Driveway Fit Guarantee & assessment process
   enableGoogleCalendarLink?: boolean; // Feature flag: Google Calendar availability & slot integrations in customer flow (default off)
   enableMovingCartons?: boolean; // Feature flag: Portabox moving cartons & boxes (default: false, Portabox does not provide cartons currently)
+  enableQuoteBooking?: boolean; // Feature flag: staff can begin a booking from a frozen quote (default: false)
   enableNextStepsFlow?: boolean; // Feature flag: Post-quote Next Steps & self-booking flow (default: false)
+  enableLivePhoneQuoteSimulator?: boolean; // Feature flag: Live Phone Quote Simulator panel on the Price Matrix page (default: false)
+  enableEarlyTerminationClawback?: boolean; // Feature flag: Early Termination Clawback Engine panel in the Duration & Discount Matrix (default: false)
   quoteValidityDays?: number; // Exactly 30 calendar days
   rateLockDurationMonths?: number; // Mandatory 12-month freeze
   annualPriceAdjustmentCapPercent?: number; // Default 10%
@@ -355,6 +372,18 @@ export interface PackingSuppliesOrder {
   totalSuppliesPrice: number;
 }
 
+/** Storage discount for one container size on a booking (e.g. 2 × 25 m³ Large). */
+export interface SizeDiscountLine {
+  sizeId: 'small_10m3' | 'medium_19m3' | 'large_25m3';
+  label: string; // e.g. "25 m³ Large"
+  count: number;
+  listMonthlyRate: number; // all containers of this size, before discounts
+  durationDiscountPercent: number;
+  durationDiscountMonthly: number; // $ off per month for all containers of this size
+  firstMonthFree: boolean;
+  hasDiscount: boolean;
+}
+
 export interface QuoteBreakdown {
   containerSize: ContainerSizeId;
   containerCount: number;
@@ -378,6 +407,7 @@ export interface QuoteBreakdown {
   billingCycleSavingsText?: string;
   upfrontMonths?: number;
   upfrontDiscountPercent?: number;
+  storageDurationMonths?: number; // months picked (block start, e.g. 6 for 6–8)
   storageDuration: StorageDuration;
   preferredDate: string;
   
@@ -389,6 +419,7 @@ export interface QuoteBreakdown {
   deliveryZoneRangeLabel?: string; // e.g. '< 25 km'
   
   movingDistanceKm?: number; // Road driving distance between origin and destination
+  moveRouteKm?: number; // Local move charged on depot -> origin -> destination km (Dan, 16 Nov)
   movingDeliveryZone?: string | number;
   movingDeliveryZoneRangeLabel?: string;
   movingKmCharge?: number;
@@ -441,6 +472,9 @@ export interface QuoteBreakdown {
   destinationLogisticsMethod?: LogisticsMethod;
   legsSavedCount?: number;
   legsSavedDollarTotal?: number;
+  savingsBreakdown?: { label: string; amount: number }[]; // Itemised real savings on this booking
+  discountBreakdownBySize?: SizeDiscountLine[]; // Storage discounts per container size (10 m³ shows "No discount")
+  totalSavings?: number; // Sum of savingsBreakdown
   totalLegsCount?: number;
   requiredAddressesCount?: number;
   initialDeliveryFee: number;
@@ -448,6 +482,12 @@ export interface QuoteBreakdown {
   monthlyStorageFee: number;
   weeklyStorageFee: number;
   currentPeriodicStorageFee: number;
+  firstPaymentStorageFee?: number; // storage rental inside the first payment (after 1st month free; the prepaid amount for upfront billing)
+  firstPaymentDiscount?: number; // promotions taken off the first payment
+  /** Dan (16 Nov): upfront % taken off the initial delivery + fuel levy (6 / 12 months upfront). */
+  upfrontDeliveryDiscount?: number;
+  /** Milestone credit taken off the prepaid storage rental (6 / 12 months upfront). */
+  upfrontMilestoneCredit?: number;
   collectionFeeEstimate: number;
   
   durationDiscountPercent?: number;
@@ -512,6 +552,8 @@ export interface QuoteBreakdown {
 export interface CustomerLead {
   id: string;
   createdAt: string;
+  /** Server quote number; one lead per number (a resend replaces it). */
+  quoteNumber?: string;
   firstName: string;
   lastName?: string;
   companyName?: string;

@@ -1,4 +1,7 @@
-import React from 'react';
+import React, { useState } from 'react';
+import { AdminSettingsSyncBadge } from './AdminSettingsSyncBadge';
+import { AdminSettingsHistoryModal } from './AdminSettingsHistoryModal';
+import { History } from 'lucide-react';
 import {
   X,
   Plus,
@@ -70,6 +73,7 @@ export const AdminWorkspaceTabs: React.FC<AdminWorkspaceTabsProps> = ({
   onNavigateToQuote,
   onOpenSmsModal,
 }) => {
+  const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   return (
     <div className="bg-[#081e30] text-white border-b border-slate-800 flex flex-col shrink-0">
       {/* Top utility row: Global search, View switcher, Phone intake, Save, Back */}
@@ -133,6 +137,19 @@ export const AdminWorkspaceTabs: React.FC<AdminWorkspaceTabsProps> = ({
               <span>Phone Intake</span>
             </button>
           )}
+
+          <AdminSettingsSyncBadge />
+
+          <button
+            type="button"
+            onClick={() => setIsHistoryOpen(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-slate-600 text-slate-200 hover:bg-slate-800 font-bold text-xs cursor-pointer"
+            title="Every save of the pricing settings, with Restore"
+          >
+            <History className="w-3.5 h-3.5" />
+            <span>History</span>
+          </button>
+          {isHistoryOpen && <AdminSettingsHistoryModal onClose={() => setIsHistoryOpen(false)} />}
 
           {saveSuccess && (
             <span className="hidden sm:flex items-center gap-1.5 text-xs font-bold text-emerald-400 bg-emerald-950/90 border border-emerald-800 px-2.5 py-1 rounded-lg">

@@ -159,7 +159,10 @@ export function evaluatePostcodeServiceTier(
     };
   }
 
-  const isInsideServicedState = (validStates as string[]).includes(record.state);
+  // ACT is serviced from the Sydney depot, so it counts as inside NSW coverage
+  const isInsideServicedState =
+    (validStates as string[]).includes(record.state) ||
+    (record.state === 'ACT' && (validStates as string[]).includes('NSW'));
   const isWithin200Km = distanceKm <= maxKm;
 
   // d) Tier 3 - all other postcodes in other states and territories - we do not service your location -

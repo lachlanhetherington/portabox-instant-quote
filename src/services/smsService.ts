@@ -86,10 +86,14 @@ export const sendSms = async (contactId: string, to: string, message: string): P
       console.log(`[Twilio SMS Sent] To: ${formattedTo} (SID: ${messageSid})`);
     }
 
-    // 3. Fallback to realistic simulation if no active live keys
+    // 3. No provider sent it. Outside production, pretend (for demos and testing);
+    //    in production, fail so staff see the text didn't go.
     if (providerUsed === 'simulated') {
+      if (process.env.APP_ENV === 'production') {
+        throw new SmsNotSentError('SMS not sent: no SMS provider is configured, or the provider refused it.');
+      }
       messageSid = `SM_SIM_${Date.now()}`;
-      console.log(`[SMS Gateway Simulated] To: ${formattedTo} | Message: "${message}" (ID: ${messageSid})`);
+      console.log(`[SMS Gateway Simulated] To: ${formattedTo} (${message.length} chars, ID: ${messageSid})`);
     }
 
     // Log outbound message to Firestore (non-blocking)
@@ -116,10 +120,16 @@ export const sendSms = async (contactId: string, to: string, message: string): P
     return messageSid;
   } catch (error) {
     console.error('Error sending SMS:', error);
+    if (process.env.APP_ENV === 'production') {
+      throw error instanceof SmsNotSentError ? error : new SmsNotSentError('SMS not sent: the SMS provider returned an error.');
+    }
     console.warn(`Falling back to simulated SMS dispatch for ${formattedTo}`);
     return `SM_FALLBACK_${Date.now()}`;
   }
 };
+
+/** Thrown in production when a text could not actually be sent. */
+export class SmsNotSentError extends Error {}
 
 export const logInboundSms = async (contactId: string, from: string, body: string): Promise<void> => {
   const { twilioPhoneNumber } = getTwilioConfig();

@@ -45,12 +45,21 @@ if (end <= start) throw new Error('the route body markers are out of order');
 
 /* One level of indentation comes off, since the body was inside
    createServer() and is now inside registerApiRoutes(). Blank lines stay
-   blank. Then both kinds of path get rewritten for the new location:
-   src/server/apiRoutes.ts is two levels down, so './src/x' is '../x'. This
-   covers inline `await import('./src/...')` as well as the top-level
-   imports — missing those is a type error at best and a runtime failure in
-   the one route that needs them at worst. */
-const rewrite = (s) => s.replace(/(['"])\.\/src\//g, '$1../');
+   blank. Then relative paths get rewritten for the new location, since
+   server.ts sits at the repo root and src/server/apiRoutes.ts is two levels
+   down:
+
+     './src/x'  ->  '../x'        a file under src/
+     './x'      ->  '../../x'     a file at the root, such as ./serverAuth
+
+   Both forms matter, and both appear as inline `await import()` as well as
+   top-level imports. Missing one is a type error at best and, in a route
+   that only loads its dependency when called, a runtime failure in
+   production at worst. The root-level case arrived with the drop that added
+   serverAuth.ts and was not handled before. */
+const rewrite = (s) => s
+  .replace(/(['"])\.\/src\//g, '$1../')
+  .replace(/(['"])\.\/(?!src\/)/g, '$1../../');
 
 const body = rewrite(
   src.slice(start, end)
@@ -59,11 +68,62 @@ const body = rewrite(
 ).replace(/\s+$/, '');
 
 /* Upstream's own imports, minus the ones that belong to the server shell
-   rather than the routes. */
-const SHELL = /from '(express|http|vite|path)'/;
-const upstreamImports = src.slice(0, start)
-  .filter((l) => /^import /.test(l) && !SHELL.test(l))
-  .map(rewrite);
+   rather than the routes.
+ *
+ * Collected as statements, not as lines. A multi-line import —
+ *
+ *   import {
+ *     BOOKING_FREEZE_MONTHS,
+ *     ...
+ *   } from './src/services/quoteFreeze';
+ *
+ * — breaks a line-based filter in the worst way: it takes the `import {`
+ * and leaves the members behind, so the emitted file has a dangling import
+ * followed by a loose list of identifiers. It does not fail quietly; it
+ * fails as a parse error that looks like the file was mangled. Upstream
+ * started writing imports this way with the quote-freeze work. */
+const SHELL = /from '(express|http|vite|path|fs)'/;
+const ENDS_IMPORT = (l) =>
+  /from\s+['"][^'"]+['"]\s*;?\s*$/.test(l) || /^import\s+['"][^'"]+['"]\s*;?\s*$/.test(l);
+
+const headerLines = src.slice(0, start);
+const statements = [];
+for (let i = 0; i < headerLines.length; ) {
+  if (!/^import\b/.test(headerLines[i])) { i++; continue; }
+  const buf = [];
+  let j = i;
+  for (; j < headerLines.length; j++) {
+    buf.push(headerLines[j]);
+    if (ENDS_IMPORT(headerLines[j])) break;
+  }
+  if (j >= headerLines.length) {
+    throw new Error(`unterminated import beginning at line ${i + 1} of the source server.ts`);
+  }
+  statements.push({ text: buf.join('\n'), end: j });
+  i = j + 1;
+}
+
+const upstreamImports = statements
+  .filter((st) => !SHELL.test(st.text))
+  .map((st) => rewrite(st.text));
+
+/* Anything declared at module scope between the imports and createServer().
+   The routes close over it, so leaving it behind compiles to "Cannot find
+   name" — which is how this was found: the drop that moved the Smartsheet
+   token server-side put SMARTSHEET_NOT_CONFIGURED and smartsheetToken()
+   here, and five routes stopped resolving.
+   Taken verbatim, at its original indentation, since it is already at
+   module scope in both files. */
+const SHELL_START = /^\s*(async\s+)?function createServer\s*\(/;
+const shellAt = src.findIndex((l) => SHELL_START.test(l));
+const lastImportEnd = statements.length ? statements[statements.length - 1].end : -1;
+
+let preamble = '';
+if (shellAt > 0 && lastImportEnd >= 0 && shellAt > lastImportEnd) {
+  preamble = rewrite(src.slice(lastImportEnd + 1, shellAt).join('\n'))
+    .replace(/^\s*\n/, '')
+    .replace(/\s+$/, '');
+}
 
 /* Keep imports static — do not be tempted to make these lazy.
  *
@@ -112,7 +172,7 @@ const header = `/* The API surface, lifted out of server.ts so one definition se
 import express from 'express';
 ${eagerImports.join('\n')}
 import type { Express } from 'express';
-${lazyBlocks.length ? '\n' + lazyBlocks.join('\n\n') + '\n' : ''}
+${preamble ? '\n' + preamble + '\n' : ''}${lazyBlocks.length ? '\n' + lazyBlocks.join('\n\n') + '\n' : ''}
 export function registerApiRoutes(app: Express) {
 
 `;

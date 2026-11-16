@@ -33,28 +33,9 @@ export interface TwoFactorChallenge {
 }
 
 const PASSKEYS_STORAGE_KEY = 'portabox_registered_passkeys';
-const ADMIN_SESSION_STORAGE_KEY = 'portabox_admin_auth_session';
 
 // Pre-seeded passkeys for instant, zero-friction testing
 const DEFAULT_PASSKEYS: PasskeyRecord[] = [
-  {
-    id: 'pk-admin-01',
-    userId: 'admin@portabox.com.au',
-    role: 'admin',
-    name: 'Hardware Security Key (YubiKey 5 NFC)',
-    createdAt: '12 Jan 2026',
-    credentialId: 'cred_admin_yubikey_01',
-    deviceType: 'security_key',
-  },
-  {
-    id: 'pk-admin-02',
-    userId: 'admin@portabox.com.au',
-    role: 'admin',
-    name: 'MacBook Pro Touch ID / Windows Hello',
-    createdAt: '18 Feb 2026',
-    credentialId: 'cred_admin_touchid_02',
-    deviceType: 'platform',
-  },
   {
     id: 'pk-cust-01',
     userId: 'sarah.jenkins@gmail.com',
@@ -278,64 +259,13 @@ export function generateTwoFactorChallenge(
 }
 
 /**
- * Validates a 2FA code (accepts matching challenge code or universal test bypass 849201 / 123456)
+ * Validates a 2FA code (matching, unexpired challenge code only)
  */
 export function verifyTwoFactorCode(inputCode: string, challenge?: TwoFactorChallenge | null): boolean {
   const clean = inputCode.trim();
   if (!clean) return false;
-  // Master bypass codes for reliable testing & QA
-  if (clean === '849201' || clean === '123456' || clean === '000000') {
-    return true;
-  }
   if (challenge && challenge.code === clean && Date.now() < challenge.expiresAt) {
     return true;
   }
   return false;
-}
-
-/**
- * Admin Session Management with 2FA / Passkey verification
- */
-export interface AdminAuthSession {
-  isAuthenticated: boolean;
-  verifiedAt: string;
-  method: 'passkey' | 'password_2fa';
-  expiresAt: number;
-}
-
-export function getAdminAuthSession(): AdminAuthSession | null {
-  try {
-    const raw = sessionStorage.getItem(ADMIN_SESSION_STORAGE_KEY) || localStorage.getItem(ADMIN_SESSION_STORAGE_KEY);
-    if (!raw) return null;
-    const session: AdminAuthSession = JSON.parse(raw);
-    if (session.expiresAt && Date.now() > session.expiresAt) {
-      clearAdminAuthSession();
-      return null;
-    }
-    return session;
-  } catch {
-    return null;
-  }
-}
-
-export function setAdminAuthSession(method: 'passkey' | 'password_2fa', rememberMe: boolean = false): void {
-  const session: AdminAuthSession = {
-    isAuthenticated: true,
-    verifiedAt: new Date().toISOString(),
-    method,
-    expiresAt: Date.now() + (rememberMe ? 30 * 24 * 60 * 60 * 1000 : 8 * 60 * 60 * 1000), // 30 days or 8 hours
-  };
-  const json = JSON.stringify(session);
-  if (rememberMe) {
-    localStorage.setItem(ADMIN_SESSION_STORAGE_KEY, json);
-  } else {
-    sessionStorage.setItem(ADMIN_SESSION_STORAGE_KEY, json);
-  }
-}
-
-export function clearAdminAuthSession(): void {
-  try {
-    sessionStorage.removeItem(ADMIN_SESSION_STORAGE_KEY);
-    localStorage.removeItem(ADMIN_SESSION_STORAGE_KEY);
-  } catch {}
 }

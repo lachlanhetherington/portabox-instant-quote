@@ -1,8 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   Users,
   User,
   Sparkles,
+  Calculator,
   DollarSign,
   Tag,
   MapPin,
@@ -65,15 +66,12 @@ import {
   authenticateWithPasskey,
   generateTwoFactorChallenge,
   verifyTwoFactorCode,
-  getAdminAuthSession,
-  setAdminAuthSession,
-  clearAdminAuthSession,
-  AdminAuthSession,
   TwoFactorChallenge,
 } from '../services/authSecurityService';
 import { AppConfig, BlockedPostcode, ContainerPriceConfig, CustomerLead, DeliveryZoneSettings, LocationPricingConfig, MetroHub, PromotionRule, PromoLocationScope, PromoServiceScope, PromoContainerSizeScope, QuoteDropOffRecord, FuelSurchargeModel, FuelSurchargeZoneRates } from '../types/quote';
 import { PORTABOX_DEPOTS } from '../data/australianPostcodes';
 import { DEFAULT_DELIVERY_ZONES, DEFAULT_LOCATION_PRICING, DEFAULT_FUEL_SURCHARGE_ZONE_RATES, getLocationPricingForHub, loadDropOffRecords, saveAppConfig } from '../services/pricingEngine';
+import { apiFetch } from '../services/apiClient';
 import {
   ZeptoEftInstruction,
   loadZeptoEftRecords,
@@ -133,6 +131,8 @@ import {
 import { AfterHoursTextModal } from './AfterHoursTextModal';
 import { AdminSidebar, AdminTabId } from './admin/AdminSidebar';
 import { AdminWorkspaceTabs, WorkspaceTab } from './admin/AdminWorkspaceTabs';
+import { TraditionalQuoteDocument } from './TraditionalQuoteDocument';
+import { AllQuotesPanel } from './admin/AllQuotesPanel';
 import { AdminSlideOverDrawer, DrawerState } from './admin/AdminSlideOverDrawer';
 import { PricingMatrixWorkspace } from './admin/PricingMatrixWorkspace';
 import { SmartsheetGridView } from './admin/SmartsheetGridView';
@@ -141,6 +141,7 @@ import { CallCenterTelephonyHub } from './telephony/CallCenterTelephonyHub';
 import { BrandingBannerSettings } from './admin/BrandingBannerSettings';
 import { QuoteLifecycleAdminWorkspace } from './admin/QuoteLifecycleAdminWorkspace';
 import { DurationDiscountsAdminWorkspace } from './admin/DurationDiscountsAdminWorkspace';
+import { BillingDiscountsAdminWorkspace } from './admin/BillingDiscountsAdminWorkspace';
 import { FrozenPricingDashboard } from './admin/FrozenPricingDashboard';
 import { PostcodeTiersAdminWorkspace } from './admin/PostcodeTiersAdminWorkspace';
 import { LocationServiceHoursManager } from './admin/LocationServiceHoursManager';
@@ -150,6 +151,7 @@ import { FinancialDataExportModal } from './admin/FinancialDataExportModal';
 import { CompetitorPricingWorkspace } from './admin/CompetitorPricingWorkspace';
 import { StaffPermissionsWorkspace } from './admin/StaffPermissionsWorkspace';
 import { StaffMfaAuditLogWorkspace } from './admin/StaffMfaAuditLogWorkspace';
+import { QuoteDisplaySettingsCard } from './admin/QuoteDisplaySettingsCard';
 import {
   getStaffSession,
   setStaffSession,
@@ -159,6 +161,7 @@ import {
   INITIAL_STAFF_MEMBERS,
 } from '../services/adminAuthService';
 import { StaffSession, StaffPermissionKey } from '../types/adminAuth';
+import { applyProductionLocks, productionLockReason, PRODUCTION_LOCKED_FEATURES, PRODUCTION_FEATURE_LABELS, isProductionApp } from '../services/productionFeatures';
 
 interface AdminPortalProps {
   config: AppConfig;
@@ -193,10 +196,9 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
   const [staffSession, setStaffSessionState] = useState<StaffSession | null>(getStaffSession());
 
   const handleSwitchToCeoSession = () => {
-    const staff = loadStaffMembers();
-    const ceo = staff.find((s) => s.role === 'ceo') || INITIAL_STAFF_MEMBERS[0];
-    const newSession = setStaffSession(ceo, 'passkey');
-    setStaffSessionState(newSession);
+    // Role elevation from the browser is not allowed: the role comes from the
+    // server-verified sign-in. Sign in with a CEO account instead.
+    return;
   };
 
   const getRequiredPermissionForTab = (tab: AdminTabId): StaffPermissionKey | null => {
@@ -219,6 +221,9 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
       case 'features':
         return 'communications_config';
       case 'pricing':
+      case 'supplies':
+      case 'protection':
+      case 'billing_discounts':
       case 'competitor_pricing':
       case 'duration_discounts':
       case 'quote_lifecycle':
@@ -239,7 +244,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
 
   const getTabDisplayName = (tab: AdminTabId): string => {
     switch (tab) {
-      case 'pricing_matrix': return 'Tariff Matrix & Simulator (Daily Operations)';
+      case 'pricing_matrix': return 'Container Rental & Local Delivery Price Matrix (Daily Operations)';
       case 'customers': return 'Customers & Accounts (Daily Operations)';
       case 'leads': return 'Quote Leads & CRM (Daily Operations)';
       case 'smartsheet': return 'Yard Dispatch & Smartsheet (Daily Operations)';
@@ -256,6 +261,9 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
       case 'staff_permissions': return 'Staff Roles & 2FA Governance';
       case 'staff_mfa_audit': return 'Staff MFA Verification Audit (CEO Security Oversight)';
       case 'admin_copilot': return 'Admin AI Copilot';
+      case 'supplies': return 'Supplies (Pricing & Revenue)';
+      case 'protection': return 'Protection (Pricing & Revenue)';
+      case 'billing_discounts': return 'Billing Type Discounts (Pricing & Revenue)';
       default: return tab;
     }
   };
@@ -263,78 +271,12 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
   const requiredPermissionForCurrentTab = getRequiredPermissionForTab(activeTab);
   const isCurrentTabAuthorized =
     !requiredPermissionForCurrentTab ||
-    (staffSession?.user ? hasStaffPermission(staffSession.user, requiredPermissionForCurrentTab) : true);
-  const isDailyOpsAuthorized = staffSession?.user ? hasStaffPermission(staffSession.user, 'daily_operations') : true;
+    (staffSession?.user ? hasStaffPermission(staffSession.user, requiredPermissionForCurrentTab) : false);
+  const isDailyOpsAuthorized = staffSession?.user ? hasStaffPermission(staffSession.user, 'daily_operations') : false;
 
-  // Admin Enterprise Security Gate (Passkey & 2FA)
-  const [adminAuthSession, setAdminAuthSessionState] = useState<AdminAuthSession | null>(getAdminAuthSession());
-  const [adminAuthStep, setAdminAuthStep] = useState<'credentials' | '2fa'>('credentials');
-  const [adminEmail, setAdminEmail] = useState('admin@portabox.com.au');
-  const [adminPassword, setAdminPassword] = useState('••••••••••••');
-  const [admin2FaCode, setAdmin2FaCode] = useState('');
-  const [admin2FaMethod, setAdmin2FaMethod] = useState<'sms' | 'authenticator'>('sms');
-  const [admin2FaChallenge, setAdmin2FaChallenge] = useState<TwoFactorChallenge | null>(null);
-  const [adminAuthError, setAdminAuthError] = useState<string | null>(null);
-  const [isAdminPasskeyLoading, setIsAdminPasskeyLoading] = useState(false);
-  const [rememberAdminDevice, setRememberAdminDevice] = useState(true);
-
-  const handleAdminPasskeySignIn = async () => {
-    setAdminAuthError(null);
-    setIsAdminPasskeyLoading(true);
-    try {
-      const res = await authenticateWithPasskey('admin', adminEmail);
-      if (res.success) {
-        setAdminAuthSession('passkey', rememberAdminDevice);
-        setAdminAuthSessionState(getAdminAuthSession());
-      } else {
-        setAdminAuthError(res.error || 'Hardware Key / Passkey verification failed. Use 2FA credentials below.');
-      }
-    } catch (err: any) {
-      setAdminAuthError(err?.message || 'Biometric passkey prompt bypassed or unsupported. Use 2FA credentials below.');
-    } finally {
-      setIsAdminPasskeyLoading(false);
-    }
-  };
-
-  const handleAdminCredentialsSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    setAdminAuthError(null);
-    if (!adminEmail.trim()) {
-      setAdminAuthError('Enter your operations admin email');
-      return;
-    }
-    const dest = admin2FaMethod === 'sms' ? 'Operations Dispatch Mobile (0488 123 456)' : 'Authenticator App (TOTP)';
-    const challenge = generateTwoFactorChallenge(admin2FaMethod, dest);
-    setAdmin2FaChallenge(challenge);
-    setAdmin2FaCode(challenge.code); // Pre-filled for demo convenience
-    setAdminAuthStep('2fa');
-  };
-
-  const handleAdminVerify2Fa = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!verifyTwoFactorCode(admin2FaCode, admin2FaChallenge)) {
-      setAdminAuthError('Invalid 2FA code. Enter 123456 or the code shown.');
-      return;
-    }
-    setAdminAuthSession('password_2fa', rememberAdminDevice);
-    setAdminAuthSessionState(getAdminAuthSession());
-    setAdminAuthStep('credentials');
-    setAdmin2FaCode('');
-  };
-
-  const handleAdminQuickBypass = () => {
-    setAdminAuthSession('passkey', rememberAdminDevice);
-    setAdminAuthSessionState(getAdminAuthSession());
-    setAdminAuthError(null);
-  };
-
-  const handleLockAdminSession = () => {
-    clearAdminAuthSession();
-    setAdminAuthSessionState(null);
-    setAdminAuthStep('credentials');
-  };
-
-  const [currentConfig, setCurrentConfig] = useState<AppConfig>(config);
+  const [storedCurrentConfig, setCurrentConfig] = useState<AppConfig>(config);
+  // Production: simulated modules stay off whatever is saved (see productionFeatures.ts).
+  const currentConfig = useMemo(() => applyProductionLocks(storedCurrentConfig), [storedCurrentConfig]);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [globalSearchQuery, setGlobalSearchQuery] = useState('');
@@ -342,12 +284,14 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
   const [isPhoneIntakeOpen, setIsPhoneIntakeOpen] = useState(false);
   const [isFinancialExportOpen, setIsFinancialExportOpen] = useState(false);
   const [workspaceTabs, setWorkspaceTabs] = useState<WorkspaceTab[]>([
-    { id: 'tab-pricing', tabKey: 'pricing_matrix', title: 'Tariff Matrix & Simulator', isClosable: false },
+    { id: 'tab-pricing', tabKey: 'pricing_matrix', title: 'Container Rental & Local Delivery Price Matrix', isClosable: false },
     ...(config.enableCustomersLedger ? [{ id: 'tab-customers', tabKey: 'customers' as AdminTabId, title: 'Customers & Ledger' }] : []),
     { id: 'tab-leads', tabKey: 'leads', title: 'Quote Leads' },
     ...(config.enableSmartsheetYardDispatch ? [{ id: 'tab-smartsheet', tabKey: 'smartsheet' as AdminTabId, title: 'Yard Dispatch' }] : []),
   ]);
   const [activeWorkspaceTabId, setActiveWorkspaceTabId] = useState('tab-pricing');
+  // Full quote opened from Customer Inquiries & Quotes
+  const [viewQuoteLead, setViewQuoteLead] = useState<CustomerLead | null>(null);
   const [drawerState, setDrawerState] = useState<DrawerState>({
     isOpen: false,
     type: 'customer',
@@ -487,7 +431,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
     setGeminiPromoMessage(null);
 
     try {
-      const res = await fetch('/api/gemini/generate-discount', {
+      const res = await apiFetch('/api/gemini/generate-discount', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ prompt: promptToUse }),
@@ -987,6 +931,11 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
     flagKey: keyof AppConfig,
     enabled: boolean
   ) => {
+    const lockReason = enabled ? productionLockReason(String(flagKey)) : undefined;
+    if (lockReason) {
+      window.alert(`This module can't be switched on in production yet.\n\n${lockReason}`);
+      return;
+    }
     const updated: AppConfig = {
       ...currentConfig,
       [flagKey]: enabled,
@@ -1025,7 +974,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
   };
 
   const handleBulkToggleStagedFeatures = (enableAll: boolean) => {
-    const updated: AppConfig = {
+    const updated: AppConfig = applyProductionLocks({
       ...currentConfig,
       enableSoftphone: enableAll,
       enableCustomerPortal: enableAll,
@@ -1037,7 +986,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
       enableDropOffFunnelAnalytics: enableAll,
       enableFieldAssetsLogistics: enableAll,
       enablePromoBanner: enableAll,
-    };
+    });
     setCurrentConfig(updated);
     saveAppConfig(updated);
     onSaveConfig(updated);
@@ -1257,7 +1206,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
       const tabTitle =
         label ||
         (tabId === 'pricing_matrix'
-          ? 'Tariff Matrix & Simulator'
+          ? 'Container Rental & Local Delivery Price Matrix'
           : tabId === 'customers'
           ? 'Customers & Billing'
           : tabId === 'leads'
@@ -1314,6 +1263,509 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
     if (tabId === 'business_hours') setAfterHoursMessages(loadAfterHoursMessages());
   };
 
+  // Supplies page (Dan, 16 Nov): blanket rental 10-pack and padlock prices only.
+  // Free blankets / free lock promotions are handled in the discount section.
+  const renderSuppliesPage = () => (
+    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+      <div className="p-5 rounded-2xl border border-slate-200 bg-white space-y-2">
+        <h5 className="text-xs font-bold text-[#0b2942] uppercase tracking-wider">Blanket Rental</h5>
+        <label className="block text-xs">
+          <span className="text-[11px] text-slate-500 block mb-1">10 Pack ($ per month)</span>
+          <input
+            type="number"
+            min="0"
+            value={currentConfig.packingSupplies.blanketBlockPriceMonthly ?? 25}
+            onChange={(e) => {
+              const price = Math.max(0, Number(e.target.value));
+              setCurrentConfig({
+                ...currentConfig,
+                packingSupplies: {
+                  ...currentConfig.packingSupplies,
+                  blanketBlockPriceMonthly: price,
+                  blanket10Price: price,
+                },
+              });
+            }}
+            className="w-full px-3 py-2 rounded-xl border border-slate-300 bg-white font-mono font-bold text-sm text-[#0b2942]"
+          />
+        </label>
+      </div>
+      <div className="p-5 rounded-2xl border border-slate-200 bg-white space-y-2">
+        <h5 className="text-xs font-bold text-[#0b2942] uppercase tracking-wider">Heavy-Duty Padlocks</h5>
+        <label className="block text-xs">
+          <span className="text-[11px] text-slate-500 block mb-1">Padlock Price ($)</span>
+          <input
+            type="number"
+            min="0"
+            value={currentConfig.packingSupplies.lockPrice ?? 22}
+            onChange={(e) =>
+              setCurrentConfig({
+                ...currentConfig,
+                packingSupplies: { ...currentConfig.packingSupplies, lockPrice: Math.max(0, Number(e.target.value)) },
+              })
+            }
+            className="w-full px-3 py-2 rounded-xl border border-slate-300 bg-white font-mono font-bold text-sm text-[#0b2942]"
+          />
+        </label>
+        <p className="text-[11px] text-slate-500">Discus stainless steel lock (anti-bolt cutter)</p>
+      </div>
+    </div>
+  );
+
+  // Protection page (Dan, 16 Nov): CPO and COO on their own rows; the $5,000 CPO cover is fixed wording.
+  const insuranceWithDefaults = () =>
+    currentConfig.insurance || {
+      enabled: true,
+      monthlyPricePerContainer: 15,
+      cooMonthlyPricePerContainer: 10,
+      isFreePromo: false,
+      coverageAmountPerContainer: 5000,
+    };
+  const renderProtectionPage = () => (
+    <div className="space-y-4">
+      <div className="p-5 rounded-2xl border border-slate-200 bg-white flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <h5 className="text-sm font-extrabold text-[#0b2942]">Contents Protection Option (CPO)</h5>
+          <p className="text-xs text-slate-500">Covers the contents of each container up to $5,000.</p>
+        </div>
+        <label className="block text-xs sm:w-56 shrink-0">
+          <span className="text-[11px] text-slate-500 block mb-1">CPO / Container ($ per month)</span>
+          <input
+            type="number"
+            min="0"
+            value={currentConfig.insurance?.monthlyPricePerContainer ?? 15}
+            onChange={(e) =>
+              setCurrentConfig({
+                ...currentConfig,
+                insurance: { ...insuranceWithDefaults(), monthlyPricePerContainer: Math.max(0, Number(e.target.value)) },
+              })
+            }
+            className="w-full px-3 py-2 rounded-xl border border-slate-300 bg-white font-mono font-bold text-sm text-[#0b2942]"
+          />
+        </label>
+      </div>
+      <div className="p-5 rounded-2xl border border-slate-200 bg-white flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <h5 className="text-sm font-extrabold text-[#0b2942]">Container Only Option (COO)</h5>
+          <p className="text-xs text-slate-500">Covers the container itself.</p>
+        </div>
+        <label className="block text-xs sm:w-56 shrink-0">
+          <span className="text-[11px] text-slate-500 block mb-1">COO / Container ($ per month)</span>
+          <input
+            type="number"
+            min="0"
+            value={currentConfig.insurance?.cooMonthlyPricePerContainer ?? 10}
+            onChange={(e) =>
+              setCurrentConfig({
+                ...currentConfig,
+                insurance: { ...insuranceWithDefaults(), cooMonthlyPricePerContainer: Math.max(0, Number(e.target.value)) },
+              })
+            }
+            className="w-full px-3 py-2 rounded-xl border border-slate-300 bg-white font-mono font-bold text-sm text-[#0b2942]"
+          />
+        </label>
+      </div>
+    </div>
+  );
+
+  // Supplies and Protection price editors (legacy pricing page only)
+  const renderSuppliesAndProtection = (show: 'all' | 'supplies' | 'protection' = 'all') => (
+            <div className="p-5 rounded-2xl border border-slate-200 bg-white space-y-4">
+              <div>
+                <h4 className="font-extrabold text-sm text-[#0b2942]">
+                  {show === 'protection' ? 'Contents Protection (CPO) & COO Rates' : show === 'supplies' ? 'Supplies: Boxes, Blankets & Locks' : 'Packing Supplies, Blanket Rental & Protection Rates'}
+                </h4>
+                <p className="text-xs text-slate-500">
+                  {show === 'protection'
+                    ? 'Monthly price per container for the Contents Protection Option (CPO) and COO, and the CPO cover limit.'
+                    : 'Set prices for moving cartons, blanket hire and padlocks.'}
+                </p>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {show !== 'protection' && (
+                  <>
+                {/* Boxes */}
+                <div className="p-4 rounded-xl border border-slate-200 bg-slate-50/40 space-y-2">
+                  <h5 className="text-xs font-bold text-[#0b2942] uppercase tracking-wider">Heavy Duty Boxes</h5>
+                  <div className="grid grid-cols-2 gap-2 text-xs">
+                    <div>
+                      <label className="text-[10px] text-slate-500 block">Single Box ($)</label>
+                      <input
+                        type="number"
+                        step="0.1"
+                        value={currentConfig.packingSupplies.boxSinglePrice}
+                        onChange={(e) =>
+                          setCurrentConfig({
+                            ...currentConfig,
+                            packingSupplies: {
+                              ...currentConfig.packingSupplies,
+                              boxSinglePrice: Number(e.target.value),
+                            },
+                          })
+                        }
+                        className="w-full px-2 py-1 rounded-lg border font-mono font-bold text-xs"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-slate-500 block">10 Pack ($)</label>
+                      <input
+                        type="number"
+                        value={currentConfig.packingSupplies.box10Price}
+                        onChange={(e) =>
+                          setCurrentConfig({
+                            ...currentConfig,
+                            packingSupplies: {
+                              ...currentConfig.packingSupplies,
+                              box10Price: Number(e.target.value),
+                            },
+                          })
+                        }
+                        className="w-full px-2 py-1 rounded-lg border font-mono font-bold text-xs"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-slate-500 block">50 Pack ($)</label>
+                      <input
+                        type="number"
+                        value={currentConfig.packingSupplies.box50Price}
+                        onChange={(e) =>
+                          setCurrentConfig({
+                            ...currentConfig,
+                            packingSupplies: {
+                              ...currentConfig.packingSupplies,
+                              box50Price: Number(e.target.value),
+                            },
+                          })
+                        }
+                        className="w-full px-2 py-1 rounded-lg border font-mono font-bold text-xs"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-slate-500 block">100 Pack ($)</label>
+                      <input
+                        type="number"
+                        value={currentConfig.packingSupplies.box100Price}
+                        onChange={(e) =>
+                          setCurrentConfig({
+                            ...currentConfig,
+                            packingSupplies: {
+                              ...currentConfig.packingSupplies,
+                              box100Price: Number(e.target.value),
+                            },
+                          })
+                        }
+                        className="w-full px-2 py-1 rounded-lg border font-mono font-bold text-xs"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Blankets */}
+                <div className="p-4 rounded-xl border border-slate-200 bg-slate-50/40 space-y-2">
+                  <h5 className="text-xs font-bold text-[#0b2942] uppercase tracking-wider">Blanket Rental</h5>
+                  <div className="grid grid-cols-2 gap-2 text-xs">
+                    <div>
+                      <label className="text-[10px] text-slate-500 block">Single Blanket ($)</label>
+                      <input
+                        type="number"
+                        step="0.1"
+                        value={currentConfig.packingSupplies.blanketSinglePrice}
+                        onChange={(e) =>
+                          setCurrentConfig({
+                            ...currentConfig,
+                            packingSupplies: {
+                              ...currentConfig.packingSupplies,
+                              blanketSinglePrice: Number(e.target.value),
+                            },
+                          })
+                        }
+                        className="w-full px-2 py-1 rounded-lg border font-mono font-bold text-xs"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-slate-500 block">10 Pack ($)</label>
+                      <input
+                        type="number"
+                        value={currentConfig.packingSupplies.blanket10Price}
+                        onChange={(e) =>
+                          setCurrentConfig({
+                            ...currentConfig,
+                            packingSupplies: {
+                              ...currentConfig.packingSupplies,
+                              blanket10Price: Number(e.target.value),
+                            },
+                          })
+                        }
+                        className="w-full px-2 py-1 rounded-lg border font-mono font-bold text-xs"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-slate-500 block">50 Pack ($)</label>
+                      <input
+                        type="number"
+                        value={currentConfig.packingSupplies.blanket50Price}
+                        onChange={(e) =>
+                          setCurrentConfig({
+                            ...currentConfig,
+                            packingSupplies: {
+                              ...currentConfig.packingSupplies,
+                              blanket50Price: Number(e.target.value),
+                            },
+                          })
+                        }
+                        className="w-full px-2 py-1 rounded-lg border font-mono font-bold text-xs"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-slate-500 block">100 Pack ($)</label>
+                      <input
+                        type="number"
+                        value={currentConfig.packingSupplies.blanket100Price}
+                        onChange={(e) =>
+                          setCurrentConfig({
+                            ...currentConfig,
+                            packingSupplies: {
+                              ...currentConfig.packingSupplies,
+                              blanket100Price: Number(e.target.value),
+                            },
+                          })
+                        }
+                        className="w-full px-2 py-1 rounded-lg border font-mono font-bold text-xs"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Free Blankets Policy & Monthly Block Pricing */}
+                  <div className="pt-2 border-t border-slate-200/60 space-y-2">
+                    <span className="text-[10px] font-black uppercase text-[#0b2942] tracking-wider block">
+                      Free Blanket Allowance &amp; Rental Blocks
+                    </span>
+                    <div className="grid grid-cols-2 gap-2 text-xs">
+                      <div>
+                        <label className="text-[10px] text-slate-500 block">Free Blankets / Container</label>
+                        <input
+                          type="number"
+                          min="0"
+                          value={currentConfig.packingSupplies.freeBlanketsPerContainer ?? 10}
+                          onChange={(e) =>
+                            setCurrentConfig({
+                              ...currentConfig,
+                              packingSupplies: {
+                                ...currentConfig.packingSupplies,
+                                freeBlanketsPerContainer: Number(e.target.value),
+                              },
+                            })
+                          }
+                          className="w-full px-2 py-1 rounded-lg border font-mono font-bold text-xs"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] text-slate-500 block">Price / 10 Block ($/mo)</label>
+                        <input
+                          type="number"
+                          min="0"
+                          value={currentConfig.packingSupplies.blanketBlockPriceMonthly ?? 25}
+                          onChange={(e) =>
+                            setCurrentConfig({
+                              ...currentConfig,
+                              packingSupplies: {
+                                ...currentConfig.packingSupplies,
+                                blanketBlockPriceMonthly: Number(e.target.value),
+                              },
+                            })
+                          }
+                          className="w-full px-2 py-1 rounded-lg border font-mono font-bold text-xs"
+                        />
+                      </div>
+                    </div>
+                    <label className="flex items-center gap-2 pt-1 text-[11px] text-slate-700 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={Boolean(currentConfig.packingSupplies.isAllBlanketsFreePromo)}
+                        onChange={(e) =>
+                          setCurrentConfig({
+                            ...currentConfig,
+                            packingSupplies: {
+                              ...currentConfig.packingSupplies,
+                              isAllBlanketsFreePromo: e.target.checked,
+                            },
+                          })
+                        }
+                        className="w-3.5 h-3.5 rounded text-emerald-600 accent-emerald-600"
+                      />
+                      <span className="font-bold text-emerald-800">
+                        Promotional Incentive: Offer ALL blankets 100% Free
+                      </span>
+                    </label>
+                  </div>
+                </div>
+
+                {/* Padlocks */}
+                <div className="p-4 rounded-xl border border-slate-200 bg-slate-50/40 space-y-2">
+                  <h5 className="text-xs font-bold text-[#0b2942] uppercase tracking-wider">Heavy-Duty Padlocks</h5>
+                  <div className="grid grid-cols-2 gap-2 text-xs">
+                    <div>
+                      <label className="text-[10px] text-slate-500 block">Padlock Price ($)</label>
+                      <input
+                        type="number"
+                        min="0"
+                        value={currentConfig.packingSupplies.lockPrice ?? 20}
+                        onChange={(e) =>
+                          setCurrentConfig({
+                            ...currentConfig,
+                            packingSupplies: {
+                              ...currentConfig.packingSupplies,
+                              lockPrice: Number(e.target.value),
+                            },
+                          })
+                        }
+                        className="w-full px-2 py-1 rounded-lg border font-mono font-bold text-xs"
+                      />
+                    </div>
+                    <div className="flex flex-col justify-end">
+                      <span className="text-[10px] text-slate-500 font-medium">
+                        Discus stainless steel lock (anti-bolt cutter)
+                      </span>
+                    </div>
+                  </div>
+                  <label className="flex items-center gap-2 pt-2 text-[11px] text-slate-700 cursor-pointer border-t border-slate-200/60">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(currentConfig.packingSupplies.isLockFreePromo)}
+                      onChange={(e) =>
+                        setCurrentConfig({
+                          ...currentConfig,
+                          packingSupplies: {
+                            ...currentConfig.packingSupplies,
+                            isLockFreePromo: e.target.checked,
+                          },
+                        })
+                      }
+                      className="w-3.5 h-3.5 rounded text-emerald-600 accent-emerald-600"
+                    />
+                    <span className="font-bold text-emerald-800">
+                      Promotional Incentive: Free Padlock Included with Container
+                    </span>
+                  </label>
+                </div>
+
+                  </>
+                )}
+                {/* Container Protection Option (CPO / Insurance) */}
+                {show !== 'supplies' && (
+                <div className="p-4 rounded-xl border border-emerald-300 bg-emerald-50/30 space-y-2">
+                  <h5 className="text-xs font-bold text-[#0b2942] uppercase tracking-wider flex items-center justify-between">
+                    <span>Contents Protection Option (CPO) &amp; COO</span>
+                    <span className="text-[10px] bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full font-bold">
+                      Contents Cover
+                    </span>
+                  </h5>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
+                    <div>
+                      <label className="text-[10px] text-slate-500 block">CPO / Container ($/mo)</label>
+                      <input
+                        type="number"
+                        min="0"
+                        value={currentConfig.insurance?.monthlyPricePerContainer ?? 15}
+                        onChange={(e) =>
+                          setCurrentConfig({
+                            ...currentConfig,
+                            insurance: {
+                              ...(currentConfig.insurance || {
+                                enabled: true,
+                                monthlyPricePerContainer: 15,
+                                cooMonthlyPricePerContainer: 10,
+                                isFreePromo: false,
+                                coverageAmountPerContainer: 5000,
+                              }),
+                              monthlyPricePerContainer: Number(e.target.value),
+                            },
+                          })
+                        }
+                        className="w-full px-2 py-1 rounded-lg border font-mono font-bold text-xs"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-slate-500 block">COO / Container ($/mo, Onsite)</label>
+                      <input
+                        type="number"
+                        min="0"
+                        value={currentConfig.insurance?.cooMonthlyPricePerContainer ?? 10}
+                        onChange={(e) =>
+                          setCurrentConfig({
+                            ...currentConfig,
+                            insurance: {
+                              ...(currentConfig.insurance || {
+                                enabled: true,
+                                monthlyPricePerContainer: 15,
+                                cooMonthlyPricePerContainer: 10,
+                                isFreePromo: false,
+                                coverageAmountPerContainer: 5000,
+                              }),
+                              cooMonthlyPricePerContainer: Number(e.target.value),
+                            },
+                          })
+                        }
+                        className="w-full px-2 py-1 rounded-lg border font-mono font-bold text-xs"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-slate-500 block">CPO Max Cover / Container ($)</label>
+                      <input
+                        type="number"
+                        min="1000"
+                        step="500"
+                        value={currentConfig.insurance?.coverageAmountPerContainer ?? 5000}
+                        onChange={(e) =>
+                          setCurrentConfig({
+                            ...currentConfig,
+                            insurance: {
+                              ...(currentConfig.insurance || {
+                                enabled: true,
+                                monthlyPricePerContainer: 15,
+                                cooMonthlyPricePerContainer: 10,
+                                isFreePromo: false,
+                                coverageAmountPerContainer: 5000,
+                              }),
+                              coverageAmountPerContainer: Number(e.target.value),
+                            },
+                          })
+                        }
+                        className="w-full px-2 py-1 rounded-lg border font-mono font-bold text-xs"
+                      />
+                    </div>
+                  </div>
+                  <label className="flex items-center gap-2 pt-2 text-[11px] text-slate-700 cursor-pointer border-t border-slate-200/60">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(currentConfig.insurance?.isFreePromo)}
+                      onChange={(e) =>
+                        setCurrentConfig({
+                          ...currentConfig,
+                          insurance: {
+                            ...(currentConfig.insurance || {
+                              enabled: true,
+                              monthlyPricePerContainer: 15,
+                              isFreePromo: false,
+                              coverageAmountPerContainer: 10000,
+                            }),
+                            isFreePromo: e.target.checked,
+                          },
+                        })
+                      }
+                      className="w-3.5 h-3.5 rounded text-emerald-600 accent-emerald-600"
+                    />
+                    <span className="font-bold text-emerald-800">
+                      Promotional Incentive: Offer Free Insurance to Incentivise Sales
+                    </span>
+                  </label>
+                </div>
+                )}
+              </div>
+            </div>
+  );
+
   return (
     <div className="bg-slate-900 w-full flex-1 flex flex-col min-h-screen overflow-hidden">
       {/* Top Zendesk / HubSpot-Style Workspace Header & Tabs */}
@@ -1344,7 +1796,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
           }
         }}
         onOpenNewQuoteTab={() => {
-          handleSelectNavTab('pricing_matrix', 'Tariff Matrix & Simulator');
+          handleSelectNavTab('pricing_matrix', 'Container Rental & Local Delivery Price Matrix');
         }}
         onSave={handleSave}
         onCloseAdmin={onClose}
@@ -2873,13 +3325,8 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                   </div>
 
                   <div>
-                    <label className="block text-slate-700 font-bold mb-1">API Access Token (Bearer)</label>
-                    <input
-                      type="password"
-                      value={smartsheetConfig.apiToken}
-                      onChange={(e) => setSmartsheetConfig({ ...smartsheetConfig, apiToken: e.target.value })}
-                      className="w-full px-3 py-2 rounded-xl border border-slate-200 bg-white font-mono focus:ring-2 focus:ring-[#00c0f3]"
-                    />
+                    <label className="block text-slate-700 font-bold mb-1">API Access Token</label>
+                    <p className="text-slate-500">Configured on the server (SMARTSHEET_API_TOKEN). It is never entered or stored in the browser.</p>
                   </div>
 
                   <div>
@@ -3729,176 +4176,8 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
         {/* ================= TAB 1: CUSTOMER LEADS CRM ================= */}
         {activeTab === 'leads' && (
           <div className="space-y-6">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-100">
-              <div>
-                <h3 className="text-lg font-extrabold text-[#0b2942]">Customer Inquiries & Quotes</h3>
-                <p className="text-xs text-slate-500">
-                  Collected customer leads for follow-up calls, SMS dispatch, and CRM marketing.
-                </p>
-              </div>
-
-              <div className="flex items-center gap-3">
-                <button
-                  onClick={handleExportCSV}
-                  className="flex items-center gap-1.5 px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-bold rounded-xl transition-colors cursor-pointer"
-                >
-                  <Download className="w-3.5 h-3.5" />
-                  <span>Export to CSV</span>
-                </button>
-              </div>
-            </div>
-
-            {/* Filter Bar */}
-            <div className="flex flex-col sm:flex-row gap-3">
-              <div className="relative flex-1">
-                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-3 pointer-events-none" />
-                <input
-                  type="text"
-                  value={leadsSearch}
-                  onChange={(e) => setLeadsSearch(e.target.value)}
-                  placeholder="Search by customer name, mobile, email, suburb, or postcode..."
-                  className="w-full pl-9 pr-3 py-2 rounded-xl border border-slate-200 text-xs font-medium focus:outline-none focus:ring-2 focus:ring-[#00c0f3]"
-                />
-              </div>
-
-              <div className="flex items-center gap-2">
-                <span className="text-xs text-slate-500 font-semibold whitespace-nowrap">Status:</span>
-                {['All', 'New', 'Contacted', 'Booked', 'Follow-up'].map((st) => (
-                  <button
-                    key={st}
-                    onClick={() => setLeadStatusFilter(st)}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer ${
-                      leadStatusFilter === st
-                        ? 'bg-[#0b2942] text-white'
-                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                    }`}
-                  >
-                    {st}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Table */}
-            {filteredLeads.length === 0 ? (
-              <div className="text-center py-12 bg-slate-50 rounded-2xl border border-dashed border-slate-200">
-                <Users className="w-8 h-8 text-slate-400 mx-auto mb-2" />
-                <p className="text-sm font-bold text-slate-700">No matching customer quotes found</p>
-                <p className="text-xs text-slate-400 mt-1">Quotes submitted via the app will automatically appear here.</p>
-              </div>
-            ) : (
-              <div className="overflow-x-auto rounded-2xl border border-slate-200">
-                <table className="w-full text-left text-xs">
-                  <thead className="bg-slate-50 text-slate-500 font-bold border-b border-slate-200 uppercase tracking-wider text-[10px]">
-                    <tr>
-                      <th className="py-3 px-4">Customer</th>
-                      <th className="py-3 px-4">Contact</th>
-                      <th className="py-3 px-4">Location</th>
-                      <th className="py-3 px-4">Container & Service</th>
-                      <th className="py-3 px-4">First Payment</th>
-                      <th className="py-3 px-4">Status</th>
-                      <th className="py-3 px-4">Follow-up Notes</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {filteredLeads.map((lead) => (
-                      <tr key={lead.id} className="hover:bg-slate-50/70 transition-colors">
-                        <td className="py-3 px-4 font-bold text-slate-900">
-                          <div>{lead.firstName}</div>
-                          <div className="text-[10px] text-slate-400 font-normal">
-                            {new Date(lead.createdAt).toLocaleDateString()} {new Date(lead.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                          </div>
-                        </td>
-
-                        <td className="py-3 px-4">
-                          <div className="font-mono text-slate-800">{lead.mobile}</div>
-                          <div className="text-slate-500 text-[11px]">{lead.email}</div>
-                          <div className="flex items-center gap-1.5 mt-1">
-                            <span className="px-1.5 py-0.5 rounded bg-sky-50 text-[#00c0f3] text-[9px] font-bold">
-                              SMS Sent
-                            </span>
-                            <span className="px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-600 text-[9px] font-bold">
-                              Email Sent
-                            </span>
-                          </div>
-                        </td>
-
-                        <td className="py-3 px-4">
-                          <div className="font-semibold text-slate-800">
-                            {lead.quote.originPostcode.suburb}
-                          </div>
-                          <div className="text-slate-400 text-[11px]">
-                            {lead.quote.originPostcode.state} {lead.quote.originPostcode.postcode} (Zone {lead.quote.deliveryZone})
-                          </div>
-                        </td>
-
-                        <td className="py-3 px-4">
-                          <div className="font-semibold text-slate-800">{lead.quote.containerName}</div>
-                          <div className="text-slate-500 text-[11px]">
-                            {lead.quote.serviceType.replace(/_/g, ' ')} · {lead.quote.storageDuration.replace(/_/g, ' ')}
-                          </div>
-                        </td>
-
-                        <td className="py-3 px-4 font-mono font-bold text-slate-900 text-sm">
-                          ${lead.quote.firstPaymentTotal}
-                        </td>
-
-                        <td className="py-3 px-4">
-                          <div className="flex items-center gap-1.5">
-                            <select
-                              value={lead.status}
-                              onChange={(e) => onUpdateLeadStatus(lead.id, e.target.value as any)}
-                              className="text-xs font-semibold px-2 py-1 rounded-lg border border-slate-300 bg-white focus:outline-none focus:ring-1 focus:ring-[#00c0f3]"
-                            >
-                              <option value="New">New</option>
-                              <option value="Contacted">Contacted</option>
-                              <option value="Booked">Booked</option>
-                              <option value="Follow-up">Follow-up</option>
-                              <option value="Archived">Archived</option>
-                            </select>
-                            <button
-                              type="button"
-                              onClick={() => setDrawerState({ isOpen: true, type: 'lead', data: lead })}
-                              className="p-1.5 rounded-lg bg-sky-50 hover:bg-sky-100 text-sky-700 border border-sky-200 cursor-pointer transition-colors"
-                              title="Inspect lead in 360° drawer (Pipedrive/HubSpot style)"
-                            >
-                              <Sparkles className="w-3.5 h-3.5 text-sky-600" />
-                            </button>
-                          </div>
-                        </td>
-
-                        <td className="py-3 px-4">
-                          <div className="space-y-1 max-w-xs">
-                            {lead.notes && lead.notes.length > 0 && (
-                              <div className="text-[11px] text-slate-600 bg-slate-100 p-1.5 rounded">
-                                {lead.notes[lead.notes.length - 1]}
-                              </div>
-                            )}
-                            <div className="flex items-center gap-1 mt-1">
-                              <input
-                                type="text"
-                                placeholder="Add note..."
-                                value={newNoteText[lead.id] || ''}
-                                onChange={(e) =>
-                                  setNewNoteText({ ...newNoteText, [lead.id]: e.target.value })
-                                }
-                                onKeyDown={(e) => {
-                                  if (e.key === 'Enter' && newNoteText[lead.id]?.trim()) {
-                                    onAddLeadNote(lead.id, newNoteText[lead.id]);
-                                    setNewNoteText({ ...newNoteText, [lead.id]: '' });
-                                  }
-                                }}
-                                className="w-full text-[11px] px-2 py-1 rounded border border-slate-200"
-                              />
-                            </div>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
+            {/* Every quote saved on the server (all customers, any device). Dan (16 Nov): the only quote list. */}
+            <AllQuotesPanel phone={currentConfig.phone} />
           </div>
         )}
 
@@ -4734,391 +5013,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
               </div>
             </div>
 
-            {/* Packing Supplies Pricing Settings */}
-            <div className="p-5 rounded-2xl border border-slate-200 bg-white space-y-4">
-              <div>
-                <h4 className="font-extrabold text-sm text-[#0b2942]">Packing Supplies & Blanket Rental Rates</h4>
-                <p className="text-xs text-slate-500">
-                  Set prices for moving cartons and protective blanket hire packages.
-                </p>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                {/* Boxes */}
-                <div className="p-4 rounded-xl border border-slate-200 bg-slate-50/40 space-y-2">
-                  <h5 className="text-xs font-bold text-[#0b2942] uppercase tracking-wider">Heavy Duty Boxes</h5>
-                  <div className="grid grid-cols-2 gap-2 text-xs">
-                    <div>
-                      <label className="text-[10px] text-slate-500 block">Single Box ($)</label>
-                      <input
-                        type="number"
-                        step="0.1"
-                        value={currentConfig.packingSupplies.boxSinglePrice}
-                        onChange={(e) =>
-                          setCurrentConfig({
-                            ...currentConfig,
-                            packingSupplies: {
-                              ...currentConfig.packingSupplies,
-                              boxSinglePrice: Number(e.target.value),
-                            },
-                          })
-                        }
-                        className="w-full px-2 py-1 rounded-lg border font-mono font-bold text-xs"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-[10px] text-slate-500 block">10 Pack ($)</label>
-                      <input
-                        type="number"
-                        value={currentConfig.packingSupplies.box10Price}
-                        onChange={(e) =>
-                          setCurrentConfig({
-                            ...currentConfig,
-                            packingSupplies: {
-                              ...currentConfig.packingSupplies,
-                              box10Price: Number(e.target.value),
-                            },
-                          })
-                        }
-                        className="w-full px-2 py-1 rounded-lg border font-mono font-bold text-xs"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-[10px] text-slate-500 block">50 Pack ($)</label>
-                      <input
-                        type="number"
-                        value={currentConfig.packingSupplies.box50Price}
-                        onChange={(e) =>
-                          setCurrentConfig({
-                            ...currentConfig,
-                            packingSupplies: {
-                              ...currentConfig.packingSupplies,
-                              box50Price: Number(e.target.value),
-                            },
-                          })
-                        }
-                        className="w-full px-2 py-1 rounded-lg border font-mono font-bold text-xs"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-[10px] text-slate-500 block">100 Pack ($)</label>
-                      <input
-                        type="number"
-                        value={currentConfig.packingSupplies.box100Price}
-                        onChange={(e) =>
-                          setCurrentConfig({
-                            ...currentConfig,
-                            packingSupplies: {
-                              ...currentConfig.packingSupplies,
-                              box100Price: Number(e.target.value),
-                            },
-                          })
-                        }
-                        className="w-full px-2 py-1 rounded-lg border font-mono font-bold text-xs"
-                      />
-                    </div>
-                  </div>
-                </div>
-
-                {/* Blankets */}
-                <div className="p-4 rounded-xl border border-slate-200 bg-slate-50/40 space-y-2">
-                  <h5 className="text-xs font-bold text-[#0b2942] uppercase tracking-wider">Blanket Rental</h5>
-                  <div className="grid grid-cols-2 gap-2 text-xs">
-                    <div>
-                      <label className="text-[10px] text-slate-500 block">Single Blanket ($)</label>
-                      <input
-                        type="number"
-                        step="0.1"
-                        value={currentConfig.packingSupplies.blanketSinglePrice}
-                        onChange={(e) =>
-                          setCurrentConfig({
-                            ...currentConfig,
-                            packingSupplies: {
-                              ...currentConfig.packingSupplies,
-                              blanketSinglePrice: Number(e.target.value),
-                            },
-                          })
-                        }
-                        className="w-full px-2 py-1 rounded-lg border font-mono font-bold text-xs"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-[10px] text-slate-500 block">10 Pack ($)</label>
-                      <input
-                        type="number"
-                        value={currentConfig.packingSupplies.blanket10Price}
-                        onChange={(e) =>
-                          setCurrentConfig({
-                            ...currentConfig,
-                            packingSupplies: {
-                              ...currentConfig.packingSupplies,
-                              blanket10Price: Number(e.target.value),
-                            },
-                          })
-                        }
-                        className="w-full px-2 py-1 rounded-lg border font-mono font-bold text-xs"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-[10px] text-slate-500 block">50 Pack ($)</label>
-                      <input
-                        type="number"
-                        value={currentConfig.packingSupplies.blanket50Price}
-                        onChange={(e) =>
-                          setCurrentConfig({
-                            ...currentConfig,
-                            packingSupplies: {
-                              ...currentConfig.packingSupplies,
-                              blanket50Price: Number(e.target.value),
-                            },
-                          })
-                        }
-                        className="w-full px-2 py-1 rounded-lg border font-mono font-bold text-xs"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-[10px] text-slate-500 block">100 Pack ($)</label>
-                      <input
-                        type="number"
-                        value={currentConfig.packingSupplies.blanket100Price}
-                        onChange={(e) =>
-                          setCurrentConfig({
-                            ...currentConfig,
-                            packingSupplies: {
-                              ...currentConfig.packingSupplies,
-                              blanket100Price: Number(e.target.value),
-                            },
-                          })
-                        }
-                        className="w-full px-2 py-1 rounded-lg border font-mono font-bold text-xs"
-                      />
-                    </div>
-                  </div>
-
-                  {/* Free Blankets Policy & Monthly Block Pricing */}
-                  <div className="pt-2 border-t border-slate-200/60 space-y-2">
-                    <span className="text-[10px] font-black uppercase text-[#0b2942] tracking-wider block">
-                      Free Blanket Allowance &amp; Rental Blocks
-                    </span>
-                    <div className="grid grid-cols-2 gap-2 text-xs">
-                      <div>
-                        <label className="text-[10px] text-slate-500 block">Free Blankets / Container</label>
-                        <input
-                          type="number"
-                          min="0"
-                          value={currentConfig.packingSupplies.freeBlanketsPerContainer ?? 10}
-                          onChange={(e) =>
-                            setCurrentConfig({
-                              ...currentConfig,
-                              packingSupplies: {
-                                ...currentConfig.packingSupplies,
-                                freeBlanketsPerContainer: Number(e.target.value),
-                              },
-                            })
-                          }
-                          className="w-full px-2 py-1 rounded-lg border font-mono font-bold text-xs"
-                        />
-                      </div>
-                      <div>
-                        <label className="text-[10px] text-slate-500 block">Price / 10 Block ($/mo)</label>
-                        <input
-                          type="number"
-                          min="0"
-                          value={currentConfig.packingSupplies.blanketBlockPriceMonthly ?? 25}
-                          onChange={(e) =>
-                            setCurrentConfig({
-                              ...currentConfig,
-                              packingSupplies: {
-                                ...currentConfig.packingSupplies,
-                                blanketBlockPriceMonthly: Number(e.target.value),
-                              },
-                            })
-                          }
-                          className="w-full px-2 py-1 rounded-lg border font-mono font-bold text-xs"
-                        />
-                      </div>
-                    </div>
-                    <label className="flex items-center gap-2 pt-1 text-[11px] text-slate-700 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={Boolean(currentConfig.packingSupplies.isAllBlanketsFreePromo)}
-                        onChange={(e) =>
-                          setCurrentConfig({
-                            ...currentConfig,
-                            packingSupplies: {
-                              ...currentConfig.packingSupplies,
-                              isAllBlanketsFreePromo: e.target.checked,
-                            },
-                          })
-                        }
-                        className="w-3.5 h-3.5 rounded text-emerald-600 accent-emerald-600"
-                      />
-                      <span className="font-bold text-emerald-800">
-                        Promotional Incentive: Offer ALL blankets 100% Free
-                      </span>
-                    </label>
-                  </div>
-                </div>
-
-                {/* Padlocks */}
-                <div className="p-4 rounded-xl border border-slate-200 bg-slate-50/40 space-y-2">
-                  <h5 className="text-xs font-bold text-[#0b2942] uppercase tracking-wider">Heavy-Duty Padlocks</h5>
-                  <div className="grid grid-cols-2 gap-2 text-xs">
-                    <div>
-                      <label className="text-[10px] text-slate-500 block">Padlock Price ($)</label>
-                      <input
-                        type="number"
-                        min="0"
-                        value={currentConfig.packingSupplies.lockPrice ?? 20}
-                        onChange={(e) =>
-                          setCurrentConfig({
-                            ...currentConfig,
-                            packingSupplies: {
-                              ...currentConfig.packingSupplies,
-                              lockPrice: Number(e.target.value),
-                            },
-                          })
-                        }
-                        className="w-full px-2 py-1 rounded-lg border font-mono font-bold text-xs"
-                      />
-                    </div>
-                    <div className="flex flex-col justify-end">
-                      <span className="text-[10px] text-slate-500 font-medium">
-                        Discus stainless steel lock (anti-bolt cutter)
-                      </span>
-                    </div>
-                  </div>
-                  <label className="flex items-center gap-2 pt-2 text-[11px] text-slate-700 cursor-pointer border-t border-slate-200/60">
-                    <input
-                      type="checkbox"
-                      checked={Boolean(currentConfig.packingSupplies.isLockFreePromo)}
-                      onChange={(e) =>
-                        setCurrentConfig({
-                          ...currentConfig,
-                          packingSupplies: {
-                            ...currentConfig.packingSupplies,
-                            isLockFreePromo: e.target.checked,
-                          },
-                        })
-                      }
-                      className="w-3.5 h-3.5 rounded text-emerald-600 accent-emerald-600"
-                    />
-                    <span className="font-bold text-emerald-800">
-                      Promotional Incentive: Free Padlock Included with Container
-                    </span>
-                  </label>
-                </div>
-
-                {/* Container Protection Option (CPO / Insurance) */}
-                <div className="p-4 rounded-xl border border-emerald-300 bg-emerald-50/30 space-y-2">
-                  <h5 className="text-xs font-bold text-[#0b2942] uppercase tracking-wider flex items-center justify-between">
-                    <span>Container Protection Option (CPO Insurance)</span>
-                    <span className="text-[10px] bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full font-bold">
-                      Contents Cover
-                    </span>
-                  </h5>
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
-                    <div>
-                      <label className="text-[10px] text-slate-500 block">CPO / Container ($/mo)</label>
-                      <input
-                        type="number"
-                        min="0"
-                        value={currentConfig.insurance?.monthlyPricePerContainer ?? 15}
-                        onChange={(e) =>
-                          setCurrentConfig({
-                            ...currentConfig,
-                            insurance: {
-                              ...(currentConfig.insurance || {
-                                enabled: true,
-                                monthlyPricePerContainer: 15,
-                                cooMonthlyPricePerContainer: 10,
-                                isFreePromo: false,
-                                coverageAmountPerContainer: 5000,
-                              }),
-                              monthlyPricePerContainer: Number(e.target.value),
-                            },
-                          })
-                        }
-                        className="w-full px-2 py-1 rounded-lg border font-mono font-bold text-xs"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-[10px] text-slate-500 block">COO / Container ($/mo, Onsite)</label>
-                      <input
-                        type="number"
-                        min="0"
-                        value={currentConfig.insurance?.cooMonthlyPricePerContainer ?? 10}
-                        onChange={(e) =>
-                          setCurrentConfig({
-                            ...currentConfig,
-                            insurance: {
-                              ...(currentConfig.insurance || {
-                                enabled: true,
-                                monthlyPricePerContainer: 15,
-                                cooMonthlyPricePerContainer: 10,
-                                isFreePromo: false,
-                                coverageAmountPerContainer: 5000,
-                              }),
-                              cooMonthlyPricePerContainer: Number(e.target.value),
-                            },
-                          })
-                        }
-                        className="w-full px-2 py-1 rounded-lg border font-mono font-bold text-xs"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-[10px] text-slate-500 block">CPO Max Cover / Container ($)</label>
-                      <input
-                        type="number"
-                        min="1000"
-                        step="500"
-                        value={currentConfig.insurance?.coverageAmountPerContainer ?? 5000}
-                        onChange={(e) =>
-                          setCurrentConfig({
-                            ...currentConfig,
-                            insurance: {
-                              ...(currentConfig.insurance || {
-                                enabled: true,
-                                monthlyPricePerContainer: 15,
-                                cooMonthlyPricePerContainer: 10,
-                                isFreePromo: false,
-                                coverageAmountPerContainer: 5000,
-                              }),
-                              coverageAmountPerContainer: Number(e.target.value),
-                            },
-                          })
-                        }
-                        className="w-full px-2 py-1 rounded-lg border font-mono font-bold text-xs"
-                      />
-                    </div>
-                  </div>
-                  <label className="flex items-center gap-2 pt-2 text-[11px] text-slate-700 cursor-pointer border-t border-slate-200/60">
-                    <input
-                      type="checkbox"
-                      checked={Boolean(currentConfig.insurance?.isFreePromo)}
-                      onChange={(e) =>
-                        setCurrentConfig({
-                          ...currentConfig,
-                          insurance: {
-                            ...(currentConfig.insurance || {
-                              enabled: true,
-                              monthlyPricePerContainer: 15,
-                              isFreePromo: false,
-                              coverageAmountPerContainer: 10000,
-                            }),
-                            isFreePromo: e.target.checked,
-                          },
-                        })
-                      }
-                      className="w-3.5 h-3.5 rounded text-emerald-600 accent-emerald-600"
-                    />
-                    <span className="font-bold text-emerald-800">
-                      Promotional Incentive: Offer Free Insurance to Incentivise Sales
-                    </span>
-                  </label>
-                </div>
-              </div>
-            </div>
+            {renderSuppliesAndProtection('all')}
 
             {/* Zone A through E Leg Pricing Summary Card (replaces legacy Standard Domestic Transport Leg Fee) */}
             <div className="p-5 rounded-2xl border border-slate-200 bg-white space-y-3">
@@ -5236,6 +5131,46 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
               </p>
             </div>
           </div>
+        )}
+
+        {/* ================= SUPPLIES / PROTECTION PRICING ================= */}
+        {(activeTab === 'supplies' || activeTab === 'protection') && (
+          <div className="space-y-6 max-w-4xl">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-3 border-b border-slate-100">
+              <div>
+                <h3 className="text-lg font-extrabold text-[#0b2942]">
+                  {activeTab === 'supplies' ? 'Supplies' : 'Protection'}
+                </h3>
+                <p className="text-xs text-slate-500">
+                  {activeTab === 'supplies'
+                    ? 'Prices for blanket rental and padlocks'
+                    : 'Prices for the Contents Protection Option and Container Only Option (COO)'}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={handleSave}
+                className="px-4 py-2 rounded-xl bg-[#00c0f3] hover:bg-[#00a8d6] text-white text-xs font-black cursor-pointer transition-all shadow-xs flex items-center gap-1.5 shrink-0"
+              >
+                <Save className="w-3.5 h-3.5" />
+                <span>{activeTab === 'supplies' ? 'Save Supplies Prices' : 'Save Protection Prices'}</span>
+              </button>
+            </div>
+            {activeTab === 'supplies' ? renderSuppliesPage() : renderProtectionPage()}
+          </div>
+        )}
+
+        {/* ================= BILLING TYPE DISCOUNTS ================= */}
+        {activeTab === 'billing_discounts' && (
+          <BillingDiscountsAdminWorkspace
+            config={currentConfig}
+            onUpdateConfig={(updated) => {
+              setCurrentConfig(updated);
+              onSaveConfig(updated);
+              setSaveSuccess(true);
+              setTimeout(() => setSaveSuccess(false), 2500);
+            }}
+          />
         )}
 
         {/* ================= TAB 3: DELIVERY ZONES & KM CHARGES ================= */}
@@ -7071,6 +7006,20 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
               )}
             </div>
 
+            {isProductionApp() && (
+              <div role="note" className="p-4 rounded-2xl bg-amber-50 border-2 border-amber-300 text-amber-950 text-xs space-y-2">
+                <p className="font-bold text-sm">Some modules are switched off in production</p>
+                <p>These only simulate their work for now, so they stay off here whatever is saved. They can still be tried on staging.</p>
+                <ul className="list-disc pl-5 space-y-1">
+                  {Object.entries(PRODUCTION_LOCKED_FEATURES).map(([key, reason]) => (
+                    <li key={key}>
+                      <strong>{PRODUCTION_FEATURE_LABELS[key] || key}:</strong> {reason}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
             {/* CEO Executive Control Banner for the 9 Staged Features */}
             <div className="p-5 rounded-3xl bg-gradient-to-r from-[#0b2942] via-[#15385E] to-[#0b2942] text-white border-2 border-slate-700 shadow-md space-y-4">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -7125,6 +7074,9 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
 
             {/* ================= THE 10 STAGED FEATURES LIST ================= */}
             <div className="space-y-3.5">
+              {/* CEO-only: quote display settings (saved on the server for all customers) */}
+              {(staffSession || getStaffSession())?.user.role === 'ceo' && <QuoteDisplaySettingsCard />}
+
               {/* 1. Soft Phone */}
               <div className={`p-5 rounded-2xl border transition-all ${
                 Boolean(currentConfig.enableSoftphone)
@@ -7822,7 +7774,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                   <div>
                     <h4 className="text-sm font-extrabold text-[#0b2942]">Post-Quote Next Steps &amp; Self-Booking Flow (Default OFF)</h4>
                     <p className="text-xs text-slate-600 mt-1 max-w-2xl">
-                      Controls self-service online deposit and delivery window checkout immediately following the quotation.
+                      Controls self-service online deposit and delivery window checkout immediately following the quotation. Also shows the "Delivery window &amp; date selected in Next Steps upon booking" note on the quote.
                     </p>
                   </div>
                 </div>
@@ -7836,6 +7788,96 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                   }`}
                 >
                   {currentConfig.enableNextStepsFlow ? 'Turn Off Next Steps Flow' : 'Enable Next Steps Flow'}
+                </button>
+              </div>
+            </div>
+
+            {/* Feature: Live Phone Quote Simulator (Price Matrix page) */}
+            <div className="p-5 rounded-2xl border border-slate-200 bg-white shadow-xs">
+              <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
+                <div className="flex items-start gap-3.5">
+                  <div className={`p-2.5 rounded-xl text-white shrink-0 ${
+                    currentConfig.enableLivePhoneQuoteSimulator ? 'bg-emerald-600' : 'bg-slate-400'
+                  }`}>
+                    <Calculator className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h4 className="text-sm font-extrabold text-[#0b2942]">Live Phone Quote Simulator (Default OFF)</h4>
+                    <p className="text-xs text-slate-600 mt-1 max-w-2xl">
+                      Shows the Live Phone Quote Simulator panel beside the Container Rental &amp; Local Delivery Price Matrix.
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => handleToggleFeatureFlag('enableLivePhoneQuoteSimulator', !currentConfig.enableLivePhoneQuoteSimulator)}
+                  className={`px-4 py-2 rounded-xl text-xs font-bold transition-all shrink-0 cursor-pointer ${
+                    currentConfig.enableLivePhoneQuoteSimulator
+                      ? 'bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300'
+                      : 'bg-[#15385E] hover:bg-[#1f4a7a] text-white'
+                  }`}
+                >
+                  {currentConfig.enableLivePhoneQuoteSimulator ? 'Turn Off Simulator' : 'Enable Simulator'}
+                </button>
+              </div>
+            </div>
+
+            {/* Feature: Early Termination Clawback Engine (Duration & Discount Matrix) */}
+            <div className="p-5 rounded-2xl border border-slate-200 bg-white shadow-xs">
+              <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
+                <div className="flex items-start gap-3.5">
+                  <div className={`p-2.5 rounded-xl text-white shrink-0 ${
+                    currentConfig.enableEarlyTerminationClawback ? 'bg-amber-600' : 'bg-slate-400'
+                  }`}>
+                    <AlertTriangle className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h4 className="text-sm font-extrabold text-[#0b2942]">Early Termination Clawback Engine (Default OFF)</h4>
+                    <p className="text-xs text-slate-600 mt-1 max-w-2xl">
+                      Shows the Early Termination Clawback Engine panel in the Duration &amp; Discount Matrix.
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => handleToggleFeatureFlag('enableEarlyTerminationClawback', !currentConfig.enableEarlyTerminationClawback)}
+                  className={`px-4 py-2 rounded-xl text-xs font-bold transition-all shrink-0 cursor-pointer ${
+                    currentConfig.enableEarlyTerminationClawback
+                      ? 'bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300'
+                      : 'bg-[#15385E] hover:bg-[#1f4a7a] text-white'
+                  }`}
+                >
+                  {currentConfig.enableEarlyTerminationClawback ? 'Turn Off Clawback Engine' : 'Enable Clawback Engine'}
+                </button>
+              </div>
+            </div>
+
+            {/* Feature: Book a frozen quote (staff begin a booking at the quote's frozen prices) */}
+            <div className="p-5 rounded-2xl border border-slate-200 bg-white shadow-xs">
+              <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
+                <div className="flex items-start gap-3.5">
+                  <div className={`p-2.5 rounded-xl text-white shrink-0 ${
+                    currentConfig.enableQuoteBooking ? 'bg-emerald-600' : 'bg-slate-400'
+                  }`}>
+                    <CheckCircle className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h4 className="text-sm font-extrabold text-[#0b2942]">Book Frozen Quotes (Default OFF)</h4>
+                    <p className="text-xs text-slate-600 mt-1 max-w-2xl">
+                      Lets staff begin a booking from a saved quote within its 30 days. The quote's frozen prices become the Booking Frozen Price for 12 months.
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => handleToggleFeatureFlag('enableQuoteBooking', !currentConfig.enableQuoteBooking)}
+                  className={`px-4 py-2 rounded-xl text-xs font-bold transition-all shrink-0 cursor-pointer ${
+                    currentConfig.enableQuoteBooking
+                      ? 'bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300'
+                      : 'bg-[#15385E] hover:bg-[#1f4a7a] text-white'
+                  }`}
+                >
+                  {currentConfig.enableQuoteBooking ? 'Turn Off Quote Booking' : 'Enable Quote Booking'}
                 </button>
               </div>
             </div>
@@ -8434,6 +8476,51 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
       </div>
 
       {/* Slide-Over Detail Inspector Drawer (HubSpot / Pipedrive Style) */}
+      {viewQuoteLead && (
+        <div
+          className="fixed inset-0 z-[90] bg-slate-900/60 flex items-start justify-center overflow-y-auto p-3 sm:p-6"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Full quote"
+          onClick={() => setViewQuoteLead(null)}
+        >
+          <div className="w-full max-w-4xl bg-white rounded-2xl shadow-xl my-4" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between p-4 border-b border-slate-100">
+              <div>
+                <h2 className="text-base font-black text-[#0b2942]">
+                  Quote for {viewQuoteLead.firstName}
+                  {viewQuoteLead.companyName ? ` (${viewQuoteLead.companyName})` : ''}
+                </h2>
+                <p className="text-xs text-slate-500">
+                  {new Date(viewQuoteLead.createdAt).toLocaleString('en-AU')} · {viewQuoteLead.status}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setViewQuoteLead(null)}
+                className="p-1.5 rounded-lg hover:bg-slate-100 cursor-pointer"
+                aria-label="Close"
+              >
+                <X className="w-4 h-4 text-slate-600" />
+              </button>
+            </div>
+            <div className="p-4">
+              <TraditionalQuoteDocument
+                quote={viewQuoteLead.quote}
+                quoteNumber={viewQuoteLead.quoteNumber}
+                phone={currentConfig.phone}
+                customerData={{
+                  firstName: viewQuoteLead.firstName,
+                  companyName: viewQuoteLead.companyName,
+                  email: viewQuoteLead.email,
+                  mobile: viewQuoteLead.mobile,
+                }}
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
       <AdminSlideOverDrawer
         drawerState={drawerState}
         onClose={() => setDrawerState({ isOpen: false, type: 'customer', data: null })}

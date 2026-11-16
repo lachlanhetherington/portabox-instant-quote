@@ -23,6 +23,7 @@ import {
 } from 'lucide-react';
 import { AppConfig, CustomerLead, PromotionRule } from '../../types/quote';
 import { createPhoneBookingSmartsheetRow } from '../../services/smartsheetService';
+import { apiFetch } from '../../services/apiClient';
 
 export interface AdminChatMessage {
   id: string;
@@ -255,7 +256,7 @@ export const AdminCopilotChat: React.FC<AdminCopilotChatProps> = ({
     setIsLoading(true);
 
     try {
-      const response = await fetch('/api/gemini/admin-chat', {
+      const response = await apiFetch('/api/gemini/admin-chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

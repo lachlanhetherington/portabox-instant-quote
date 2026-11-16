@@ -1,0 +1,18 @@
+node_modules
+dist
+.git
+.claude
+.aistudio
+.gmp_cache
+*.log
+.DS_Store
+# Never bake secrets into the image; Cloud Run provides env vars at runtime.
+.env*
+!.env.example
+*service-account*.json
+serviceAccount*.json
+build
+playwright-report
+test-results
+tests
+*-debug.log

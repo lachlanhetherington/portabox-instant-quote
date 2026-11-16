@@ -128,6 +128,15 @@ export function getCompetitorBenchmark(): CompetitorBenchmark {
   }
 }
 
+/** Called after an admin save, so the benchmark can also be sent to the server (see adminSettingsSync). */
+let competitorSaveListener: ((benchmark: CompetitorBenchmark) => void) | null = null;
+export function setCompetitorSaveListener(fn: ((benchmark: CompetitorBenchmark) => void) | null): void {
+  competitorSaveListener = fn;
+}
+
+/** Key the benchmark is kept under in this browser (the server's copy is written here on load). */
+export const COMPETITOR_BENCHMARK_STORAGE_KEY = STORAGE_KEY;
+
 /**
  * Saves updated competitor benchmark rates to persistent storage
  * and dispatches a notification event so the entire app updates reactively.
@@ -145,7 +154,8 @@ export function saveCompetitorBenchmark(benchmark: CompetitorBenchmark): Competi
     };
 
     localStorage.setItem(STORAGE_KEY, JSON.stringify(validated));
-    
+    competitorSaveListener?.(validated);
+
     // Broadcast change to active windows and components
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('portabox:competitor-rates-updated', { detail: validated }));

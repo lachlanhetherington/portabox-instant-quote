@@ -1,3 +1,4 @@
+import { apiFetch } from './apiClient';
 /**
  * ClickSend Australian SMS & Voice Gateway Service
  * Provides direct Australian carrier SMS dispatch, inbound webhooks,
@@ -46,7 +47,8 @@ export function loadClickSendConfig(): ClickSendConfig {
   try {
     const raw = localStorage.getItem(CLICKSEND_CONFIG_KEY);
     if (!raw) return DEFAULT_CLICKSEND_CONFIG;
-    return { ...DEFAULT_CLICKSEND_CONFIG, ...JSON.parse(raw) };
+    // Credentials live on the server only; drop any that older versions stored here
+    return { ...DEFAULT_CLICKSEND_CONFIG, ...JSON.parse(raw), username: '', apiKey: '' };
   } catch {
     return DEFAULT_CLICKSEND_CONFIG;
   }
@@ -54,7 +56,7 @@ export function loadClickSendConfig(): ClickSendConfig {
 
 export function saveClickSendConfig(config: ClickSendConfig): void {
   try {
-    localStorage.setItem(CLICKSEND_CONFIG_KEY, JSON.stringify(config));
+    localStorage.setItem(CLICKSEND_CONFIG_KEY, JSON.stringify({ ...config, username: '', apiKey: '' }));
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('portabox:clicksend-config-updated', { detail: config }));
     }
@@ -97,15 +99,13 @@ export async function sendClickSendSms(params: {
   const formattedTo = formatAustralianMobile(params.to);
 
   try {
-    const response = await fetch('/api/clicksend/sms/send', {
+    const response = await apiFetch('/api/clicksend/sms/send', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         to: formattedTo,
         message: params.message,
         from: params.from || config.senderId || 'Portabox',
-        username: config.username || undefined,
-        apiKey: config.apiKey || undefined,
         contactId: params.contactId,
         customString: params.customString,
       }),
@@ -148,12 +148,7 @@ export async function sendClickSendSms(params: {
 export async function fetchClickSendAccount(): Promise<ClickSendAccountInfo> {
   const config = loadClickSendConfig();
   try {
-    const queryParams = new URLSearchParams();
-    if (config.username) queryParams.set('username', config.username);
-    if (config.apiKey) queryParams.set('apiKey', config.apiKey);
-
-    const url = `/api/clicksend/account${queryParams.toString() ? `?${queryParams.toString()}` : ''}`;
-    const response = await fetch(url);
+    const response = await apiFetch('/api/clicksend/account');
     if (!response.ok) {
       return { configured: false, balance: 0, currency: 'AUD' };
     }

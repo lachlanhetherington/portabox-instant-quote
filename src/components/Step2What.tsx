@@ -26,8 +26,8 @@ import {
   getMetroHubForPostcode,
   isPostcodeBlocked,
   calculateLegFuelSurcharge,
-  findClosestDepot,
 } from '../services/pricingEngine';
+import { evaluatePostcodeServiceTier } from '../services/postcodeServiceTierEngine';
 
 import { AreYouStuckBanner } from './AreYouStuckBanner';
 
@@ -122,6 +122,13 @@ export const Step2What: React.FC<Step2WhatProps> = ({
     }
 
     setDestBlockedNotice(null);
+    if (evaluatePostcodeServiceTier(record, config.postcodeServiceTiers, false).tier === 3) {
+      setValidationError(`${record.suburb} ${record.state} ${record.postcode} is outside our coverage area (we service SA, VIC, NSW/ACT and QLD). Please choose another destination or call 1800 467 637.`);
+      onSelectDestinationPostcode(null);
+      setDestQuery(`${record.postcode} ${record.suburb}`);
+      setIsDestOpen(false);
+      return;
+    }
     setValidationError(null);
     onSelectDestinationPostcode(record);
     setDestQuery(`${record.postcode} ${record.suburb}`);
@@ -226,7 +233,14 @@ export const Step2What: React.FC<Step2WhatProps> = ({
     if (isMoving && !destinationPostcode) {
       // Check if current destQuery matches any suggestion
       if (destSuggestions.length > 0) {
-        handleSelectDestination(destSuggestions[0]);
+        const first = destSuggestions[0];
+        handleSelectDestination(first);
+        if (
+          isPostcodeBlocked(first.postcode, config) ||
+          evaluatePostcodeServiceTier(first, config.postcodeServiceTiers, false).tier === 3
+        ) {
+          return;
+        }
         onContinue();
       } else {
         setValidationError('Please select your destination postcode or suburb before continuing.');
@@ -236,73 +250,11 @@ export const Step2What: React.FC<Step2WhatProps> = ({
     onContinue();
   };
 
-  // Initial delivery fee for the first leg (e.g. Hyde Park, SA 5061 - Initial Delivery $179)
-  // Kept on one line; updates dynamically based on onsite vs Portabox location and choices
-  const closestOriginDepot = findClosestDepot(
-    originPostcode.lat,
-    originPostcode.lng,
-    originPostcode.postcode,
-    enableSunshineCoast
-  );
-  const originDepotDist = closestOriginDepot.distanceKm;
-  let originDeliveryZoneBaseFee = originLocConfig.deliveryZones.zoneABaseFee ?? 149;
-  let originKmRate = originLocConfig.deliveryZones.zoneARatePerKm ?? 0;
-
-  if (originDepotDist < (originLocConfig.deliveryZones.zoneAMaxKm ?? 25)) {
-    originDeliveryZoneBaseFee = originLocConfig.deliveryZones.zoneABaseFee ?? 149;
-    originKmRate = originLocConfig.deliveryZones.zoneARatePerKm ?? 0;
-  } else if (originDepotDist < (originLocConfig.deliveryZones.zoneBMaxKm ?? 50)) {
-    originDeliveryZoneBaseFee = originLocConfig.deliveryZones.zoneBBaseFee ?? 179;
-    originKmRate = originLocConfig.deliveryZones.zoneBRatePerKm ?? 0;
-  } else if (originDepotDist < (originLocConfig.deliveryZones.zoneCMaxKm ?? 75)) {
-    originDeliveryZoneBaseFee = originLocConfig.deliveryZones.zoneCBaseFee ?? 219;
-    originKmRate = originLocConfig.deliveryZones.zoneCRatePerKm ?? 0;
-  } else if (originDepotDist <= (originLocConfig.deliveryZones.zoneDMaxKm ?? 100)) {
-    originDeliveryZoneBaseFee = originLocConfig.deliveryZones.zoneDBaseFee ?? 249;
-    originKmRate = originLocConfig.deliveryZones.zoneDRatePerKm ?? 0;
-  } else {
-    originDeliveryZoneBaseFee = originLocConfig.deliveryZones.zoneEBaseFee ?? 249;
-    originKmRate = originLocConfig.deliveryZones.zoneERatePerKm ?? 5.0;
-  }
-
-  const effectiveFirstLegFee = initialDeliveryFee !== undefined
-    ? initialDeliveryFee
-    : (originDeliveryZoneBaseFee * effectiveContainerCount);
-
   return (
     <div className="bg-white rounded-2xl sm:rounded-3xl p-4 sm:p-8 lg:p-10 shadow-xs border-2 border-[#DAD7D1]">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3">
-        <h1 className="text-2xl sm:text-4xl font-black text-[#15385E] tracking-tight">
-          What do you need?
-        </h1>
-
-        {/* Selected location pill with Initial Delivery Fee kept strictly on ONE line */}
-        <button
-          onClick={onChangeLocation}
-          className="flex items-center gap-1.5 text-xs font-bold text-[#15385E] bg-sky-50 hover:bg-sky-100 px-3.5 py-1.5 rounded-full transition-colors cursor-pointer self-start sm:self-auto border border-[#5CC1EF]/40 whitespace-nowrap shrink-0 shadow-2xs"
-        >
-          <span className="text-[#15385E] font-black">✓</span>
-          <span className="whitespace-nowrap">{originPostcode.suburb}, {originPostcode.state} {originPostcode.postcode} - Initial Delivery ${effectiveFirstLegFee}</span>
-          <span className="text-[#15385E] ml-1 underline font-black">Change</span>
-        </button>
-      </div>
-
-      {/* 1-Line Route & Initial Delivery Fee Bar */}
-      <div className="mt-1 mb-5 px-3.5 py-2 rounded-xl bg-slate-50 border border-[#DAD7D1] flex items-center justify-between gap-3 text-xs">
-        <div className="flex items-center gap-2 whitespace-nowrap overflow-hidden text-ellipsis">
-          <MapPin className="w-4 h-4 text-[#15385E] shrink-0" />
-          <span className="font-extrabold text-[#15385E] whitespace-nowrap">
-            {originPostcode.suburb}, {originPostcode.state} {originPostcode.postcode} - Initial Delivery ${effectiveFirstLegFee}
-          </span>
-        </div>
-        <button
-          type="button"
-          onClick={onChangeLocation}
-          className="text-xs font-bold text-[#15385E] underline hover:text-[#5CC1EF] transition-colors whitespace-nowrap shrink-0 cursor-pointer"
-        >
-          Change location
-        </button>
-      </div>
+      <h1 className="text-2xl sm:text-4xl font-black text-[#15385E] tracking-tight mb-3">
+        What do you need?
+      </h1>
 
       {/* 2 Main Choice Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-6 max-w-4xl">
@@ -606,7 +558,7 @@ export const Step2What: React.FC<Step2WhatProps> = ({
                 <div className="space-y-1">
                   <div className="flex items-center gap-2 flex-wrap">
                     <span className="font-extrabold text-sm text-[#15385E]">
-                      We will take your container to a portabox location store it for you and deliver your container to your new location when you are ready.
+                      Need interim storage between your move?
                     </span>
                     {serviceType === 'moving_storage' ? (
                       <span className="text-[10px] font-black uppercase tracking-wider bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full border border-emerald-300 shrink-0">
@@ -618,9 +570,6 @@ export const Step2What: React.FC<Step2WhatProps> = ({
                       </span>
                     )}
                   </div>
-                  <p className="text-xs text-slate-600 leading-relaxed">
-                    Route: FROM: {originPostcode.suburb}, {originPostcode.state} {originPostcode.postcode} → VIA: Portabox Location → TO: {destinationPostcode.suburb}, {destinationPostcode.state} {destinationPostcode.postcode}. We collect your container, store it securely at our Portabox Location, and deliver it when you are ready.
-                  </p>
                 </div>
               </label>
             </div>

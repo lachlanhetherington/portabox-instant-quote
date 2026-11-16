@@ -156,7 +156,7 @@ export const Step6Confirmation: React.FC<Step6ConfirmationProps> = ({
           /* Email Confirmation View */
           <div className="bg-white rounded-3xl p-5 shadow-xs border border-slate-200/80 animate-in fade-in duration-200">
             <div className="flex items-center justify-between text-[11px] text-slate-400 font-bold mb-3 pb-2 border-b border-slate-100">
-              <span className="text-slate-700">Inbox · quotes@portabox.com.au</span>
+              <span className="text-slate-700">Inbox · sales@auspods.com.au</span>
               <span>Today</span>
             </div>
 

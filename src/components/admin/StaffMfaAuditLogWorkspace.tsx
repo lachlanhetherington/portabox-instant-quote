@@ -190,11 +190,6 @@ export const StaffMfaAuditLogWorkspace: React.FC<StaffMfaAuditLogWorkspaceProps>
             onClick={() => {
               if (onSwitchToCeo) {
                 onSwitchToCeo();
-              } else {
-                const staff = loadStaffMembers();
-                const ceo = staff.find((s) => s.role === 'ceo') || INITIAL_STAFF_MEMBERS[0];
-                setStaffSession(ceo, 'passkey');
-                window.location.reload();
               }
             }}
             className="px-6 py-3 bg-[#0b2942] hover:bg-[#15385E] text-white rounded-xl text-xs font-black shadow-md flex items-center justify-center gap-2 mx-auto cursor-pointer transition-all hover:scale-105"

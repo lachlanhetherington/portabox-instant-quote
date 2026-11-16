@@ -1,6 +1,7 @@
 import { initializeApp, getApps } from 'firebase/app';
 import { getFirestore, type Firestore } from 'firebase/firestore';
-import { getAuth, signInWithPopup, GoogleAuthProvider, type Auth, User } from 'firebase/auth';
+import { publicEnv } from '../utils/publicEnv';
+import { getAuth, signInWithPopup, GoogleAuthProvider, OAuthProvider, User, type Auth } from 'firebase/auth';
 
 /**
  * Shipped with the original developer's own Firebase project hardcoded,
@@ -41,14 +42,60 @@ const app = hasFirebaseConfig
   : null;
 
 /* Asserted rather than typed as nullable on purpose. Around sixty call
-   sites across seven admin services take db and auth as given, and they
-   are upstream's files — widening the type here would mean editing every
-   one of them and re-doing it on each drop. The runtime behaviour is the
-   same either way: unconfigured, a call throws where it is made, so the
-   admin feature fails and the quote flow, which never imports this, does
-   not. Guard with hasFirebaseConfig before reaching for either. */
-export const db = (app ? getFirestore(app) : null) as Firestore;
-export const auth = (app ? getAuth(app) : null) as Auth;
+   sites across seven admin services take db as given, and they are
+   upstream's files — widening the type here would mean editing every one
+   of them and re-doing it on each drop. Unconfigured, a call throws where
+   it is made, so the admin feature fails rather than the page. Guard with
+   hasFirebaseConfig before reaching for it. */
+/* Upstream's own choice of database, kept: "(default)" in production,
+   "staging" otherwise, so local work never reads or writes production
+   data. Only the guard against an uninitialised app is added. */
+const firestoreDatabaseId =
+  envVar('VITE_FIRESTORE_DATABASE_ID') ||
+  (typeof process !== 'undefined' ? process.env?.FIRESTORE_DATABASE_ID : '') ||
+  'staging';
+
+export const db = (
+  app
+    ? firestoreDatabaseId === '(default)'
+      ? getFirestore(app)
+      : getFirestore(app, firestoreDatabaseId)
+    : null
+) as Firestore;
+
+/* auth cannot be null, and that is not a style preference.
+   App.tsx calls onAuthStateChanged(auth, ...) as the component mounts,
+   so this module is now reached by the public quote flow and not only by
+   the admin screens. With no Firebase project configured, a null here
+   threw before React rendered anything: blank page, no quote form,
+   nothing — for every customer, not just staff.
+
+   An earlier version of this comment said the quote flow never imported
+   this module. That was true until the drop that moved staff login into
+   Firebase, and it is the assumption that broke.
+
+   So unconfigured, auth is a stand-in that answers exactly one question —
+   "is anyone signed in?" — with "no", and does nothing else. Any real
+   authentication still fails at the point of use, which is where it
+   should: this keeps the page up, it does not pretend to log anyone in. */
+const reportSignedOut = (next: unknown) => {
+  const cb =
+    typeof next === 'function'
+      ? (next as (u: null) => void)
+      : (next as { next?: (u: null) => void } | null)?.next;
+  if (typeof cb === 'function') cb(null);
+  return () => {};
+};
+
+const signedOutAuth = {
+  currentUser: null,
+  onAuthStateChanged: reportSignedOut,
+  onIdTokenChanged: reportSignedOut,
+  beforeAuthStateChanged: () => () => {},
+  signOut: async () => {},
+};
+
+export const auth = (app ? getAuth(app) : signedOutAuth) as unknown as Auth;
 const provider = new GoogleAuthProvider();
 provider.addScope('https://www.googleapis.com/auth/drive.file');
 
@@ -62,6 +109,17 @@ export const googleSignIn = async (): Promise<{ user: User; accessToken: string 
         return { user: result.user, accessToken: cachedAccessToken };
     }
     return null;
+};
+
+/**
+ * Signs in with a Microsoft work account (Entra ID) from the given tenant.
+ * The Azure app registration behind Firebase's Microsoft provider must be single-tenant.
+ */
+export const microsoftSignIn = async (tenantId: string): Promise<User> => {
+    const microsoft = new OAuthProvider('microsoft.com');
+    microsoft.setCustomParameters({ tenant: tenantId, prompt: 'select_account' });
+    const result = await signInWithPopup(auth, microsoft);
+    return result.user;
 };
 
 export const getAccessToken = async (): Promise<string | null> => {

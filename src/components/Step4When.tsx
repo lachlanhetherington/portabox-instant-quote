@@ -1,14 +1,26 @@
-import React, { useState } from 'react';
-import { ArrowLeft, ArrowRight, Check, Sparkles, TrendingDown, Info, ShieldCheck, Gift, Award, AlertTriangle, Lock } from 'lucide-react';
+import React from 'react';
+import { ArrowLeft, ArrowRight, Check, Sparkles, TrendingDown, Info, ShieldCheck, Award, AlertTriangle } from 'lucide-react';
 import { PostcodeRecord } from '../data/australianPostcodes';
 import { AppConfig, BillingCycle, ContainerSizeId, StorageDuration, ServiceType, AnnualMilestoneOption, QuoteBreakdown } from '../types/quote';
 import {
-  getLocationPricingForHub,
+  getContainerRentalPrices,
   getMetroHubForPostcode,
-  getDurationDiscount,
+  getBookedSizeCounts,
+  getMatrixContainerSize,
+  calculateSizeDiscounts,
+  calculateUpfrontBreakdown,
+  getMilestoneCreditInPeriod,
+  getPayableNowDeliveryAmount,
+  isUpfrontCycleAllowed,
   evaluateDiscountMatrix,
+  getBlanketUnitValue,
+  getLockUnitValue,
+  getUpfrontDiscountPercent,
+  DURATION_BLOCKS,
+  getDurationBlock,
 } from '../services/pricingEngine';
 import { formatMoney } from '../utils/currency';
+import { UPFRONT_SAVING_DISCLAIMER } from '../services/quoteCostSections';
 import { AreYouStuckBanner } from './AreYouStuckBanner';
 
 interface Step4WhenProps {
@@ -56,131 +68,136 @@ export const Step4When: React.FC<Step4WhenProps> = ({
 }) => {
   const metroHub = getMetroHubForPostcode(originPostcode);
 
-  const [customDurationVal, setCustomDurationVal] = useState<number>(() => {
-    if (storageDuration === '2_weeks') return 0.5;
-    if (storageDurationMonths && storageDurationMonths > 0) return storageDurationMonths;
-    if (storageDuration === '1_to_3_months') return 1;
-    if (storageDuration === '4_to_11_months') return 6;
+  // Selected duration, as the first month of its block (4–5 → 4, 6–8 → 6, 9–11 → 9, 12+ → 12)
+  const selectedMonths = (() => {
+    if (storageDurationMonths && storageDurationMonths >= 1) return getDurationBlock(storageDurationMonths).minMonths;
+    if (storageDuration === '4_to_11_months') return 4;
     if (storageDuration === '12_plus_months') return 12;
-    const match = storageDuration.match(/\d+/);
-    return match ? parseInt(match[0], 10) : 1;
-  });
+    return 1;
+  })();
+  const selectedBlock = getDurationBlock(selectedMonths);
 
-  const getContainerRates = () => {
-    const locPricing = getLocationPricingForHub(config, metroHub);
-    const isOnsite = serviceType === 'storage_at_place' || storagePlacement === 'my_place';
-    const prices = isOnsite
-      ? (locPricing.onsiteContainerPrices || config.onsiteContainerPrices || {
-          small_10m3: { monthlyRate: 149, weeklyRate: 49 },
-          medium_19m3: { monthlyRate: 169, weeklyRate: 59 },
-          large_25m3: { monthlyRate: 179, weeklyRate: 65 },
-        })
-      : locPricing.containerPrices;
-    const { small_10m3, medium_19m3, large_25m3 } = prices;
-
-    if (containerSelections) {
-      const selSmall = containerSelections.small_10m3 || 0;
-      const selMed = containerSelections.medium_19m3 || 0;
-      const selLrg = (containerSelections.large_25m3 || 0) + ((containerSelections.two_large_50m3 || 0) * 2);
-      if (selSmall + selMed + selLrg > 0) {
-        return {
-          weeklyRate: (selSmall * small_10m3.weeklyRate) + (selMed * medium_19m3.weeklyRate) + (selLrg * large_25m3.weeklyRate),
-          monthlyRate: (selSmall * small_10m3.monthlyRate) + (selMed * medium_19m3.monthlyRate) + (selLrg * large_25m3.monthlyRate),
-        };
-      }
-    }
-
-    let weekly = 75;
-    let monthly = 219;
-    if (containerSize === 'small_10m3') {
-      weekly = small_10m3.weeklyRate;
-      monthly = small_10m3.monthlyRate;
-    } else if (containerSize === 'medium_19m3') {
-      weekly = medium_19m3.weeklyRate;
-      monthly = medium_19m3.monthlyRate;
-    } else if (containerSize === 'large_25m3') {
-      weekly = large_25m3.weeklyRate;
-      monthly = large_25m3.monthlyRate;
-    } else if (containerSize === 'two_large_50m3') {
-      weekly = large_25m3.weeklyRate * 2;
-      monthly = large_25m3.monthlyRate * 2;
-    }
-    const count = containerSize === 'two_large_50m3' ? 1 : (containerCount || 1);
-    return {
-      weeklyRate: weekly * count,
-      monthlyRate: monthly * count,
-    };
-  };
-
-  const { weeklyRate, monthlyRate } = getContainerRates();
-
-  const isTwoWeeksSelected = storageDuration === '2_weeks';
-  const effectiveContainerCount = containerSize === 'two_large_50m3' ? 2 : (containerCount || 1);
-  const twoWeeksRatePerContainer = config.twoWeeksStorageRate !== undefined ? config.twoWeeksStorageRate : 199;
-  const twoWeeksTotalFee = twoWeeksRatePerContainer * effectiveContainerCount;
+  // Container rates and per-size counts, using the same helpers as calculateQuote
+  const isOnsiteBooking = serviceType === 'storage_at_place' || storagePlacement === 'my_place';
+  const isInterstateJob = Boolean(
+    destinationPostcode && metroHub !== getMetroHubForPostcode(destinationPostcode)
+  );
+  const rentalPrices = getContainerRentalPrices(config, metroHub, { isOnsite: isOnsiteBooking, isInterstate: isInterstateJob, serviceType });
+  const sizeCounts = getBookedSizeCounts(containerSize, containerCount, containerSelections);
+  const matrixContainerSize = getMatrixContainerSize(sizeCounts, containerSize);
+  const monthlyRate =
+    sizeCounts.small_10m3 * rentalPrices.small_10m3.monthlyRate +
+    sizeCounts.medium_19m3 * rentalPrices.medium_19m3.monthlyRate +
+    sizeCounts.large_25m3 * rentalPrices.large_25m3.monthlyRate;
+  const weeklyRate =
+    sizeCounts.small_10m3 * rentalPrices.small_10m3.weeklyRate +
+    sizeCounts.medium_19m3 * rentalPrices.medium_19m3.weeklyRate +
+    sizeCounts.large_25m3 * rentalPrices.large_25m3.weeklyRate;
+  // 10 m³ containers are exempt from promotional perks, so the 1st-month-free value covers larger sizes only
+  const nonSmallMonthlyRate = monthlyRate - sizeCounts.small_10m3 * rentalPrices.small_10m3.monthlyRate;
 
   // Duration in months for discount engine:
-  const effectiveMonths = isTwoWeeksSelected ? 0.5 : customDurationVal;
+  const effectiveMonths = selectedMonths;
+  const eligibleContainerCount = sizeCounts.medium_19m3 + sizeCounts.large_25m3;
 
+  // Must match calculateQuote: interstate means origin and destination are served by different depot hubs
   const isInterstateMove = Boolean(
     destinationPostcode &&
-    originPostcode.state !== destinationPostcode.state
+    getMetroHubForPostcode(originPostcode) !== getMetroHubForPostcode(destinationPostcode)
   );
 
-  // Evaluate the Admin Discount Matrix based on exact business logic (image-2.jpg)
-  const matrixEvaluation = evaluateDiscountMatrix(
-    {
-      months: effectiveMonths,
-      containerSize,
-      serviceType: serviceType || 'storage_facility',
-      isInterstate: isInterstateMove,
-      storagePlacement: storagePlacement || 'facility',
-      hub: metroHub,
-      annualOption: annualDiscountOption,
-      billingCycle,
-      baseMonthlyRate: monthlyRate,
-    },
-    config.discountMatrixRules
-  );
+  // Evaluate the Admin Discount Matrix (same inputs as calculateQuote)
+  const evaluateForMonths = (months: number) =>
+    evaluateDiscountMatrix(
+      {
+        months,
+        containerSize: matrixContainerSize,
+        serviceType: serviceType || 'storage_facility',
+        isInterstate: isInterstateMove,
+        storagePlacement: storagePlacement || 'facility',
+        hub: metroHub,
+        annualOption: annualDiscountOption,
+        billingCycle,
+        baseMonthlyRate: nonSmallMonthlyRate,
+        eligibleContainerCount,
+        upfrontDiscounts: config.upfrontDiscounts,
+      },
+      config.discountMatrixRules,
+      config.packingSupplies
+    );
+  const matrixEvaluation = evaluateForMonths(effectiveMonths);
+  const sixMonthsUpfrontPercent = getUpfrontDiscountPercent('6_months_upfront', config.upfrontDiscounts);
+  const twelveMonthsUpfrontPercent = getUpfrontDiscountPercent('12_months_upfront', config.upfrontDiscounts);
 
-  const durationDiscountInfo = getDurationDiscount(
-    {
-      months: effectiveMonths,
-      serviceType,
-      isInterstate: isInterstateMove,
-      storagePlacement,
-    },
-    config.durationDiscounts
-  );
-  const durationDiscountPct = Math.max(durationDiscountInfo.discountPercent, matrixEvaluation.discountPercent);
-  const isCompletionDurationDiscount = durationDiscountInfo.applyMode === 'on_completion_remaining_charges';
-  const durationDiscountDollars = Math.round(monthlyRate * (durationDiscountPct / 100));
-  const discountedMonthlyRate = isCompletionDurationDiscount
-    ? monthlyRate
-    : Math.max(0, monthlyRate - durationDiscountDollars);
+  // Must match calculateQuote: the duration discount comes from the admin Discount Matrix only
+  // (Dan, 16 Nov), and 10 m³-only bookings are exempt. It is applied to the monthly rate before any upfront discount.
+  const matrixDurationPercent = Math.max(0, Math.min(100, Number(matrixEvaluation.matchedRule?.discountPercent) || 0));
+  const isSmallOnlyBooking = (() => {
+    const sel = containerSelections;
+    if (sel && Object.values(sel).some((n) => (n || 0) > 0)) {
+      return (sel.small_10m3 || 0) > 0 && !(sel.medium_19m3 || 0) && !(sel.large_25m3 || 0) && !(sel.two_large_50m3 || 0);
+    }
+    return containerSize === 'small_10m3';
+  })();
+  const durationDiscountPct = isSmallOnlyBooking ? 0 : matrixDurationPercent;
+  const isCompletionDurationDiscount = false;
+  // Per-size discounts (same calculation as the quote): 10 m³ containers get no discount
+  const sizeDiscounts = calculateSizeDiscounts({
+    prices: rentalPrices,
+    counts: sizeCounts,
+    durationDiscountPercent: isCompletionDurationDiscount ? 0 : durationDiscountPct,
+    firstMonthFree: matrixEvaluation.firstMonthFree,
+  });
+  const discountedMonthlyRate = sizeDiscounts.effectiveMonthly;
+  // Storage still charged in month 1 when 1st month free applies (the 10 m³ containers, if any)
+  const firstMonthStorageCharge = Math.max(0, discountedMonthlyRate - sizeDiscounts.freeMonthValue);
+  const isFreeMonthOnCycle = billingCycle === 'monthly' || billingCycle === '6_months_upfront';
 
   // Weekly equivalent for monthly comparison:
   const monthlyCostOnWeeklyRate = Math.round(weeklyRate * (52 / 12));
 
-  // Upfront calculations incorporating 1st month free and upfront stacking (5% for 6m, 10% for 12m):
-  // 6 months upfront: If 1st month is free, customer only pays 5 months at 5% off!
-  const sixMonthsStandardCost = monthlyRate * 6;
-  const sixMonthsUpfrontTotal = matrixEvaluation.firstMonthFree
-    ? Math.round(monthlyRate * 5 * 0.95)
-    : Math.round(monthlyRate * 6 * 0.95);
-  const sixMonthsSavings = sixMonthsStandardCost - sixMonthsUpfrontTotal;
-  const sixMonthsSavingsPercent = Math.round((sixMonthsSavings / sixMonthsStandardCost) * 100);
+  // Dan (16 Nov): upfront savings count every delivery leg. Today the only delivery savings are the
+  // legs waived because the customer loads / unloads at the Portabox location (SID / SFPU).
+  const deliverySavings = Math.round(
+    (activeQuote?.waivedLegs || []).reduce((sum, leg) => sum + (leg.waivedSavings || 0), 0)
+  );
 
-  // 12 months upfront: 10% off
-  const twelveMonthsStandardCost = monthlyRate * 12;
-  const twelveMonthsUpfrontTotal = Math.round(monthlyRate * 12 * 0.90);
-  const twelveMonthsSavings = twelveMonthsStandardCost - twelveMonthsUpfrontTotal;
-  const twelveMonthsSavingsPercent = Math.round((twelveMonthsSavings / twelveMonthsStandardCost) * 100);
+  // Dan (16 Nov) upfront savings, using the same calculation as the quote:
+  //   duration discount = milestone credit inside the prepaid months (+ any matrix % discount)
+  //   N% upfront = N% of (rental - credit) + N% of the initial delivery incl. fuel levy
+  // The parts on each card add up to its saving.
+  const initialDeliveryWithFuel = getPayableNowDeliveryAmount(activeQuote?.legs?.find((l) => l.isPayableNow));
+  const cents = (n: number) => Math.round(n * 100) / 100;
+  const buildUpfront = (months: number, percent: number, includeFreeMonth: boolean) => {
+    const available = isUpfrontCycleAllowed(months === 6 ? '6_months_upfront' : '12_months_upfront', effectiveMonths);
+    const listCost = monthlyRate * months;
+    const freeMonth = includeFreeMonth && matrixEvaluation.firstMonthFree ? sizeDiscounts.freeMonthValue : 0;
+    const credit = getMilestoneCreditInPeriod(months, matrixEvaluation.milestoneDiscountAmount, annualDiscountOption);
+    const b = calculateUpfrontBreakdown({
+      effectiveMonthly: discountedMonthlyRate,
+      months,
+      freeMonthValue: freeMonth,
+      milestoneCredit: credit,
+      percent,
+      initialDeliveryWithFuel,
+    });
+    const durationSaving = cents((monthlyRate - discountedMonthlyRate) * months + credit);
+    const upfrontSaving = cents(b.storageUpfrontSaving + b.deliveryUpfrontSaving);
+    const parts: string[] = [];
+    if (freeMonth > 0) parts.push(`1st month free $${formatMoney(freeMonth)}`);
+    parts.push(`duration discount $${formatMoney(durationSaving)}`);
+    if (upfrontSaving > 0) parts.push(`${percent}% upfront $${formatMoney(upfrontSaving)}`);
+    if (deliverySavings > 0) parts.push(`delivery savings $${formatMoney(deliverySavings)}`);
+    const saving = cents(freeMonth + durationSaving + upfrontSaving + deliverySavings);
+    return { listCost, total: b.storageTotal, saving: available ? saving : 0, parts, hasFreeMonth: freeMonth > 0, available };
+  };
+  const sixMonthsUpfront = buildUpfront(6, sixMonthsUpfrontPercent, true);
+  const twelveMonthsUpfront = buildUpfront(12, twelveMonthsUpfrontPercent, false);
 
   const handleSelectMonths = (months: number) => {
-    setCustomDurationVal(months);
     if (onSelectDurationMonths) onSelectDurationMonths(months);
-
+    // Dan (16 Nov): an upfront option the new duration doesn't allow falls back to monthly
+    if (!isUpfrontCycleAllowed(billingCycle, months)) onSelectBillingCycle('monthly');
     if (months <= 3) {
       onSelectDuration('1_to_3_months');
     } else if (months < 12) {
@@ -190,7 +207,61 @@ export const Step4When: React.FC<Step4WhenProps> = ({
     }
   };
 
-  const isSmallExempt = containerSize === 'small_10m3';
+  // Free lock and blanket rental are for 12' and 16' containers only (7' get none, Dan 16 Nov)
+  const totalContainers = eligibleContainerCount;
+
+  // Dan (16 Nov): "Total Savings" = one-off savings + monthly savings, e.g. "Save $241 + $25 monthly".
+  // One-off: the free 1st month, the free lock(s) and the 12+ month credit.
+  // Monthly: free blanket rental and any duration discount, every month.
+  const oneOffSavings = Math.round(
+    (matrixEvaluation.firstMonthFree && isFreeMonthOnCycle ? nonSmallMonthlyRate : 0) +
+      (matrixEvaluation.freeLockIncluded ? totalContainers * getLockUnitValue(config.packingSupplies) : 0) +
+      (effectiveMonths >= 12 ? matrixEvaluation.milestoneDiscountAmount : 0)
+  );
+  const monthlySavings = Math.round(
+    (matrixEvaluation.freeBlanketsCount > 0
+      ? totalContainers * (config.packingSupplies?.freeBlanketsPerContainer ?? 10) * getBlanketUnitValue(config.packingSupplies)
+      : 0) + sizeDiscounts.lines.reduce((sum, l) => sum + (l.durationDiscountMonthly || 0), 0)
+  );
+  const totalSavingsLabel = [
+    oneOffSavings > 0 ? `Save $${formatMoney(oneOffSavings)}` : '',
+    monthlySavings > 0 ? `${oneOffSavings > 0 ? '+ ' : 'Save '}$${formatMoney(monthlySavings)} monthly` : '',
+  ]
+    .filter(Boolean)
+    .join(' ');
+
+  // What each container gets for the chosen duration, listed one container at a time
+  const perContainerPerks = (() => {
+    const rows: { key: string; label: string; perks: string[] }[] = [];
+    let n = 0;
+    (['large_25m3', 'medium_19m3', 'small_10m3'] as const).forEach((sizeId) => {
+      const line = sizeDiscounts.lines.find((l) => l.sizeId === sizeId);
+      if (!line) return;
+      const perContainerOff = line.count > 0 ? Math.round(line.durationDiscountMonthly / line.count) : 0;
+      for (let i = 0; i < line.count; i++) {
+        n += 1;
+        const perks: string[] = [];
+        const eligible = sizeId !== 'small_10m3';
+        if (line.firstMonthFree && isFreeMonthOnCycle) perks.push('1st month free');
+        if (perContainerOff > 0) perks.push(`${line.durationDiscountPercent}% off (−$${formatMoney(perContainerOff)}/mo)`);
+        // 7' (10 m³) containers get no free blankets or lock (Dan 16 Nov)
+        if (eligible && (config.packingSupplies?.freeBlanketsPerContainer ?? 10) > 0) {
+          perks.push(`Free Blanket Rental (${config.packingSupplies?.freeBlanketsPerContainer ?? 10})`);
+        }
+        if (eligible && matrixEvaluation.freeLockIncluded) perks.push('Free lock');
+        if (eligible && matrixEvaluation.milestoneDiscountAmount > 0 && eligibleContainerCount > 0) {
+          perks.push(`$${formatMoney(matrixEvaluation.milestoneDiscountAmount / eligibleContainerCount)} credit`);
+        }
+        rows.push({ key: `${sizeId}-${i}`, label: `Container ${n} · ${line.label}`, perks });
+      }
+    });
+    return rows;
+  })();
+
+  // Only 10 m³ containers booked: no promotional perks, so show the 7' note instead of the package.
+  // Mixed bookings (10 m³ + larger) show the package; the per-size box shows "No discount" for the 10 m³.
+  const isSmallExempt =
+    sizeCounts.small_10m3 > 0 && sizeCounts.medium_19m3 === 0 && sizeCounts.large_25m3 === 0;
 
   return (
     <div className="bg-white rounded-2xl sm:rounded-3xl p-4 sm:p-8 lg:p-10 shadow-xs border-2 border-[#DAD7D1]">
@@ -198,7 +269,7 @@ export const Step4When: React.FC<Step4WhenProps> = ({
         Duration &amp; Billing
       </h1>
       <p className="text-xs sm:text-sm text-slate-500 mb-8 max-w-2xl">
-        Choose your storage duration and select your preferred billing schedule. The longer you store, the more you save.
+        Choose your storage duration and select your preferred billing schedule.
       </p>
 
       {/* Section 1: Estimated storage duration (select weeks or months) */}
@@ -212,111 +283,54 @@ export const Step4When: React.FC<Step4WhenProps> = ({
               Select an estimated storage period to unlock promotional discounts and guaranteed price freezes.
             </p>
           </div>
-          <div className="flex items-center gap-2">
-            <span className="text-[11px] font-black uppercase tracking-wider text-emerald-800 bg-emerald-100 px-2.5 py-1 rounded-md border border-emerald-300 flex items-center gap-1.5">
-              <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
-              1-Year Booking Price Guarantee
-            </span>
-          </div>
         </div>
 
         {/* Duration Selection Buttons */}
         <div className="space-y-4">
           <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2.5">
-            {[
-              { id: '2_weeks', label: '2 Weeks', months: 0.5, tag: 'Standard' },
-              { id: '1_month', label: '1 Month', months: 1, tag: 'Free Kit' },
-              { id: '2_months', label: '2 Months', months: 2, tag: '1st Mth Free' },
-              { id: '3_months', label: '3 Months', months: 3, tag: '1st Mth Free' },
-              { id: '6_months', label: '6 Months', months: 6, tag: '1st Mth Free' },
-              { id: '9_months', label: '9 Months', months: 9, tag: '1st Mth Free' },
-              { id: '12_plus_months', label: '12+ Months', months: 12, tag: '$400 Credit' },
-            ].map((opt) => {
-              const isSelected = opt.id === '2_weeks'
-                ? storageDuration === '2_weeks'
-                : storageDuration !== '2_weeks' && customDurationVal === opt.months;
+            {DURATION_BLOCKS.map((block) => {
+              const evalForBlock = evaluateForMonths(block.minMonths);
+              // Dan (15 Nov): every block shows "Free Kit"; the duration perk goes underneath.
+              const hasFreeKit = evalForBlock.freeLockIncluded || evalForBlock.freeBlanketsCount > 0;
+              const perkTag = evalForBlock.milestoneDiscountAmount > 0
+                ? `$${formatMoney(evalForBlock.milestoneDiscountAmount)} Credit`
+                : evalForBlock.firstMonthFree
+                ? '1st Mth Free'
+                : null;
+              const isSelected = selectedBlock.id === block.id;
               return (
                 <button
-                  key={opt.id}
+                  key={block.id}
                   type="button"
-                  onClick={() => {
-                    if (opt.id === '2_weeks') {
-                      onSelectDuration('2_weeks');
-                      if (onSelectDurationMonths) onSelectDurationMonths(0.5);
-                      setCustomDurationVal(0.5);
-                    } else {
-                      handleSelectMonths(opt.months);
-                    }
-                  }}
+                  onClick={() => handleSelectMonths(block.minMonths)}
                   className={`p-3 rounded-2xl border text-center transition-all cursor-pointer flex flex-col items-center justify-center min-h-[68px] relative ${
                     isSelected
                       ? 'border-[#5CC1EF] bg-sky-50 text-[#15385E] ring-2 ring-[#5CC1EF]/30 shadow-xs'
                       : 'border-slate-200 hover:border-slate-300 text-slate-700 bg-white'
                   }`}
                 >
-                  <div className="font-extrabold text-xs sm:text-sm">{opt.label}</div>
-                  {!isSmallExempt && (
+                  <div className="font-extrabold text-xs sm:text-sm">{block.label}</div>
+                  {hasFreeKit && (
+                    <span className="text-[10px] font-bold mt-1 px-1.5 py-0.2 rounded-sm text-[#15385E] bg-sky-100">
+                      Free Kit
+                    </span>
+                  )}
+                  {!isSmallExempt && perkTag && (
                     <span className={`text-[10px] font-bold mt-1 px-1.5 py-0.2 rounded-sm ${
-                      opt.id === '12_plus_months'
+                      evalForBlock.milestoneDiscountAmount > 0
                         ? 'text-[#1A1A1A] bg-[#F7D347]'
-                        : opt.tag === '1st Mth Free'
-                        ? 'text-emerald-800 bg-emerald-100'
-                        : 'text-slate-500 bg-slate-100'
+                        : 'text-emerald-800 bg-emerald-100'
                     }`}>
-                      {opt.tag}
+                      {perkTag}
                     </span>
                   )}
                 </button>
               );
             })}
           </div>
-
-          {/* Custom Months Stepper */}
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 bg-white rounded-2xl border border-slate-200 text-xs">
-            <div className="flex items-center gap-3">
-              <span className="font-bold text-slate-700">Custom duration:</span>
-              <div className="flex items-center gap-1.5 bg-slate-50 p-1 rounded-xl border border-slate-300 shadow-2xs">
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (customDurationVal <= 1) {
-                      onSelectDuration('2_weeks');
-                      if (onSelectDurationMonths) onSelectDurationMonths(0.5);
-                      setCustomDurationVal(0.5);
-                    } else {
-                      handleSelectMonths(Math.max(1, Math.round(customDurationVal) - 1));
-                    }
-                  }}
-                  className="w-7 h-7 rounded-lg bg-white hover:bg-slate-200 text-slate-700 font-bold flex items-center justify-center text-sm cursor-pointer border border-slate-200"
-                >
-                  -
-                </button>
-                <span className="w-24 text-center font-bold text-[#15385E]">
-                  {storageDuration === '2_weeks' ? '2 Weeks' : `${customDurationVal} ${customDurationVal === 1 ? 'Month' : 'Months'}`}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (storageDuration === '2_weeks') {
-                      handleSelectMonths(1);
-                    } else {
-                      handleSelectMonths(Math.min(36, Math.max(1, Math.round(customDurationVal)) + 1));
-                    }
-                  }}
-                  className="w-7 h-7 rounded-lg bg-white hover:bg-slate-200 text-slate-700 font-bold flex items-center justify-center text-sm cursor-pointer border border-slate-200"
-                >
-                  +
-                </button>
-              </div>
-            </div>
-
-            {/* Price Freeze & Matched Rule Callout */}
-            <div className="flex items-center gap-2">
-              <span className="text-[11px] font-bold text-slate-600">
-                1-Year Booking Price Guarantee applies to all discounted rates
-              </span>
-            </div>
-          </div>
+          <p className="text-[11px] sm:text-xs text-slate-600">
+            <strong className="text-[#15385E]">Free Kit</strong> = free blanket rental (pack of 10) every month of your rental and a free disc lock.
+          </p>
 
           {/* Promotional Matrix Callout Card */}
           {isSmallExempt ? (
@@ -326,59 +340,47 @@ export const Step4When: React.FC<Step4WhenProps> = ({
                 <strong>7' Small Container Note:</strong> 7' containers are already priced at our ultra-low entry tier and are exempt from promotional duration discounts.
               </span>
             </div>
-          ) : isTwoWeeksSelected ? (
-            <div className="p-3.5 rounded-2xl bg-slate-100 border border-slate-200 text-xs text-slate-700 flex items-center gap-2.5">
-              <Info className="w-4 h-4 text-slate-500 shrink-0" />
-              <span>
-                <strong>2-Week Term:</strong> Price is already reflective of what we are offering ($199/container standard rate). No promotional duration discounts apply.
-              </span>
-            </div>
           ) : (
             <div className="p-4 rounded-2xl bg-gradient-to-r from-emerald-50 via-sky-50 to-white border-2 border-emerald-300 text-xs space-y-2.5 shadow-2xs">
               <div className="flex items-center justify-between flex-wrap gap-2">
                 <div className="flex items-center gap-2">
                   <Sparkles className="w-4 h-4 text-emerald-600 shrink-0" />
-                  <span className="font-black text-[#15385E] text-sm">
-                    {effectiveMonths >= 12
-                      ? '12+ Month Milestone Loyalty Package'
-                      : matrixEvaluation.firstMonthFree
-                      ? '1st Month Free Storage Package'
-                      : 'Complimentary Supplies Package'}
-                  </span>
+                  <span className="font-black text-[#15385E] text-sm">Total Savings</span>
                 </div>
-                <span className="text-[10px] font-black uppercase tracking-wider text-emerald-800 bg-emerald-100 px-2.5 py-0.5 rounded-full border border-emerald-300">
-                  {effectiveMonths >= 12 ? '$460+ TOTAL VALUE' : matrixEvaluation.firstMonthFree ? 'SAVE $' + monthlyRate + '+' : '$60 VALUE'}
-                </span>
-              </div>
-
-              {/* Items included in the promotional bundle */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1">
-                {matrixEvaluation.firstMonthFree && (
-                  <div className="flex items-center gap-2 p-2 bg-white rounded-xl border border-emerald-200 font-bold text-emerald-900">
-                    <Check className="w-4 h-4 text-emerald-600 shrink-0" />
-                    <span>1st Month Storage FREE ($0 rent)</span>
-                  </div>
-                )}
-                {matrixEvaluation.freeBlanketsCount > 0 && (
-                  <div className="flex items-center gap-2 p-2 bg-white rounded-xl border border-emerald-200 font-bold text-emerald-900">
-                    <Gift className="w-4 h-4 text-emerald-600 shrink-0" />
-                    <span>{matrixEvaluation.freeBlanketsCount} Free Blankets ({formatMoney(matrixEvaluation.freeBlanketsCount * 2.5 * 10, false)} value)</span>
-                  </div>
-                )}
-                {matrixEvaluation.freeLockIncluded && (
-                  <div className="flex items-center gap-2 p-2 bg-white rounded-xl border border-emerald-200 font-bold text-emerald-900">
-                    <Lock className="w-4 h-4 text-emerald-600 shrink-0" />
-                    <span>Free Heavy-Duty Disc Lock ($35 value)</span>
-                  </div>
+                {totalSavingsLabel && (
+                  <span className="text-[11px] font-black tracking-wide text-emerald-800 bg-emerald-100 px-2.5 py-0.5 rounded-full border border-emerald-300">
+                    {totalSavingsLabel}
+                  </span>
                 )}
               </div>
 
+              {/* What each container gets for this duration */}
+              <ul className="space-y-1.5 pt-1">
+                {perContainerPerks.map((row) => (
+                  <li
+                    key={row.key}
+                    className="flex flex-col sm:flex-row sm:items-baseline sm:justify-between gap-1 p-2 bg-white rounded-xl border border-emerald-200"
+                  >
+                    <span className="font-extrabold text-[#15385E]">{row.label}</span>
+                    <span className="font-bold text-emerald-900 flex items-center gap-1.5">
+                      {row.perks.length > 0 ? (
+                        <>
+                          <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                          {row.perks.join(' + ')}
+                        </>
+                      ) : (
+                        <span className="text-slate-500">No discount</span>
+                      )}
+                    </span>
+                  </li>
+                ))}
+              </ul>
               {/* 12+ Months Milestone Option Choice (Option 400A vs Option 400B) */}
               {effectiveMonths >= 12 && (
                 <div className="pt-2 mt-2 border-t border-emerald-200/80 space-y-2">
                   <div className="flex items-center justify-between">
                     <span className="font-extrabold text-[#15385E] text-xs">
-                      Choose your 12+ Month Milestone Loyalty Credit ($400 Total Benefit):
+                      Choose how to receive your 12+ Month Milestone Loyalty Credit (${formatMoney(matrixEvaluation.milestoneDiscountAmount)} total{eligibleContainerCount > 1 ? `, $${formatMoney(matrixEvaluation.milestoneDiscountAmount / eligibleContainerCount)} per container` : ''}):
                     </span>
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
@@ -405,7 +407,7 @@ export const Step4When: React.FC<Step4WhenProps> = ({
                           </span>
                         </div>
                         <p className="text-[11px] text-slate-600 leading-snug">
-                          <strong>$200 credit at Month 6</strong> + <strong>$200 credit at Month 12</strong> ($400 total credit)
+                          <strong>${formatMoney(matrixEvaluation.milestoneDiscountAmount / 2)} credit at Month 6</strong> + <strong>${formatMoney(matrixEvaluation.milestoneDiscountAmount / 2)} credit at Month 12</strong> (${formatMoney(matrixEvaluation.milestoneDiscountAmount)} total credit)
                         </p>
                       </div>
                     </button>
@@ -430,7 +432,7 @@ export const Step4When: React.FC<Step4WhenProps> = ({
                           <span className="font-black text-[#15385E] text-xs">Option 400A (Lump Sum)</span>
                         </div>
                         <p className="text-[11px] text-slate-600 leading-snug">
-                          <strong>$400 credit</strong> applied in full at Month 12 ($400 total credit)
+                          <strong>${formatMoney(matrixEvaluation.milestoneDiscountAmount)} credit</strong> applied in full at Month 12 (${formatMoney(matrixEvaluation.milestoneDiscountAmount)} total credit)
                         </p>
                       </div>
                     </button>
@@ -453,17 +455,14 @@ export const Step4When: React.FC<Step4WhenProps> = ({
               Select your payment schedule. Pay upfront for stacked additional savings.
             </p>
           </div>
-          <span className="text-[11px] font-black uppercase tracking-wider text-[#15385E] bg-white border border-sky-200 px-2.5 py-1 rounded-md">
-            All prices protected by 1-Year Rate Freeze
-          </span>
         </div>
 
         {/* Billing Buttons */}
         <div className="space-y-3">
-          {/* 1. Monthly Ongoing or 2 Weeks Term */}
+          {/* 1. Monthly Ongoing */}
           <button
             type="button"
-            onClick={() => onSelectBillingCycle(isTwoWeeksSelected ? 'weekly' : 'monthly')}
+            onClick={() => onSelectBillingCycle('monthly')}
             className={`w-full p-4 rounded-2xl border text-left transition-all cursor-pointer flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
               billingCycle === 'monthly' || billingCycle === 'weekly' || billingCycle === '3_months_upfront'
                 ? 'border-[#5CC1EF] bg-white ring-2 ring-[#5CC1EF]/30 shadow-sm'
@@ -479,34 +478,32 @@ export const Step4When: React.FC<Step4WhenProps> = ({
                 {(billingCycle === 'monthly' || billingCycle === 'weekly' || billingCycle === '3_months_upfront') && <Check className="w-3.5 h-3.5 text-[#15385E] stroke-[3]" />}
               </div>
               <div className="text-sm font-extrabold text-[#15385E] flex items-center gap-2">
-                <span>{isTwoWeeksSelected ? '2 Weeks Storage' : 'Monthly Ongoing'}</span>
+                <span>Monthly Ongoing</span>
                 <span className="text-[10px] font-extrabold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-full border border-emerald-300">
-                  {isTwoWeeksSelected ? 'STANDARD RATE' : matrixEvaluation.firstMonthFree ? '1ST MONTH FREE' : 'MOST POPULAR'}
+                  {matrixEvaluation.firstMonthFree ? '1ST MONTH FREE' : 'MOST POPULAR'}
                 </span>
-                {!isTwoWeeksSelected && matrixEvaluation.firstMonthFree && (
-                  <span className="text-[10px] font-black text-[#15385E] bg-[#F7D347] px-2 py-0.5 rounded-full border border-[#e6c338]">
-                    $0 FIRST MONTH
-                  </span>
-                )}
               </div>
             </div>
 
             <div className="flex flex-row sm:flex-col items-baseline sm:items-end justify-between sm:justify-center gap-1 pl-8 sm:pl-0">
               <div className="text-base font-extrabold text-[#15385E] font-mono">
-                {isTwoWeeksSelected ? (
-                  <>
-                    ${formatMoney(twoWeeksTotalFee)}<span className="text-xs font-normal text-slate-500"> / 2 wks</span>
-                  </>
-                ) : matrixEvaluation.firstMonthFree ? (
+                {matrixEvaluation.firstMonthFree ? (
                   <>
                     <span className="line-through text-slate-400 text-xs font-normal mr-1.5 font-mono">
                       ${formatMoney(monthlyRate)}
                     </span>
                     <span className="text-emerald-700 font-extrabold font-mono">
-                      $0
+                      ${formatMoney(firstMonthStorageCharge)}
                     </span>
                     <span className="text-xs font-normal text-slate-500"> 1st mo</span>
-                    <span className="text-xs text-slate-400 ml-1 font-mono">(${formatMoney(monthlyRate)}/mo after)</span>
+                    <span className="text-xs text-slate-400 ml-1 font-mono">(${formatMoney(discountedMonthlyRate)}/mo after)</span>
+                  </>
+                ) : discountedMonthlyRate < monthlyRate ? (
+                  <>
+                    <span className="line-through text-slate-400 text-xs font-normal mr-1.5 font-mono">
+                      ${formatMoney(monthlyRate)}
+                    </span>
+                    ${formatMoney(discountedMonthlyRate)}<span className="text-xs font-normal text-slate-500">/mo</span>
                   </>
                 ) : (
                   <>
@@ -514,24 +511,28 @@ export const Step4When: React.FC<Step4WhenProps> = ({
                   </>
                 )}
               </div>
-              <span className="text-[11px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
-                {isTwoWeeksSelected
-                  ? `Standard rate ($${formatMoney(twoWeeksRatePerContainer)}/container for 2 weeks) · Cancel anytime with 1 day notice`
-                  : matrixEvaluation.firstMonthFree
-                  ? `1st Month Free Storage ($0 container rent) · Cancel anytime with 1 day notice`
-                  : 'Cancel anytime with 1 day notice'}
-              </span>
+              {/* 7' (10 m³) containers never get 1st Month Free, so the note only shows when a larger container is booked */}
+              {eligibleContainerCount > 0 && (
+                <span className="text-[11px] text-slate-600 sm:text-right">
+                  "1st Month Free" is based on staying 2 months or more
+                </span>
+              )}
             </div>
           </button>
 
           {/* 2. 6 months upfront then monthly (5% off + duration discounts stacked) */}
           <button
             type="button"
-            onClick={() => onSelectBillingCycle('6_months_upfront')}
-            className={`w-full p-4 rounded-2xl border text-left transition-all cursor-pointer flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
-              billingCycle === '6_months_upfront'
-                ? 'border-[#5CC1EF] bg-white ring-2 ring-[#5CC1EF]/30 shadow-sm'
-                : 'border-slate-200 bg-white/70 hover:bg-white'
+            disabled={!sixMonthsUpfront.available}
+            aria-disabled={!sixMonthsUpfront.available}
+            data-billing-option="6_months_upfront"
+            onClick={() => sixMonthsUpfront.available && onSelectBillingCycle('6_months_upfront')}
+            className={`w-full p-4 rounded-2xl border text-left transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
+              !sixMonthsUpfront.available
+                ? 'border-slate-200 bg-slate-100 opacity-50 cursor-not-allowed'
+                : billingCycle === '6_months_upfront'
+                  ? 'border-[#5CC1EF] bg-white ring-2 ring-[#5CC1EF]/30 shadow-sm cursor-pointer'
+                  : 'border-slate-200 bg-white/70 hover:bg-white cursor-pointer'
             }`}
           >
             <div className="flex items-center gap-3">
@@ -546,36 +547,35 @@ export const Step4When: React.FC<Step4WhenProps> = ({
                 <div className="text-sm font-extrabold text-[#15385E] flex items-center gap-2">
                   <span>6 months upfront then monthly</span>
                   <span className="text-[10px] font-black text-emerald-800 bg-emerald-100 border border-emerald-300 px-2 py-0.5 rounded-full">
-                    5% OFF STACKED
+                    EXTRA {sixMonthsUpfrontPercent}% OFF
                   </span>
                 </div>
                 <div className="text-[11px] text-slate-500 font-medium">
-                  {matrixEvaluation.firstMonthFree
-                    ? '1st Month FREE + 5 months billed at 5% discount'
-                    : '6 months prepaid at 5% discount'}
+                  {!sixMonthsUpfront.available
+                    ? 'Available for 6+ months storage'
+                    : sixMonthsUpfront.hasFreeMonth
+                      ? `1st month free + 5 months prepaid with an extra ${sixMonthsUpfrontPercent}% off`
+                      : `6 months prepaid with an extra ${sixMonthsUpfrontPercent}% off`}
                 </div>
               </div>
             </div>
 
-            <div className="flex flex-row sm:flex-col items-baseline sm:items-end justify-between sm:justify-center gap-1 pl-8 sm:pl-0">
-              <div className="text-base font-extrabold text-[#15385E] font-mono">
-                ${Math.round(sixMonthsUpfrontTotal / 6)}<span className="text-xs font-normal text-slate-500">/mo equiv</span>
-                <span className="text-xs text-slate-400 font-normal ml-1">(${formatMoney(sixMonthsUpfrontTotal)} upfront)</span>
-              </div>
-              <span className="text-[11px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
-                Save ${formatMoney(sixMonthsSavings)} ({sixMonthsSavingsPercent}% total savings)
-              </span>
-            </div>
+            <UpfrontPrice upfront={sixMonthsUpfront} months={6} />
           </button>
 
           {/* 3. 12 months upfront then monthly (10% off + duration discounts stacked) */}
           <button
             type="button"
-            onClick={() => onSelectBillingCycle('12_months_upfront')}
-            className={`w-full p-4 rounded-2xl border text-left transition-all cursor-pointer flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
-              billingCycle === '12_months_upfront'
-                ? 'border-[#5CC1EF] bg-white ring-2 ring-[#5CC1EF]/30 shadow-sm'
-                : 'border-slate-200 bg-white/70 hover:bg-white'
+            disabled={!twelveMonthsUpfront.available}
+            aria-disabled={!twelveMonthsUpfront.available}
+            data-billing-option="12_months_upfront"
+            onClick={() => twelveMonthsUpfront.available && onSelectBillingCycle('12_months_upfront')}
+            className={`w-full p-4 rounded-2xl border text-left transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
+              !twelveMonthsUpfront.available
+                ? 'border-slate-200 bg-slate-100 opacity-50 cursor-not-allowed'
+                : billingCycle === '12_months_upfront'
+                  ? 'border-[#5CC1EF] bg-white ring-2 ring-[#5CC1EF]/30 shadow-sm cursor-pointer'
+                  : 'border-slate-200 bg-white/70 hover:bg-white cursor-pointer'
             }`}
           >
             <div className="flex items-center gap-3">
@@ -590,39 +590,21 @@ export const Step4When: React.FC<Step4WhenProps> = ({
                 <div className="text-sm font-extrabold text-[#15385E] flex items-center gap-2">
                   <span>12 months upfront then monthly</span>
                   <span className="text-[10px] font-black text-[#1A1A1A] bg-[#F7D347] border border-[#e6c338] px-2 py-0.5 rounded-full">
-                    10% OFF · MAX SAVINGS
+                    EXTRA {twelveMonthsUpfrontPercent}% OFF · MAX SAVINGS
                   </span>
                 </div>
                 <div className="text-[11px] text-slate-500 font-medium">
-                  Prepay 12 months for guaranteed lowest rates + all promotional perks
+                  {twelveMonthsUpfront.available
+                    ? `12 months prepaid with an extra ${twelveMonthsUpfrontPercent}% off`
+                    : 'Available for 12+ months storage'}
                 </div>
               </div>
             </div>
 
-            <div className="flex flex-row sm:flex-col items-baseline sm:items-end justify-between sm:justify-center gap-1 pl-8 sm:pl-0">
-              <div className="text-base font-extrabold text-[#15385E] font-mono">
-                ${Math.round(twelveMonthsUpfrontTotal / 12)}<span className="text-xs font-normal text-slate-500">/mo equiv</span>
-                <span className="text-xs text-slate-400 font-normal ml-1">(${formatMoney(twelveMonthsUpfrontTotal)} upfront)</span>
-              </div>
-              <span className="text-[11px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
-                Save ${formatMoney(twelveMonthsSavings)} ({twelveMonthsSavingsPercent}% total savings)
-              </span>
-            </div>
+            <UpfrontPrice upfront={twelveMonthsUpfront} months={12} />
           </button>
         </div>
 
-        {/* Section 2b: Early Termination Transparency & Clawback Terms */}
-        {!isSmallExempt && !isTwoWeeksSelected && (
-          <div className="mt-4 p-4 rounded-2xl bg-slate-50 border border-slate-200 text-xs text-slate-600 space-y-1.5">
-            <div className="flex items-center gap-2 font-black text-[#15385E]">
-              <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0" />
-              <span>Promotional Commitment &amp; Early Termination Terms:</span>
-            </div>
-            <p className="leading-relaxed">
-              In exchange for promotional allowances (such as waived 1st month storage rent, complimentary blankets &amp; disc lock, or milestone loyalty credits), you agree to maintain storage for your estimated commitment of <strong>{effectiveMonths >= 12 ? '12+ months' : `${effectiveMonths} month(s)`}</strong>. If storage is concluded earlier than committed, unearned promotional discounts are automatically adjusted on the final settlement invoice as per Portabox standard booking terms.
-            </p>
-          </div>
-        )}
       </div>
 
       {/* Are You Stuck Banner with originPostcode explicitly passed */}
@@ -653,3 +635,25 @@ export const Step4When: React.FC<Step4WhenProps> = ({
     </div>
   );
 };
+
+/**
+ * Upfront card: only the amount saved (Dan, 16 Nov), not the upfront total, because the upfront
+ * amount depends on which legs the customer books in. The parts add up to the saving.
+ */
+const UpfrontPrice: React.FC<{
+  upfront: { listCost: number; total: number; saving: number; parts: string[] };
+  months: number;
+}> = ({ upfront }) =>
+  upfront.saving > 0 ? (
+    <div className="flex flex-col items-start sm:items-end justify-center gap-1 pl-8 sm:pl-0">
+      <div className="text-base font-extrabold text-emerald-700 font-mono" data-upfront-saving={upfront.saving}>
+        Save ${formatMoney(upfront.saving)}
+      </div>
+      <span className="text-[11px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200 sm:text-right">
+        {upfront.parts.join(' + ')}
+      </span>
+      <span className="text-[10px] text-slate-500 sm:text-right" data-upfront-disclaimer>
+        {UPFRONT_SAVING_DISCLAIMER}
+      </span>
+    </div>
+  ) : null;

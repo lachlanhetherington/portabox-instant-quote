@@ -17,7 +17,7 @@
   ],
   "repo": "https://github.com/ahammo67/portabox-CRM.git",
   "branch": "main",
-  "sha": "a581d0eb3e3a30efa156d52c5da24c856a4fb46d",
-  "subject": "feat: gate softphone feature and remove dev auth bypass",
-  "applied": "2026-11-11"
+  "sha": "1a147c4624c63695cfc6e6561b941217937e002e",
+  "subject": "Merge pull request #41 from ahammo67/claude/dan-quote-inquiries",
+  "applied": "2026-11-16"
 }

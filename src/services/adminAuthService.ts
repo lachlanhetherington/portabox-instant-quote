@@ -55,6 +55,20 @@ export const DEFAULT_ROLE_PERMISSIONS: RolePermissionMatrix = {
     manage_permissions: false,
     view_announcement_banner: false,
   },
+  call_centre_supervisor: {
+    daily_operations: false,
+    field_logistics: false,
+    communications_config: false,
+    pricing_and_rates: false,
+    dispatch_calendar: true,
+    softphone_telephony: true,
+    driver_portal: true,
+    customer_crm: true,
+    yard_inventory: false,
+    ai_copilot: false,
+    manage_permissions: false,
+    view_announcement_banner: false,
+  },
   driver: {
     daily_operations: false,
     field_logistics: false,
@@ -105,7 +119,6 @@ export const INITIAL_STAFF_MEMBERS: StaffMember[] = [
     name: 'Dan Harrington',
     email: 'dan.ceo@portabox.com.au',
     username: 'dan.ceo',
-    password: 'Portabox2026!',
     role: 'ceo',
     title: 'CEO & Managing Director',
     mobile: '0488 123 456',
@@ -121,7 +134,6 @@ export const INITIAL_STAFF_MEMBERS: StaffMember[] = [
     name: 'Sarah Collins',
     email: 'sarah.ops@portabox.com.au',
     username: 'sarah.ops',
-    password: 'Portabox2026!',
     role: 'manager',
     title: 'National Operations & Fleet Manager',
     mobile: '0412 889 001',
@@ -137,7 +149,6 @@ export const INITIAL_STAFF_MEMBERS: StaffMember[] = [
     name: 'Chloe Davis',
     email: 'chloe.agent@portabox.com.au',
     username: 'chloe.agent',
-    password: 'Portabox2026!',
     role: 'call_center',
     title: 'Customer Care & Dispatch Lead',
     mobile: '0433 555 782',
@@ -153,7 +164,6 @@ export const INITIAL_STAFF_MEMBERS: StaffMember[] = [
     name: 'Dave Miller',
     email: 'dave.driver@portabox.com.au',
     username: 'dave.driver',
-    password: 'Portabox2026!',
     role: 'driver',
     title: 'Senior Fleet Driver (Tilt Tray & Crane)',
     mobile: '0421 999 334',
@@ -169,7 +179,6 @@ export const INITIAL_STAFF_MEMBERS: StaffMember[] = [
     name: 'Marcus Webb',
     email: 'marcus.admin@portabox.com.au',
     username: 'marcus.admin',
-    password: 'Portabox2026!',
     role: 'admin_pricing',
     title: 'Commercial Analyst & Billing Admin',
     mobile: '0409 666 123',
@@ -185,7 +194,6 @@ export const INITIAL_STAFF_MEMBERS: StaffMember[] = [
     name: 'Jason Wong',
     email: 'jason.yard@portabox.com.au',
     username: 'jason.yard',
-    password: 'Portabox2026!',
     role: 'warehouse',
     title: 'Yard Logistics & Forklift Supervisor',
     mobile: '0414 777 221',
@@ -207,14 +215,14 @@ export function loadStaffMembers(): StaffMember[] {
     }
     const parsed = JSON.parse(raw);
     if (Array.isArray(parsed) && parsed.length > 0) {
-      // Ensure all staff have default username and password if loaded from older localStorage
+      // Ensure all staff have a username; strip legacy credentials from older localStorage
       const enriched = parsed.map((staff: StaffMember) => {
         const username = staff.username || staff.email.split('@')[0];
-        const password = staff.password || 'Portabox2026!';
+        // Drop any legacy plaintext password persisted by older versions
+        const { password: _legacyPassword, ...rest } = staff as StaffMember & { password?: string };
         return {
-          ...staff,
+          ...rest,
           username,
-          password,
         };
       });
       return enriched;
@@ -357,7 +365,8 @@ export function getStaffSession(): StaffSession | null {
         clearStaffSession();
         return null;
       }
-      session.user = updatedUser;
+      // Role always comes from the server-verified identity, never the local roster
+      session.user = { ...updatedUser, role: session.user.role };
     }
     return session;
   } catch {
@@ -367,11 +376,11 @@ export function getStaffSession(): StaffSession | null {
 
 export function setStaffSession(
   user: StaffMember,
-  verifiedVia: '2fa_sms' | '2fa_totp' | 'passkey'
+  verifiedVia: 'google' = 'google'
 ): StaffSession {
   const session: StaffSession = {
     user,
-    token: `pbox_jwt_${Math.random().toString(36).substring(2)}_${Date.now()}`,
+    token: 'firebase', // identity is proven by the Firebase ID token, never stored here
     verifiedVia,
     loginTime: new Date().toLocaleTimeString('en-AU', { hour: '2-digit', minute: '2-digit' }),
     expiresAt: Date.now() + 12 * 60 * 60 * 1000, // 12 hours operational shift
@@ -396,96 +405,7 @@ export function clearStaffSession(): void {
 }
 
 /**
- * Generates an authentic 6-digit 2FA OTP
- */
-export function generateStaff2FACode(): string {
-  return Math.floor(100000 + Math.random() * 900000).toString();
-}
-
-/**
- * Verifies staff 2FA code (supports universal demo codes 123456, 849201 for test reliability)
- */
-export function verifyStaff2FACode(inputCode: string, expectedCode?: string): boolean {
-  const clean = inputCode.trim();
-  if (!clean) return false;
-  if (clean === '123456' || clean === '849201' || clean === '000000') {
-    return true;
-  }
-  return expectedCode ? clean === expectedCode.trim() : false;
-}
-
-/**
- * Validates username/email and password credentials
- */
-export function verifyStaffCredentials(
-  identifier: string,
-  passwordInput: string
-): { success: boolean; staff?: StaffMember; error?: string } {
-  const cleanId = identifier.trim().toLowerCase();
-  const cleanPass = passwordInput.trim();
-
-  if (!cleanId) {
-    return { success: false, error: 'Please enter your staff username or email address.' };
-  }
-  if (!cleanPass) {
-    return { success: false, error: 'Please enter your password.' };
-  }
-
-  const staffList = loadStaffMembers();
-  const matched = staffList.find(
-    (s) =>
-      s.email.toLowerCase() === cleanId ||
-      (s.username && s.username.toLowerCase() === cleanId)
-  );
-
-  if (!matched) {
-    return {
-      success: false,
-      error: 'Staff account not found. Please verify your username/email with the CEO.',
-    };
-  }
-
-  if (matched.status !== 'active') {
-    return {
-      success: false,
-      error: 'This staff account has been suspended. Please contact the CEO for access.',
-    };
-  }
-
-  const expectedPassword = matched.password || 'Portabox2026!';
-  if (cleanPass !== expectedPassword) {
-    return {
-      success: false,
-      error: 'Incorrect password. Please verify your credentials or ask the CEO to reset it.',
-    };
-  }
-
-  return { success: true, staff: matched };
-}
-
-/**
- * CEO function to update or reset a staff member's password
- */
-export function updateStaffPassword(staffId: string, newPassword: string): boolean {
-  const staffList = loadStaffMembers();
-  const idx = staffList.findIndex((s) => s.id === staffId);
-  if (idx === -1) return false;
-
-  staffList[idx].password = newPassword.trim();
-  saveStaffMembers(staffList);
-
-  // If the updated user is currently logged in, sync active session
-  const currentSession = getStaffSession();
-  if (currentSession && currentSession.user.id === staffId) {
-    currentSession.user.password = newPassword.trim();
-    localStorage.setItem(STAFF_SESSION_STORAGE_KEY, JSON.stringify(currentSession));
-  }
-
-  return true;
-}
-
-/**
- * CEO function to provision a new staff member with credentials
+ * CEO function to add a staff roster entry (sign-in is via Google; server decides access)
  */
 export function createStaffMember(
   data: Omit<StaffMember, 'id' | 'createdAt'>
@@ -495,7 +415,6 @@ export function createStaffMember(
     ...data,
     id: `staff-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
     username: data.username || data.email.split('@')[0],
-    password: data.password || 'Portabox2026!',
     twoFactorEnabled: true,
     twoFactorMethod: 'sms',
     status: data.status || 'active',
