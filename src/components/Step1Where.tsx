@@ -10,6 +10,7 @@ import {
   Compass,
   Phone,
   Info,
+  ChevronDown,
 } from 'lucide-react';
 import { PORTABOX_IMAGES } from '../assets/images';
 import {
@@ -31,6 +32,8 @@ interface Step1WhereProps {
   initialPostcode: PostcodeRecord | null;
   onSelectPostcode: (postcode: PostcodeRecord) => void;
   onContinue: () => void;
+  /** Opens the "Open your saved quote" window. */
+  onOpenSavedQuote?: () => void;
   config: AppConfig;
 }
 
@@ -38,11 +41,15 @@ export const Step1Where: React.FC<Step1WhereProps> = ({
   initialPostcode,
   onSelectPostcode,
   onContinue,
+  onOpenSavedQuote,
   config,
 }) => {
   const [query, setQuery] = useState(initialPostcode ? `${initialPostcode.postcode} ${initialPostcode.suburb}` : '5061');
   const [selected, setSelected] = useState<PostcodeRecord | null>(initialPostcode || AUSTRALIAN_POSTCODES[0]);
   const [isOpen, setIsOpen] = useState(false);
+  const [expandedGuarantee, setExpandedGuarantee] = useState<'price-lock' | 'rate-freeze' | null>(null);
+  const toggleGuaranteeInfo = (key: 'price-lock' | 'rate-freeze') =>
+    setExpandedGuarantee((prev) => (prev === key ? null : key));
   const [suggestions, setSuggestions] = useState<PostcodeRecord[]>([]);
   const [blockedNotice, setBlockedNotice] = useState<BlockedPostcode | null>(null);
   const [isCoverageMapOpen, setIsCoverageMapOpen] = useState(false);
@@ -145,8 +152,60 @@ export const Step1Where: React.FC<Step1WhereProps> = ({
         </div>
       </div>
 
-      {/* Portabox Core Trust Triad on Step 1 */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+      {/* Portabox Core Trust Triad on Step 1.
+          Order is fixed across the quote flow: 30-Day, 1-Year, Price Match.
+          "More info" copy mirrors the guarantee cards in RightSidebar.tsx. */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-start">
+        <div className="p-3.5 sm:p-4 rounded-2xl bg-white border-2 border-[#DAD7D1] shadow-2xs flex items-start gap-3">
+          <div className="w-9 h-9 rounded-xl bg-[#5CC1EF]/20 border border-[#5CC1EF] text-[#15385E] flex items-center justify-center shrink-0">
+            <Sparkles className="w-5 h-5 text-[#008fbb]" />
+          </div>
+          <div className="min-w-0">
+            <div className="text-xs font-black text-[#15385E] uppercase tracking-wide">30-Day Quote Price Guarantee</div>
+            <div className="text-[11px] text-slate-500 font-semibold">Quoted price frozen for 30 days</div>
+            <button
+              type="button"
+              onClick={() => toggleGuaranteeInfo('price-lock')}
+              aria-expanded={expandedGuarantee === 'price-lock'}
+              aria-controls="step1-guarantee-price-lock-info"
+              className="mt-1 inline-flex items-center gap-1 text-[11px] font-bold text-[#15385E] hover:text-[#5CC1EF] underline cursor-pointer"
+            >
+              {expandedGuarantee === 'price-lock' ? 'Less info' : 'More info'}
+              <ChevronDown className={`w-3 h-3 transition-transform ${expandedGuarantee === 'price-lock' ? 'rotate-180' : ''}`} />
+            </button>
+            {expandedGuarantee === 'price-lock' && (
+              <p id="step1-guarantee-price-lock-info" className="mt-1.5 text-[11px] text-slate-600 leading-relaxed">
+                Quoted prices are locked for 30 days from quote date. Changes to quotes that affect pricing will result in updated pricing and a new 30-day quote price guarantee period. This does not include date changes or other non-pricing items.
+              </p>
+            )}
+          </div>
+        </div>
+
+        <div className="p-3.5 sm:p-4 rounded-2xl bg-white border-2 border-[#DAD7D1] shadow-2xs flex items-start gap-3">
+          <div className="w-9 h-9 rounded-xl bg-emerald-50 border border-emerald-300 text-emerald-800 flex items-center justify-center shrink-0">
+            <Check className="w-5 h-5 text-emerald-600" />
+          </div>
+          <div className="min-w-0">
+            <div className="text-xs font-black text-[#15385E] uppercase tracking-wide">1-Year Booking Price Guarantee</div>
+            <div className="text-[11px] text-slate-500 font-semibold">Container rate and delivery fees locked for 12 months</div>
+            <button
+              type="button"
+              onClick={() => toggleGuaranteeInfo('rate-freeze')}
+              aria-expanded={expandedGuarantee === 'rate-freeze'}
+              aria-controls="step1-guarantee-rate-freeze-info"
+              className="mt-1 inline-flex items-center gap-1 text-[11px] font-bold text-[#15385E] hover:text-[#5CC1EF] underline cursor-pointer"
+            >
+              {expandedGuarantee === 'rate-freeze' ? 'Less info' : 'More info'}
+              <ChevronDown className={`w-3 h-3 transition-transform ${expandedGuarantee === 'rate-freeze' ? 'rotate-180' : ''}`} />
+            </button>
+            {expandedGuarantee === 'rate-freeze' && (
+              <p id="step1-guarantee-rate-freeze-info" className="mt-1.5 text-[11px] text-slate-600 leading-relaxed">
+                When a booking is made, prices on all attributes (container rental, delivery fees, ancillaries, etc.) are locked for 1 year with our 1-Year Booking Price Guarantee. Beyond 1 year, delivery fees will default to live pricing and container rental prices can go up or down with a 30-day notification.
+              </p>
+            )}
+          </div>
+        </div>
+
         <div className="p-3.5 sm:p-4 rounded-2xl bg-white border-2 border-[#DAD7D1] shadow-2xs flex items-center gap-3">
           <div className="w-9 h-9 rounded-xl bg-[#F7D347]/20 border border-[#F7D347] text-[#1A1A1A] flex items-center justify-center shrink-0">
             <ShieldCheck className="w-5 h-5 text-[#15385E]" />
@@ -156,27 +215,19 @@ export const Step1Where: React.FC<Step1WhereProps> = ({
             <div className="text-[11px] text-slate-500 font-semibold">We beat comparable quotes per m³</div>
           </div>
         </div>
-
-        <div className="p-3.5 sm:p-4 rounded-2xl bg-white border-2 border-[#DAD7D1] shadow-2xs flex items-center gap-3">
-          <div className="w-9 h-9 rounded-xl bg-[#5CC1EF]/20 border border-[#5CC1EF] text-[#15385E] flex items-center justify-center shrink-0">
-            <Sparkles className="w-5 h-5 text-[#008fbb]" />
-          </div>
-          <div>
-            <div className="text-xs font-black text-[#15385E] uppercase tracking-wide">30-Day Quote Price Guarantee</div>
-            <div className="text-[11px] text-slate-500 font-semibold">Quoted price frozen for 30 days</div>
-          </div>
-        </div>
-
-        <div className="p-3.5 sm:p-4 rounded-2xl bg-white border-2 border-[#DAD7D1] shadow-2xs flex items-center gap-3">
-          <div className="w-9 h-9 rounded-xl bg-emerald-50 border border-emerald-300 text-emerald-800 flex items-center justify-center shrink-0">
-            <Check className="w-5 h-5 text-emerald-600" />
-          </div>
-          <div>
-            <div className="text-xs font-black text-[#15385E] uppercase tracking-wide">1-Year Booking Price Guarantee</div>
-            <div className="text-[11px] text-slate-500 font-semibold">Container rate and delivery fees locked for 12 months</div>
-          </div>
-        </div>
       </div>
+
+      {onOpenSavedQuote && (
+        <div className="flex justify-end -mb-1">
+          <button
+            type="button"
+            onClick={onOpenSavedQuote}
+            className="text-xs sm:text-sm font-bold text-[#15385E] underline hover:text-[#5CC1EF] cursor-pointer"
+          >
+            Already have a quote? Open your saved quote
+          </button>
+        </div>
+      )}
 
       {/* Main Step 1 Input Card */}
       <div className="bg-white rounded-2xl sm:rounded-3xl p-5 sm:p-8 lg:p-10 shadow-xs border-2 border-[#DAD7D1]">

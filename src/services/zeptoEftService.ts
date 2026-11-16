@@ -1,3 +1,4 @@
+import { publicEnv } from '../utils/publicEnv';
 /**
  * Zepto NPP / PayID & Virtual Account Electronic Funds Transfer (EFT) Service
  * Implements Option 1: Auto-generated unique reference code, dynamic PayID,
@@ -166,6 +167,10 @@ export function settleOrRegisterZeptoEftPayment(params: {
   updatedInstruction: ZeptoEftInstruction;
   nppTransactionId: string;
 } {
+  // Simulator only (records live in this browser). Never mark a real payment as settled.
+  if (publicEnv('VITE_APP_ENV') === 'production') {
+    throw new Error('EFT payment confirmation is not available yet.');
+  }
   const records = loadZeptoEftRecords();
   const nppTxnId =
     params.mode === 'instant_npp_webhook'

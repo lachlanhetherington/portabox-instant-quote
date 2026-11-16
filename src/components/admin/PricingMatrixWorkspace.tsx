@@ -39,8 +39,28 @@ export const PricingMatrixWorkspace: React.FC<PricingMatrixWorkspaceProps> = ({
   onCreateLeadFromQuote,
 }) => {
   const [selectedHub, setSelectedHub] = useState<MetroHub>('Adelaide');
-  const [storageCategory, setStorageCategory] = useState<'facility' | 'onsite'>('facility');
-  const [bulkAdjustmentAmount, setBulkAdjustmentAmount] = useState<number>(10);
+  const [storageCategory, setStorageCategory] = useState<'facility' | 'onsite' | 'interstate'>('facility');
+
+  // Which price table on LocationPricingConfig each tab edits
+  const PRICE_KEY_BY_CATEGORY = {
+    facility: 'containerPrices',
+    onsite: 'onsiteContainerPrices',
+    interstate: 'interstateContainerPrices',
+  } as const;
+  const CATEGORY_LABEL = { facility: 'Our Location', onsite: "Customer's Location", interstate: 'Interstate' } as const;
+
+  // Current prices for a tab at a hub (interstate falls back to the depot's facility rates until edited)
+  const getCategoryPrices = (loc: LocationPricingConfig, category: 'facility' | 'onsite' | 'interstate') => {
+    if (category === 'onsite') {
+      return loc.onsiteContainerPrices || config.onsiteContainerPrices || {
+        small_10m3: { monthlyRate: 149, weeklyRate: 49 },
+        medium_19m3: { monthlyRate: 169, weeklyRate: 59 },
+        large_25m3: { monthlyRate: 179, weeklyRate: 65 },
+      };
+    }
+    if (category === 'interstate') return loc.interstateContainerPrices || loc.containerPrices;
+    return loc.containerPrices || config.containerPrices;
+  };
   const [matrixFeedback, setMatrixFeedback] = useState<string | null>(null);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saved'>('idle');
   const [lastSavedTime, setLastSavedTime] = useState<string>(() =>
@@ -49,9 +69,9 @@ export const PricingMatrixWorkspace: React.FC<PricingMatrixWorkspaceProps> = ({
 
   const HUBS: MetroHub[] = [
     'Adelaide',
+    'Brisbane',
     'Melbourne',
     'Sydney',
-    'Brisbane',
   ];
 
   // Helper to update container storage prices with guaranteed immediate persistence
@@ -64,10 +84,8 @@ export const PricingMatrixWorkspace: React.FC<PricingMatrixWorkspaceProps> = ({
     const numericVal = Math.max(0, val);
     const existingLoc = getLocationPricingForHub(config, hub);
 
-    const priceTargetKey = storageCategory === 'onsite' ? 'onsiteContainerPrices' : 'containerPrices';
-    const currentTargetPrices = (storageCategory === 'onsite'
-      ? (existingLoc.onsiteContainerPrices || config.onsiteContainerPrices)
-      : existingLoc.containerPrices) || config.containerPrices;
+    const priceTargetKey = PRICE_KEY_BY_CATEGORY[storageCategory];
+    const currentTargetPrices = getCategoryPrices(existingLoc, storageCategory);
 
     const updatedLocPricing: LocationPricingConfig = {
       ...existingLoc,
@@ -80,19 +98,22 @@ export const PricingMatrixWorkspace: React.FC<PricingMatrixWorkspaceProps> = ({
       },
     };
 
+    // Top-level baseline price table on AppConfig (interstate rates exist only per depot)
+    const baselineKey = storageCategory === 'onsite' ? 'onsiteContainerPrices' : 'containerPrices';
+
     const newConfig: AppConfig = {
       ...config,
       locationPricing: {
         ...(config.locationPricing || {}),
         [hub]: updatedLocPricing,
       } as Record<MetroHub, LocationPricingConfig>,
-      // If updating default/Adelaide hub, keep baseline synced
-      ...(hub === 'Adelaide'
+      // If updating default/Adelaide hub, keep baseline synced (facility/onsite only; interstate is per depot)
+      ...(hub === 'Adelaide' && storageCategory !== 'interstate'
         ? {
-            [priceTargetKey]: {
-              ...((config[priceTargetKey] as any) || {}),
+            [baselineKey]: {
+              ...((config[baselineKey] as any) || {}),
               [size]: {
-                ...((config[priceTargetKey] as any)?.[size] || {}),
+                ...((config[baselineKey] as any)?.[size] || {}),
                 [field]: numericVal,
               },
             },
@@ -112,7 +133,7 @@ export const PricingMatrixWorkspace: React.FC<PricingMatrixWorkspaceProps> = ({
     const nowTime = new Date().toLocaleTimeString('en-AU', { hour: '2-digit', minute: '2-digit' });
     setLastSavedTime(nowTime);
     setSaveStatus('saved');
-    setMatrixFeedback(`Saved: ${hub} ${storageCategory === 'onsite' ? 'Onsite' : 'Facility'} ${size} ${field} updated to $${numericVal} (Persisted)`);
+    setMatrixFeedback(`Saved: ${hub} ${CATEGORY_LABEL[storageCategory]} ${size} ${field} updated to $${numericVal} (Persisted)`);
     setTimeout(() => {
       setMatrixFeedback(null);
     }, 3500);
@@ -165,51 +186,6 @@ export const PricingMatrixWorkspace: React.FC<PricingMatrixWorkspaceProps> = ({
     setTimeout(() => setMatrixFeedback(null), 3000);
   };
 
-  // Bulk Apply Adjustment (+/- $X across all sizes in selected hub)
-  const handleApplyBulkMonthlyAdjustment = (delta: number) => {
-    const existingLoc = getLocationPricingForHub(config, selectedHub);
-    const updatedLocPricing: LocationPricingConfig = {
-      ...existingLoc,
-      containerPrices: {
-        small_10m3: {
-          ...existingLoc.containerPrices.small_10m3,
-          monthlyRate: Math.max(0, existingLoc.containerPrices.small_10m3.monthlyRate + delta),
-        },
-        medium_19m3: {
-          ...existingLoc.containerPrices.medium_19m3,
-          monthlyRate: Math.max(0, existingLoc.containerPrices.medium_19m3.monthlyRate + delta),
-        },
-        large_25m3: {
-          ...existingLoc.containerPrices.large_25m3,
-          monthlyRate: Math.max(0, existingLoc.containerPrices.large_25m3.monthlyRate + delta),
-        },
-      },
-    };
-
-    const newConfig: AppConfig = {
-      ...config,
-      locationPricing: {
-        ...(config.locationPricing || {}),
-        [selectedHub]: updatedLocPricing,
-      } as Record<MetroHub, LocationPricingConfig>,
-    };
-
-    // 1. Immediately persist to localStorage
-    saveAppConfig(newConfig);
-    // 2. Update React parent states
-    onUpdateConfig(newConfig);
-    onSave();
-    // 3. Broadcast real-time update event
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(new CustomEvent('portabox:pricing-updated', { detail: newConfig }));
-    }
-    const nowTime = new Date().toLocaleTimeString('en-AU', { hour: '2-digit', minute: '2-digit' });
-    setLastSavedTime(nowTime);
-    setSaveStatus('saved');
-    setMatrixFeedback(`Saved: Applied ${delta >= 0 ? `+$${delta}` : `-$${Math.abs(delta)}`} across all ${selectedHub} container sizes.`);
-    setTimeout(() => setMatrixFeedback(null), 3000);
-  };
-
   const handleManualSave = () => {
     saveAppConfig(config);
     onSave();
@@ -219,7 +195,7 @@ export const PricingMatrixWorkspace: React.FC<PricingMatrixWorkspaceProps> = ({
     const nowTime = new Date().toLocaleTimeString('en-AU', { hour: '2-digit', minute: '2-digit' });
     setLastSavedTime(nowTime);
     setSaveStatus('saved');
-    setMatrixFeedback('✓ All Tariff Matrix rates & zone parameters saved to persistent storage.');
+    setMatrixFeedback('✓ All Price Matrix rates & zone parameters saved to persistent storage.');
     setTimeout(() => {
       setSaveStatus('idle');
       setMatrixFeedback(null);
@@ -227,24 +203,18 @@ export const PricingMatrixWorkspace: React.FC<PricingMatrixWorkspaceProps> = ({
   };
 
   const currentLoc = getLocationPricingForHub(config, selectedHub);
-  const activePrices = storageCategory === 'onsite'
-    ? (currentLoc.onsiteContainerPrices || config.onsiteContainerPrices || {
-        small_10m3: { monthlyRate: 149, weeklyRate: 49 },
-        medium_19m3: { monthlyRate: 169, weeklyRate: 59 },
-        large_25m3: { monthlyRate: 179, weeklyRate: 65 },
-      })
-    : currentLoc.containerPrices;
+  const activePrices = getCategoryPrices(currentLoc, storageCategory);
 
   return (
     <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 items-start">
       {/* Left 8 Columns: Pricing Matrix Grid & Zone Settings */}
-      <div className="xl:col-span-7 space-y-6">
+      <div className={`${config.enableLivePhoneQuoteSimulator ? 'xl:col-span-7' : 'xl:col-span-12'} space-y-6`}>
         {/* Header Ribbon */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-200">
           <div>
             <div className="flex items-center gap-2">
               <h3 className="text-base sm:text-lg font-black text-[#0b2942]">
-                Interactive Tariff Matrix Grid
+                Container Rental &amp; Local Delivery Price Matrix
               </h3>
               <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-md bg-emerald-100 text-emerald-800 border border-emerald-200 flex items-center gap-1">
                 <FileSpreadsheet className="w-3 h-3 text-emerald-600" />
@@ -286,6 +256,7 @@ export const PricingMatrixWorkspace: React.FC<PricingMatrixWorkspaceProps> = ({
 
         {/* 1. Metro Depot Switcher & Container Rates Matrix */}
         <div className="bg-white rounded-3xl border border-slate-200 p-5 space-y-4 shadow-2xs">
+          <h4 className="text-sm font-black text-[#0b2942]">Container Rental Rates</h4>
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0">
               {HUBS.map((hub) => (
@@ -303,25 +274,6 @@ export const PricingMatrixWorkspace: React.FC<PricingMatrixWorkspaceProps> = ({
                 </button>
               ))}
             </div>
-
-            {/* Quick Bulk Adjust */}
-            <div className="flex items-center gap-1.5 text-xs shrink-0">
-              <span className="text-slate-400 font-bold">Quick Shift:</span>
-              <button
-                type="button"
-                onClick={() => handleApplyBulkMonthlyAdjustment(10)}
-                className="px-2 py-1 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-800 font-extrabold text-[11px] border border-emerald-200 transition-colors cursor-pointer"
-              >
-                +$10/mo
-              </button>
-              <button
-                type="button"
-                onClick={() => handleApplyBulkMonthlyAdjustment(-10)}
-                className="px-2 py-1 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-800 font-extrabold text-[11px] border border-rose-200 transition-colors cursor-pointer"
-              >
-                -$10/mo
-              </button>
-            </div>
           </div>
 
           {/* Storage Placement Category Selector */}
@@ -335,7 +287,7 @@ export const PricingMatrixWorkspace: React.FC<PricingMatrixWorkspaceProps> = ({
                   : 'text-slate-600 hover:text-slate-900'
               }`}
             >
-              Facility Depot Storage
+              Our Location
             </button>
             <button
               type="button"
@@ -346,9 +298,28 @@ export const PricingMatrixWorkspace: React.FC<PricingMatrixWorkspaceProps> = ({
                   : 'text-slate-600 hover:text-slate-900'
               }`}
             >
-              Onsite Container Hire (Customer's Place)
+              Customer's Location
+            </button>
+            <button
+              type="button"
+              onClick={() => setStorageCategory('interstate')}
+              className={`px-3 py-1 rounded-lg text-xs font-black transition-all cursor-pointer ${
+                storageCategory === 'interstate'
+                  ? 'bg-[#0b2942] text-white shadow-2xs'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              Interstate
             </button>
           </div>
+
+          {storageCategory === 'interstate' && (
+            <p className="text-[11px] text-slate-600 bg-sky-50 border border-sky-200 rounded-xl px-3 py-2 leading-relaxed">
+              Monthly container rental for interstate jobs that <strong>start at {selectedHub}</strong>. The job is charged
+              this {selectedHub} rate for its whole duration, wherever the container ends up (e.g. {selectedHub} → another
+              depot). Until changed, these match {selectedHub}'s Our Location rates. Line-haul freight is set separately.
+            </p>
+          )}
 
           {/* Matrix Grid Table */}
           <div className="overflow-x-auto rounded-2xl border border-slate-200">
@@ -359,7 +330,6 @@ export const PricingMatrixWorkspace: React.FC<PricingMatrixWorkspaceProps> = ({
                   <th className="py-2.5 px-3">Volume</th>
                   <th className="py-2.5 px-3">Monthly Rent ($AUD)</th>
                   <th className="py-2.5 px-3">Weekly Equivalent</th>
-                  <th className="py-2.5 px-3 text-right">Placement Type</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 font-medium text-slate-800">
@@ -407,11 +377,6 @@ export const PricingMatrixWorkspace: React.FC<PricingMatrixWorkspaceProps> = ({
                       />
                     </div>
                   </td>
-                  <td className="py-3 px-3 text-right">
-                    <span className="text-[11px] font-bold text-slate-400">
-                      {storageCategory === 'onsite' ? 'Onsite' : 'Facility'}
-                    </span>
-                  </td>
                 </tr>
 
                 {/* Medium 19m3 */}
@@ -457,11 +422,6 @@ export const PricingMatrixWorkspace: React.FC<PricingMatrixWorkspaceProps> = ({
                         className="w-16 px-2 py-1 rounded-lg bg-slate-50 border border-slate-200 text-xs font-bold text-slate-600 focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#00c0f3]"
                       />
                     </div>
-                  </td>
-                  <td className="py-3 px-3 text-right">
-                    <span className="text-[11px] font-bold text-slate-400">
-                      {storageCategory === 'onsite' ? 'Onsite' : 'Facility'}
-                    </span>
                   </td>
                 </tr>
 
@@ -509,47 +469,14 @@ export const PricingMatrixWorkspace: React.FC<PricingMatrixWorkspaceProps> = ({
                       />
                     </div>
                   </td>
-                  <td className="py-3 px-3 text-right">
-                    <span className="text-[11px] font-bold text-emerald-600 font-bold">Standard Lead</span>
-                  </td>
                 </tr>
 
               </tbody>
             </table>
           </div>
 
-          {/* 2-Week Storage Rate & Duration Options Configuration */}
+          {/* Duration Options Configuration */}
           <div className="pt-3 border-t border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-            <div className="flex items-center gap-3">
-              <label className="text-xs font-bold text-[#0b2942] whitespace-nowrap">
-                Standard 2-Week Storage Rate:
-              </label>
-              <div className="flex items-center gap-1">
-                <span className="text-slate-400 font-bold text-xs">$</span>
-                <input
-                  type="number"
-                  min="0"
-                  value={config.twoWeeksStorageRate ?? 199}
-                  onChange={(e) => {
-                    const val = Math.max(0, Number(e.target.value));
-                    const updated = { ...config, twoWeeksStorageRate: val };
-                    saveAppConfig(updated);
-                    onUpdateConfig(updated);
-                    onSave();
-                    if (typeof window !== 'undefined') {
-                      window.dispatchEvent(new CustomEvent('portabox:pricing-updated', { detail: updated }));
-                    }
-                    setMatrixFeedback(`Saved: 2-week standard storage rate updated to $${val} (Persisted)`);
-                    setTimeout(() => setMatrixFeedback(null), 3000);
-                  }}
-                  className="w-20 px-2 py-1 rounded-lg bg-slate-50 border border-slate-200 text-xs font-black text-[#0b2942] focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#00c0f3]"
-                />
-                <span className="text-[10px] text-slate-500 font-medium ml-1">
-                  (Flat rate across Small, Medium & Large)
-                </span>
-              </div>
-            </div>
-
             <label className="flex items-center gap-2 cursor-pointer text-xs font-bold text-slate-700 select-none">
               <input
                 type="checkbox"
@@ -779,13 +706,15 @@ export const PricingMatrixWorkspace: React.FC<PricingMatrixWorkspaceProps> = ({
         </div>
       </div>
 
-      {/* Right 5 Columns: Live Phone Quote Simulator (Side-by-side preview) */}
-      <div className="xl:col-span-5 sticky top-4">
-        <LiveQuoteSimulator
-          config={config}
-          onCreateLeadFromQuote={onCreateLeadFromQuote}
-        />
-      </div>
+      {/* Right 5 Columns: Live Phone Quote Simulator (feature flag, off by default) */}
+      {config.enableLivePhoneQuoteSimulator && (
+        <div className="xl:col-span-5 sticky top-4">
+          <LiveQuoteSimulator
+            config={config}
+            onCreateLeadFromQuote={onCreateLeadFromQuote}
+          />
+        </div>
+      )}
     </div>
   );
 };

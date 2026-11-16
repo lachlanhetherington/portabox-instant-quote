@@ -11,3 +11,8 @@ dist
 !.env.example
 *service-account*.json
 serviceAccount*.json
+build
+playwright-report
+test-results
+tests
+*-debug.log

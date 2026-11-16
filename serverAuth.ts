@@ -41,6 +41,36 @@ function staffEmails(): Set<string> {
   );
 }
 
+/**
+ * Microsoft (Entra ID) sign-in settings, from env:
+ *   MICROSOFT_TENANT_ID      the staff organisation's tenant ID; turns Microsoft sign-in on.
+ *   MICROSOFT_STAFF_DOMAINS  comma-separated email domains to trust from Microsoft, e.g. auspods.com.au.
+ *
+ * Firebase marks Microsoft accounts' emails as unverified, so they are trusted only when
+ * both are set, the account signed in with Microsoft, and the email is on a listed domain.
+ * This relies on the Azure app registration being single-tenant ("this organizational
+ * directory only"), so only accounts from that tenant can sign in with Microsoft at all.
+ */
+export function microsoftSignInConfig(): { tenantId: string; domains: string[] } | null {
+  const tenantId = (process.env.MICROSOFT_TENANT_ID || '').trim();
+  const domains = (process.env.MICROSOFT_STAFF_DOMAINS || '')
+    .split(',')
+    .map((d) => d.trim().toLowerCase().replace(/^@/, ''))
+    .filter(Boolean);
+  return tenantId && domains.length ? { tenantId, domains } : null;
+}
+
+export function isTrustedMicrosoftAccount(user: any, email: string): boolean {
+  const config = microsoftSignInConfig();
+  if (!config || !email) return false;
+  const domain = email.split('@')[1] || '';
+  if (!config.domains.includes(domain)) return false;
+  const providers: any[] = Array.isArray(user.providerUserInfo) ? user.providerUserInfo : [];
+  return providers.some(
+    (p) => p?.providerId === 'microsoft.com' && String(p.email || '').toLowerCase() === email,
+  );
+}
+
 async function lookupIdToken(idToken: string): Promise<StaffUser | null> {
   const cached = tokenCache.get(idToken);
   if (cached && cached.exp > Date.now()) return cached.user;
@@ -66,7 +96,8 @@ async function lookupIdToken(idToken: string): Promise<StaffUser | null> {
     claims = {};
   }
   const email = String(user.email || '').toLowerCase();
-  const emailOk = !!email && user.emailVerified === true && staffEmails().has(email);
+  const emailTrusted = user.emailVerified === true || isTrustedMicrosoftAccount(user, email);
+  const emailOk = !!email && emailTrusted && staffEmails().has(email);
   if (!(claims.staff === true || emailOk)) return null;
 
   // Role: custom claim `role`, else STAFF_ROLES_MAP, else least-privilege default.

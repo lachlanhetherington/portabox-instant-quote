@@ -5,13 +5,17 @@
   "type": "module",
   "scripts": {
     "dev": "tsx server.ts",
-    "build": "vite build",
+    "build": "vite build && npm run build:server",
     "preview": "vite preview",
-    "start": "tsx server.ts",
+    "start": "node --enable-source-maps build/server.mjs",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
     "staff:claims": "tsx scripts/set-staff-claims.ts",
-    "test": "vitest run"
+    "test": "vitest run",
+    "settings:copy": "tsx scripts/copy-settings.ts",
+    "build:server": "esbuild server.ts --bundle --platform=node --target=node22 --format=esm --packages=external --sourcemap --outfile=build/server.mjs",
+    "test:rules": "npx -y firebase-tools@15.34.1 emulators:exec --only firestore --project demo-portabox \"vitest run -c vitest.rules.config.ts\"",
+    "test:e2e": "npx -y firebase-tools@15.34.1 emulators:exec --only firestore --project demo-portabox \"playwright test\""
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
@@ -23,6 +27,7 @@
     "express": "^4.21.2",
     "express-rate-limit": "^8.7.4",
     "firebase": "^13.0.0",
+    "firebase-admin": "^14.5.0",
     "html5-qrcode": "^2.3.8",
     "lucide-react": "^0.546.0",
     "motion": "^12.23.24",
@@ -33,13 +38,14 @@
     "vite": "^8.3.0"
   },
   "devDependencies": {
+    "@firebase/rules-unit-testing": "6.0.0",
+    "@playwright/test": "1.64.1",
     "@types/express": "^4.17.21",
     "@types/google.maps": "^3.66.7",
     "@types/node": "^22.14.0",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "autoprefixer": "^10.4.21",
-    "firebase-admin": "^14.5.0",
     "tailwindcss": "^4.3.3",
     "tsx": "^4.21.0",
     "typescript": "^7.0.2",

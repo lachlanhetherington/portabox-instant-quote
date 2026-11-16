@@ -30,6 +30,8 @@ import {
   Shield,
   Smartphone,
   Activity,
+  Package,
+  Wallet,
 } from 'lucide-react';
 import { AppConfig } from '../../types/quote';
 import { StaffSession, StaffMember, StaffPermissionKey } from '../../types/adminAuth';
@@ -46,6 +48,9 @@ export type AdminTabId =
   | 'staff_mfa_audit'
   | 'pricing_matrix'
   | 'pricing'
+  | 'supplies'
+  | 'protection'
+  | 'billing_discounts'
   | 'competitor_pricing'
   | 'duration_discounts'
   | 'quote_lifecycle'
@@ -137,8 +142,8 @@ export const AdminSidebar: React.FC<AdminSidebarProps> = ({
       items: [
         {
           id: 'pricing_matrix',
-          label: 'Tariff Matrix & Simulator',
-          shortLabel: 'Simulator',
+          label: 'Container Rental & Local Delivery Price Matrix',
+          shortLabel: 'Price Matrix',
           icon: Calculator,
           highlight: true,
           permissionKey: 'daily_operations',
@@ -256,9 +261,33 @@ export const AdminSidebar: React.FC<AdminSidebarProps> = ({
         },
         {
           id: 'duration_discounts',
-          label: 'Duration Discounts (2–12 mo)',
+          label: 'Duration Discounts',
           shortLabel: 'Discounts',
           icon: Percent,
+          highlight: true,
+          permissionKey: 'pricing_and_rates',
+        },
+        {
+          id: 'billing_discounts',
+          label: 'Billing Type Discounts',
+          shortLabel: 'Billing',
+          icon: Wallet,
+          highlight: true,
+          permissionKey: 'pricing_and_rates',
+        },
+        {
+          id: 'supplies',
+          label: 'Supplies',
+          shortLabel: 'Supplies',
+          icon: Package,
+          highlight: true,
+          permissionKey: 'pricing_and_rates',
+        },
+        {
+          id: 'protection',
+          label: 'Protection',
+          shortLabel: 'Protection',
+          icon: Shield,
           highlight: true,
           permissionKey: 'pricing_and_rates',
         },

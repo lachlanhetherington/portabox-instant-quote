@@ -1023,7 +1023,7 @@ export function buildSmartsheetRowsFromAccounts(accounts: CustomerAccount[]): Sm
         const legBaseFee = qData?.domesticLegFeePerContainer || 179;
         const containerMonthlyRent = qData?.monthlyRatePerContainer || (o.containerSize.includes('10') ? 149 : o.containerSize.includes('19') ? 169 : 219);
         const isFirstMoFree = Boolean(qData?.isFirstMonthFree && totalContainers > 0);
-        const protectionFee = qData?.protectionMonthlyFee || (qData?.protectionPlan === 'coo' ? 10 : 15);
+        const protectionFee = qData?.protectionMonthlyFee || (qData?.protectionPlan === 'coo' ? 10 : qData?.protectionPlan === 'cpo_coo' ? 25 : 15);
 
         rows.push({
           id: containerRowId,
@@ -1086,12 +1086,12 @@ export function buildSmartsheetRowsFromAccounts(accounts: CustomerAccount[]): Sm
           legsSavedCount: qData?.legsSavedCount || 0,
           legsSavedDollarTotal: qData?.legsSavedDollarTotal || 0,
 
-          protectionPlan: qData?.protectionPlan === 'coo' ? `COO-${protectionFee || 22}` : qData?.protectionPlan === 'cpo' ? `CPO-${protectionFee || 22}` : 'CPO-22',
-          protectionPlanName: qData?.protectionPlan === 'coo' ? 'COO (Container Only Option)' : 'CPO (Content Protection Option)',
-          protectionCoverageAmount: qData?.protectionPlan === 'cpo' ? 5000 : 0,
+          protectionPlan: qData?.protectionPlan === 'cpo_coo' ? `CPO+COO-${protectionFee || 25}` : qData?.protectionPlan === 'coo' ? `COO-${protectionFee || 22}` : qData?.protectionPlan === 'cpo' ? `CPO-${protectionFee || 22}` : 'CPO-22',
+          protectionPlanName: qData?.protectionPlan === 'cpo_coo' ? 'CPO (Contents Protection Option) + COO (Container Only Option)' : qData?.protectionPlan === 'coo' ? 'COO (Container Only Option)' : 'CPO (Contents Protection Option)',
+          protectionCoverageAmount: qData?.protectionPlan === 'cpo' || qData?.protectionPlan === 'cpo_coo' ? 5000 : 0,
           protectionMonthlyFee: protectionFee,
           isMandatoryInterstateProtection: Boolean(qData?.isInterstate),
-          insurancePlan: qData?.protectionPlan === 'coo' ? `COO-${protectionFee || 22}` : `CPO-${protectionFee || 22}`,
+          insurancePlan: qData?.protectionPlan === 'cpo_coo' ? `CPO+COO-${protectionFee || 25}` : qData?.protectionPlan === 'coo' ? `COO-${protectionFee || 22}` : `CPO-${protectionFee || 22}`,
 
           freeBlanketsAllowance: 10,
           freeBlanketsCount: 10,

@@ -5,6 +5,7 @@ import {
   CustomerAccount,
 } from './customerPortalService';
 import { addSmartsheetSyncLog } from './smartsheetService';
+import { getQuoteNumber } from './quoteNumberService';
 
 export interface QuoteDispatchResult {
   quoteNumber: string;
@@ -47,7 +48,7 @@ export function dispatchQuoteToCustomer(params: {
     agentName = 'Admin Call Center Agent',
   } = params;
 
-  const quoteRef = `Q-${(quote.quoteCreatedAt ? new Date(quote.quoteCreatedAt).getTime() : Date.now()).toString().slice(-6)}`;
+  const quoteRef = getQuoteNumber() || `Q-${Date.now().toString().slice(-6)}`;
   const timestamp = new Date().toLocaleString('en-AU');
   const validUntilStr = quote.quoteExpiresAt
     ? new Date(quote.quoteExpiresAt).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' })
@@ -83,7 +84,7 @@ QUOTATION SUMMARY:
 FINANCIAL SCHEDULE:
 • First Payment Due: $${quote.firstPaymentTotal} AUD (Includes delivery leg + initial month rent)
 • Ongoing Monthly Rent: $${quote.monthlyStorageFee || quote.monthlyContainerRate}/month
-• 1-Year Booking Price Guarantee: Guaranteed fixed pricing with 30-Day Quote Price Guarantee until ${validUntilStr}
+• 30-Day Quote Price Guarantee: prices held until ${validUntilStr}
 
 ACCESS YOUR CUSTOMER PORTAL:
 Your quotation has also been uploaded directly into your Customer Portal. You can review your inventory, choose driveway placement, and finalize your booking anytime:

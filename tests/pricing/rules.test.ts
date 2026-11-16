@@ -21,8 +21,21 @@ function expectAll(rule: (q: QuoteBreakdown, s: Scenario) => string | null) {
   expect(failures.slice(0, 15), `${failures.length} of ${results.length} quotes break this rule`).toEqual([]);
 }
 
+/**
+ * Value of the free first month: the discounted rent of the containers that get it. 10 m³ containers
+ * never get 1st month free, so in a mixed booking their first month is still charged.
+ */
+const freeMonthValue = (q: QuoteBreakdown) =>
+  q.isFirstMonthFree
+    ? (q.discountBreakdownBySize || [])
+        .filter((l) => l.sizeId !== 'small_10m3')
+        .reduce((sum, l) => sum + l.listMonthlyRate - l.durationDiscountMonthly, 0)
+    : 0;
+
 const storageCharged = (q: QuoteBreakdown) =>
-  q.isFirstMonthFree && q.billingCycle === 'monthly' ? 0 : q.currentPeriodicStorageFee;
+  q.isFirstMonthFree && q.billingCycle === 'monthly'
+    ? Math.max(0, q.currentPeriodicStorageFee - freeMonthValue(q))
+    : q.currentPeriodicStorageFee;
 
 describe(`pricing rules (${scenarios.length} scenarios)`, () => {
   it('builds a valid quote for every scenario', () => {
@@ -46,7 +59,9 @@ describe(`pricing rules (${scenarios.length} scenarios)`, () => {
         .filter((p) => p.rule.type === 'percent_off_interstate')
         .reduce((sum, p) => sum + p.discountAmount, 0);
       const discount = (q.totalDiscount || 0) - interstateDiscount;
-      const expected = Math.max(0, legsNow + storageCharged(q) + q.packingSupplies.totalSuppliesPrice + protection - discount);
+      // Dan (16 Nov): 6 / 12 months upfront also takes the upfront % off the initial delivery
+      const upfrontDelivery = q.upfrontDeliveryDiscount || 0;
+      const expected = Math.max(0, legsNow + storageCharged(q) + q.packingSupplies.totalSuppliesPrice + protection - discount - upfrontDelivery);
       return Math.abs(q.firstPaymentTotal - expected) > 0.01
         ? `first payment ${q.firstPaymentTotal}, parts add up to ${expected}`
         : null;
@@ -60,6 +75,21 @@ describe(`pricing rules (${scenarios.length} scenarios)`, () => {
       if (Math.abs(sum - (q.totalSavings || 0)) > 0.01) return `items add to ${sum}, total says ${q.totalSavings}`;
       const bad = items.find((i) => !(i.amount > 0));
       return bad ? `savings item "${bad.label}" is ${bad.amount}` : null;
+    });
+  });
+
+  it('10 m³ containers get no discount in any booking, and the per-size lines add up', () => {
+    expectAll((q) => {
+      const lines = q.discountBreakdownBySize || [];
+      const small = lines.find((l) => l.sizeId === 'small_10m3');
+      if (small && (small.hasDiscount || small.durationDiscountMonthly > 0 || small.firstMonthFree)) {
+        return `10 m³ line shows a discount (${small.durationDiscountPercent}%, free month ${small.firstMonthFree})`;
+      }
+      const list = lines.reduce((s, l) => s + l.listMonthlyRate, 0);
+      const off = lines.reduce((s, l) => s + l.durationDiscountMonthly, 0);
+      if (lines.length && Math.abs(list - (q.baseMonthlyStorageFee ?? list)) > 0.01) return `size lines list $${list}, quote base $${q.baseMonthlyStorageFee}`;
+      if (lines.length && Math.abs(list - off - q.monthlyStorageFee) > 0.01) return `size lines net $${list - off}, quote monthly $${q.monthlyStorageFee}`;
+      return null;
     });
   });
 
@@ -102,7 +132,7 @@ describe('billing comparisons', () => {
     for (const { s, q: monthly } of base) {
       for (const [cycle, months] of [['6_months_upfront', 6], ['12_months_upfront', 12]] as const) {
         const upfront = quote({ ...s.params, billingCycle: cycle });
-        const monthlyCost = monthly.monthlyStorageFee * months - (monthly.isFirstMonthFree ? monthly.monthlyStorageFee : 0);
+        const monthlyCost = monthly.monthlyStorageFee * months - freeMonthValue(monthly);
         if (upfront.currentPeriodicStorageFee > monthlyCost + 0.01) {
           failures.push(`${s.name}: ${cycle} costs $${upfront.currentPeriodicStorageFee}, monthly for ${months} months costs $${monthlyCost}`);
         }

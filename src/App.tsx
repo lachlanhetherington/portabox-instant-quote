@@ -1,9 +1,12 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { Header } from './components/Header';
 import { AdminGate } from './components/AdminGate';
 import { StaffOnly } from './components/StaffOnly';
 import { RightSidebar } from './components/RightSidebar';
 import { Step1Where } from './components/Step1Where';
+import { OpenSavedQuoteModal } from './components/OpenSavedQuoteModal';
+import { findPostcode, type QuoteInputs } from './services/quoteFreeze';
+import { loadServerAdminSettings } from './services/adminSettingsSync';
 import { Step2What } from './components/Step2What';
 import { Step3LoadingLogistics } from './components/Step3LoadingLogistics';
 import { Step3Size } from './components/Step3Size';
@@ -72,6 +75,10 @@ import { getStaffSession, clearStaffSession, hasStaffPermission } from './servic
 import { auth as firebaseAuth } from './services/firebaseService';
 import { onAuthStateChanged } from 'firebase/auth';
 import { isStaffSignInLink, finishStaffEmailLinkSignIn, completeStaffLogin } from './services/staffLogin';
+import { submitQuoteRecord } from './services/quoteRecordService';
+import { getQuoteNumber } from './services/quoteNumberService';
+import { upsertLeadByQuoteNumber } from './services/quoteFollowUp';
+import { applyProductionLocks, isFeatureLocked } from './services/productionFeatures';
 
 /**
  * The website's postcode boxes hand off here as ?postcode=3000.
@@ -89,7 +96,9 @@ function postcodeFromUrl(): PostcodeRecord | null {
 
 export default function App() {
   // App Config & Persistent Leads
-  const [config, setConfig] = useState<AppConfig>(loadAppConfig());
+  const [storedConfig, setConfig] = useState<AppConfig>(loadAppConfig());
+  // In production, modules that only simulate their work are always off (see productionFeatures.ts).
+  const config = useMemo(() => applyProductionLocks(storedConfig), [storedConfig]);
   const [leads, setLeads] = useState<CustomerLead[]>(loadCustomerLeads());
 
   // Staff Authentication & Role-Based Access Control (2FA)
@@ -200,7 +209,7 @@ export default function App() {
   const [containerSelections, setContainerSelections] = useState<Record<ContainerSizeId, number>>({
     small_10m3: 0,
     medium_19m3: 0,
-    large_25m3: 1,
+    large_25m3: 0, // Dan 16 Nov: start at zero so customers pick only what they want
     two_large_50m3: 0,
   });
   
@@ -214,8 +223,25 @@ export default function App() {
   const [boxesCount, setBoxesCount] = useState<number>(0);
   const [blanketsCount, setBlanketsCount] = useState<number>(10); // default to 10 free blankets
   const [locksCount, setLocksCount] = useState<number>(1); // default recommended 1 lock
-  const [insuranceSelected, setInsuranceSelected] = useState<boolean>(true); // default CPO insurance opted-in
-  const [protectionPlan, setProtectionPlan] = useState<ProtectionPlanType>('cpo'); // default CPO protection plan
+  const [insuranceSelected, setInsuranceSelected] = useState<boolean>(false); // Dan 16 Nov: nothing selected by default
+  const [protectionPlan, setProtectionPlan] = useState<ProtectionPlanType>('none'); // CPO is still forced on for interstate moves
+
+  // "Open your saved quote" window, and the notice when prices changed while the page was open
+  const [isOpenSavedQuoteVisible, setIsOpenSavedQuoteVisible] = useState(false);
+  const [pricesUpdatedNotice, setPricesUpdatedNotice] = useState(false);
+
+  // Locks and blankets are chosen per container (None / 1 / 2), so keep the same per-container
+  // choice when the number of containers changes (default: 1 free lock + 10 free blankets each).
+  const prevContainerCountRef = useRef(1);
+  useEffect(() => {
+    const prev = Math.max(1, prevContainerCountRef.current);
+    const next = Math.max(1, containerCount);
+    if (prev !== next) {
+      setLocksCount((n) => Math.min(2, Math.round(n / prev)) * next);
+      setBlanketsCount((n) => Math.min(2, Math.round(n / prev / 10)) * 10 * next);
+      prevContainerCountRef.current = next;
+    }
+  }, [containerCount]);
   
   // Loading & Unloading Logistics Method (depot vs home delivery)
   const [originLogisticsMethod, setOriginLogisticsMethod] = useState<LogisticsMethod>('home_delivery');
@@ -240,6 +266,42 @@ export default function App() {
   };
 
   // Calculated quote memo
+  /** Start a new quote from a saved quote's choices (priced at today's prices). */
+  const handleRequoteFromSaved = (inputs: QuoteInputs) => {
+    const origin = findPostcode(inputs.origin);
+    if (!origin) return;
+    const saved = inputs.containerSelections || ({} as Partial<Record<ContainerSizeId, number>>);
+    const selections: Record<ContainerSizeId, number> = {
+      small_10m3: saved.small_10m3 || 0,
+      medium_19m3: saved.medium_19m3 || 0,
+      large_25m3: saved.large_25m3 || 0,
+      two_large_50m3: saved.two_large_50m3 || 0,
+    };
+    if (!Object.values(selections).some((n) => n > 0)) {
+      selections[inputs.containerSize] = inputs.containerSize === 'two_large_50m3' ? 1 : Math.max(1, inputs.containerCount || 1);
+    }
+    // Keep the saved lock and blanket choices instead of rescaling them for the new container count
+    prevContainerCountRef.current = Math.max(1, Object.values(selections).reduce((a, b) => a + b, 0));
+    setOriginPostcode(origin);
+    setDestinationPostcode(inputs.destination ? findPostcode(inputs.destination) || null : null);
+    setServiceType(inputs.serviceType);
+    if (inputs.storagePlacement) setStoragePlacement(inputs.storagePlacement);
+    setContainerSelections(selections);
+    setStorageDuration(inputs.storageDuration);
+    if (inputs.storageDurationMonths) setStorageDurationMonths(inputs.storageDurationMonths);
+    setBillingCycle(inputs.billingCycle);
+    if (inputs.annualDiscountOption) setAnnualDiscountOption(inputs.annualDiscountOption);
+    setBoxesCount(inputs.boxesCount || 0);
+    setBlanketsCount(inputs.blanketsCount || 0);
+    setLocksCount(inputs.locksCount || 0);
+    if (inputs.protectionPlan) setProtectionPlan(inputs.protectionPlan);
+    if (inputs.originLogisticsMethod) setOriginLogisticsMethod(inputs.originLogisticsMethod);
+    if (inputs.destinationLogisticsMethod) setDestinationLogisticsMethod(inputs.destinationLogisticsMethod);
+    setAppliedPromoCode(inputs.appliedPromoCode || '');
+    setIsOpenSavedQuoteVisible(false);
+    setCurrentStep(5); // Duration & Billing: the customer sees today's prices and carries on from there
+  };
+
   const activeQuote = useMemo(() => {
     if (!originPostcode) return null;
     return calculateQuote({
@@ -293,8 +355,9 @@ export default function App() {
 
   // Enforce mandatory CPO for interstate moves (cannot be deselected)
   useEffect(() => {
-    if (activeQuote?.isInterstate && protectionPlan !== 'cpo') {
-      setProtectionPlan('cpo');
+    // CPO stays on for interstate moves; a COO add-on is kept
+    if (activeQuote?.isInterstate && protectionPlan !== 'cpo' && protectionPlan !== 'cpo_coo') {
+      setProtectionPlan(protectionPlan === 'coo' ? 'cpo_coo' : 'cpo');
     }
   }, [activeQuote?.isInterstate, protectionPlan]);
 
@@ -307,7 +370,7 @@ export default function App() {
       4: 'Page 4: Which size do you need?',
       5: 'Page 5: Duration & Billing',
       6: 'Page 6: Supplies',
-      7: 'Page 7: Container & Content Protection',
+      7: 'Page 7: Container & Contents Protection',
       8: 'Page 8: Where do we send your quote',
       9: 'Page 9: Instant Quote (Detailed quote & savings)',
       10: 'Page 10: Next Steps After Payment (Booking Confirmation & Lifecycle Roadmap)',
@@ -504,9 +567,11 @@ export default function App() {
     setCustomerContact(customerData);
 
     if (activeQuote) {
+      const quoteNumber = getQuoteNumber() || undefined;
       const newLead: CustomerLead = {
         id: `lead-${Date.now()}`,
         createdAt: new Date().toISOString(),
+        quoteNumber,
         firstName: customerData.firstName,
         companyName: customerData.companyName,
         mobile: customerData.mobile,
@@ -529,7 +594,8 @@ export default function App() {
         ],
       };
 
-      const updatedLeads = [newLead, ...leads];
+      // Dan (16 Nov): sending the same quote again replaces its entry instead of adding a duplicate
+      const updatedLeads = upsertLeadByQuoteNumber(leads, newLead);
       setLeads(updatedLeads);
       saveCustomerLeads(updatedLeads);
       setSubmittedLead(newLead);
@@ -544,6 +610,26 @@ export default function App() {
           quote: activeQuote,
         });
         autoSyncEventToSmartsheet(`New Customer Quote (${activeQuote.containerName})`, newLead.id);
+
+        // Save the quote and add one row per container to the quotes sheet (Smartsheet).
+        void submitQuoteRecord(activeQuote, {
+          name: customerData.firstName,
+          companyName: customerData.companyName,
+          email: customerData.hasNoPhoneOrEmail ? undefined : customerData.email,
+          mobile: customerData.hasNoPhoneOrEmail ? undefined : customerData.mobile,
+          agentName: customerData.isAgentCallIn ? customerData.agentName || 'Call centre' : undefined,
+          channels: customerData.channels || {
+            email: Boolean(customerData.email && !customerData.hasNoPhoneOrEmail),
+            sms: Boolean(customerData.mobile && !customerData.hasNoPhoneOrEmail),
+            portal: true,
+          },
+        }).then((result) => {
+          // Pricing changed while the page was open: the server froze today's prices, so show them
+          if (result.pricesUpdated) {
+            setPricesUpdatedNotice(true);
+            void loadServerAdminSettings();
+          }
+        });
 
         // Dispatch quote via Email, SMS, or In-Portal (15% call-in / quote dispatch)
         dispatchQuoteToCustomer({
@@ -674,7 +760,7 @@ export default function App() {
     setContainerSelections({
       small_10m3: 0,
       medium_19m3: 0,
-      large_25m3: 1,
+      large_25m3: 0, // Dan 16 Nov: start at zero so customers pick only what they want
       two_large_50m3: 0,
     });
   };
@@ -757,7 +843,7 @@ export default function App() {
         <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/75 backdrop-blur-xs flex items-start justify-center">
           <AdminGate onCancel={() => setIsDriverPortalOpen(false)}>
             <DriverPortalModal
-              isOpen
+              isOpen={isDriverPortalOpen && !isFeatureLocked('driverPortal')}
               onClose={() => setIsDriverPortalOpen(false)}
               enableContainerInventory={config.enableContainerInventory !== false}
             />
@@ -834,6 +920,7 @@ export default function App() {
                     initialPostcode={originPostcode}
                     onSelectPostcode={(p) => setOriginPostcode(p)}
                     onContinue={() => setCurrentStep(2)}
+                    onOpenSavedQuote={() => setIsOpenSavedQuoteVisible(true)}
                     config={config}
                   />
                 )}
@@ -943,6 +1030,7 @@ export default function App() {
                     originPostcode={originPostcode}
                     containerSize={containerSize}
                     containerCount={containerCount}
+                    perkContainerCount={containerSelections.medium_19m3 + containerSelections.large_25m3 + 2 * containerSelections.two_large_50m3}
                     insuranceSelected={insuranceSelected}
                     onToggleInsurance={(sel) => setInsuranceSelected(sel)}
                     locksCount={locksCount}
@@ -952,6 +1040,7 @@ export default function App() {
                     boxesCount={boxesCount}
                     onUpdateBoxesCount={(cnt) => setBoxesCount(cnt)}
                     durationFreeBlanketsCount={activeQuote?.durationFreeBlanketsCount || 0}
+                    durationFreeLock={Boolean(activeQuote?.freeLockIncluded)}
                     config={config}
                     onContinue={() => setCurrentStep(7)}
                     onBack={handleBack}
@@ -987,6 +1076,16 @@ export default function App() {
                 )}
 
                 {/* Step 9: Final Quote Page with Detailed Quote Information */}
+                {currentStep === 9 && activeQuote && pricesUpdatedNotice && (
+                  <div role="status" className="mb-4 p-4 rounded-2xl bg-amber-50 border-2 border-amber-300 text-amber-950 text-sm flex items-start justify-between gap-3">
+                    <span>
+                      <strong>Our prices were updated while you were getting your quote.</strong> Your quote now shows today's prices, and these are frozen for 30 days.
+                    </span>
+                    <button type="button" onClick={() => setPricesUpdatedNotice(false)} className="text-xs font-bold underline shrink-0 cursor-pointer">
+                      OK
+                    </button>
+                  </div>
+                )}
                 {currentStep === 9 && activeQuote && (
                   <Step5Quote
                     quote={activeQuote}
@@ -1063,6 +1162,7 @@ export default function App() {
                     containerSelections={containerSelections}
                     totalVolumeM3={activeQuote?.totalVolumeM3}
                     storageDuration={storageDuration}
+                    storageDurationMonths={storageDurationMonths}
                     preferredDate={preferredDate}
                     selectedSlot={selectedSlot || activeQuote?.selectedSlot}
                     metroHubName={currentHub}
@@ -1124,12 +1224,14 @@ export default function App() {
               >
                 Space Calculator
               </button>
-              <button
-                onClick={() => setIsCustomerPortalOpen(true)}
-                className="text-[#15385E] hover:text-[#5CC1EF] font-bold cursor-pointer transition-colors"
-              >
-                Customer Portal
-              </button>
+              {config.enableCustomerPortal && (
+                <button
+                  onClick={() => setIsCustomerPortalOpen(true)}
+                  className="text-[#15385E] hover:text-[#5CC1EF] font-bold cursor-pointer transition-colors"
+                >
+                  Customer Portal
+                </button>
+              )}
               <a
                 href="#staff-signin"
                 onClick={(e) => {
@@ -1151,14 +1253,23 @@ export default function App() {
 
       {/* Customer Portal Modal */}
       <CustomerPortal
-        isOpen={isCustomerPortalOpen}
+        isOpen={isCustomerPortalOpen && Boolean(config.enableCustomerPortal)}
         onClose={() => setIsCustomerPortalOpen(false)}
         phone={config.phone}
         onOpenBookingModal={(q) => handleOpenBookingModal(q)}
       />
 
-      {/* Dedicated Booking Decision Modal */}
-      {activeQuote && (
+      {/* Customer reopens a sent quote by its number */}
+      {isOpenSavedQuoteVisible && (
+        <OpenSavedQuoteModal
+          phone={config.phone}
+          onClose={() => setIsOpenSavedQuoteVisible(false)}
+          onRequote={handleRequoteFromSaved}
+        />
+      )}
+
+      {/* Dedicated Booking Decision Modal: only reachable from the self-booking flow or the customer portal */}
+      {activeQuote && (config.enableNextStepsFlow || config.enableCustomerPortal) && (
         <BookingDecisionModal
           isOpen={isBookingModalOpen}
           onClose={() => {

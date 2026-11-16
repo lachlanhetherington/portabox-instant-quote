@@ -436,6 +436,7 @@ export const Step5Quote: React.FC<Step5QuoteProps> = ({
           customerData={customerData}
           phone={phone}
           onBookNow={onGoToNextSteps || onOpenBookingModal}
+          showNextStepsDeliveryNote={Boolean(effectiveConfig.enableNextStepsFlow)}
         />
       </div>
 

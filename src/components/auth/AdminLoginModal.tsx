@@ -1,8 +1,8 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { ShieldCheck, AlertCircle, X, Loader2, Mail, CheckCircle2 } from 'lucide-react';
 import { StaffSession } from '../../types/adminAuth';
-import { googleSignIn } from '../../services/firebaseService';
-import { completeStaffLogin, sendStaffSignInLink } from '../../services/staffLogin';
+import { googleSignIn, microsoftSignIn } from '../../services/firebaseService';
+import { completeStaffLogin, fetchStaffSignInProviders, sendStaffSignInLink } from '../../services/staffLogin';
 
 interface AdminLoginModalProps {
   isOpen: boolean;
@@ -12,7 +12,7 @@ interface AdminLoginModalProps {
 }
 
 /**
- * Staff sign-in. Identity is proven by Google/Firebase; the server decides
+ * Staff sign-in. Identity is proven by Microsoft, Google or an emailed link via Firebase; the server decides
  * whether the account is staff and which role it has (GET /api/auth/me).
  * Nothing in the browser is trusted to grant access.
  */
@@ -26,6 +26,19 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [email, setEmail] = useState('');
   const [linkSentTo, setLinkSentTo] = useState<string | null>(null);
+  const [microsoftTenantId, setMicrosoftTenantId] = useState<string | null>(null);
+
+  // Ask the server which sign-in options are on each time the box opens.
+  useEffect(() => {
+    if (!isOpen) return;
+    let cancelled = false;
+    fetchStaffSignInProviders().then((p) => {
+      if (!cancelled) setMicrosoftTenantId(p.microsoft?.tenantId ?? null);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
@@ -48,6 +61,31 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
       resetAndClose();
     } catch (err: any) {
       setErrorMessage(err?.message || 'Sign-in failed. Please try again.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleMicrosoftSignIn = async () => {
+    if (!microsoftTenantId) return;
+    setErrorMessage(null);
+    setIsSubmitting(true);
+    try {
+      const user = await microsoftSignIn(microsoftTenantId);
+      const session = await completeStaffLogin(user, 'microsoft');
+      onLoginSuccess(session);
+      resetAndClose();
+    } catch (err: any) {
+      const code = err?.code as string | undefined;
+      setErrorMessage(
+        code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request'
+          ? 'Microsoft sign-in was cancelled.'
+          : code === 'auth/popup-blocked'
+          ? 'Your browser blocked the Microsoft sign-in window. Allow pop-ups for this site and try again.'
+          : code === 'auth/account-exists-with-different-credential'
+          ? 'This email already signs in another way. Use the emailed link or Google instead, or ask the CEO to reset your sign-in.'
+          : err?.message || 'Microsoft sign-in failed. Please try again.',
+      );
     } finally {
       setIsSubmitting(false);
     }
@@ -91,6 +129,31 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
               <AlertCircle className="w-4 h-4 shrink-0 text-rose-600" />
               <span>{errorMessage}</span>
             </div>
+          )}
+          {microsoftTenantId && (
+            <>
+              <button
+                type="button"
+                onClick={handleMicrosoftSignIn}
+                disabled={isSubmitting}
+                className="w-full flex items-center justify-center gap-2 py-3 bg-[#15385E] hover:bg-[#0f2a47] disabled:opacity-60 text-white text-sm font-bold rounded-xl"
+              >
+                {isSubmitting ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <svg viewBox="0 0 21 21" className="w-4 h-4" aria-hidden="true">
+                    <rect x="1" y="1" width="9" height="9" fill="#f25022" />
+                    <rect x="11" y="1" width="9" height="9" fill="#7fba00" />
+                    <rect x="1" y="11" width="9" height="9" fill="#00a4ef" />
+                    <rect x="11" y="11" width="9" height="9" fill="#ffb900" />
+                  </svg>
+                )}
+                Sign in with Microsoft (work account)
+              </button>
+              <div className="flex items-center gap-3 text-[11px] text-slate-400 uppercase tracking-wider">
+                <span className="flex-1 h-px bg-slate-200" />or<span className="flex-1 h-px bg-slate-200" />
+              </div>
+            </>
           )}
           {linkSentTo ? (
             <div className="space-y-2">

@@ -28,6 +28,7 @@ import {
   AnnualReviewEvaluation,
   applyManualContractOverride,
 } from '../../services/quoteLifecycleService';
+import { StaffQuoteLookup } from './StaffQuoteLookup';
 
 interface QuoteLifecycleAdminWorkspaceProps {
   config: AppConfig;
@@ -273,6 +274,9 @@ export const QuoteLifecycleAdminWorkspace: React.FC<QuoteLifecycleAdminWorkspace
           <span>Save Policy Parameters</span>
         </button>
       </div>
+
+      {/* Staff: open a saved quote by number and begin a booking */}
+      <StaffQuoteLookup config={config} />
 
       {/* Policy Summary Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">

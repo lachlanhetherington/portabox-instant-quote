@@ -35,37 +35,90 @@ if (!oldPath || !newPath) {
    line — the file has many other objects and some contain the same keys. */
 function configRegion(src) {
   const lines = src.split(/\r?\n/);
-  const start = lines.findIndex((l) => /(?:export\s+)?const DEFAULT_CONFIG\b[^=]*=\s*\{/.test(l));
-  if (start < 0) return null;
+  /* Every top-level constant, not just DEFAULT_CONFIG.
+   *
+   * This read DEFAULT_CONFIG alone, and that turned out to cover much less
+   * than it sounded like. The per-city container rates live in
+   * DEFAULT_LOCATION_PRICING, a few hundred lines earlier in the same file,
+   * so a drop that reworked them was reported as "no change to any number".
+   * A pricing check that answers "no" when prices moved is worse than no
+   * check, because it gets believed.
+   *
+   * So: every `const NAME = {` or `= [` at column zero, with its name as
+   * the path prefix. A new pricing object in a later drop is then covered
+   * the day it arrives rather than the day someone notices. */
+  const DECL = /^(?:export\s+)?const\s+([A-Za-z_$][\w$]*)\s*(?::[^=]+)?=\s*[{[]/;
+  const regions = [];
 
-  let depth = 0;
-  const region = [];
-  for (let i = start; i < lines.length; i++) {
-    const line = lines[i];
-    region.push(line);
-    for (const ch of line) {
-      if (ch === '{') depth++;
-      else if (ch === '}') depth--;
+  for (let i = 0; i < lines.length; i++) {
+    const m = lines[i].match(DECL);
+    if (!m) continue;
+
+    let depth = 0;
+    const region = [];
+    for (let j = i; j < lines.length; j++) {
+      const line = lines[j].replace(/\/\/.*$/, '');
+      region.push(lines[j]);
+      for (const ch of line) {
+        if (ch === '{' || ch === '[') depth++;
+        else if (ch === '}' || ch === ']') depth--;
+      }
+      if (depth === 0 && j > i) { i = j; break; }
     }
-    if (depth === 0 && i > start) break;
+    regions.push({ name: m[1], region });
   }
-  return region;
+
+  return regions.length ? regions : null;
 }
 
 /* key: 123  |  key: true  |  key: {   — enough for a config literal, and
    everything it cannot read it simply does not report. */
-function scalars(region) {
-  if (!region) return null;
+function scalars(regions) {
+  if (!regions) return null;
+  const all = new Map();
+  for (const { name, region } of regions) {
+    for (const [k, v] of scanOne(region)) all.set(`${name}.${k}`, v);
+  }
+  return all;
+}
+
+function scanOne(region) {
   const found = new Map();
   const stack = [];
+  /* Array elements have no key, so they are numbered. Without this every
+     element of a list of rate tiers collapses onto the same path and only
+     the last survives. */
+  let arrayDepth = 0;
+  let elementIndex = 0;
 
   for (const raw of region) {
     /* Strip a trailing line comment so a '{' or a number inside a comment
        cannot move the nesting or be read as a value. */
     const line = raw.replace(/\/\/.*$/, '');
 
+    /* `key: [` opens a list; its elements are numbered below. */
+    const openArray = line.match(/^\s*([A-Za-z_$][\w$]*)\s*:\s*\[\s*$/);
+    if (openArray) { stack.push(openArray[1]); arrayDepth = stack.length; elementIndex = 0; continue; }
+
+    /* A bare `{` is an element of the list we are inside. */
+    if (arrayDepth === stack.length && /^\s*\{\s*$/.test(line)) {
+      stack.push(String(elementIndex++));
+      continue;
+    }
+
     const open = line.match(/^\s*([A-Za-z_$][\w$]*)\s*:\s*\{\s*$/);
     if (open) { stack.push(open[1]); continue; }
+
+    /* An element written on one line: `{ id: 'x', percent: 5 },` */
+    if (arrayDepth === stack.length && /^\s*\{.+\}\s*,?\s*$/.test(line)) {
+      const base = [...stack, String(elementIndex++)].join('.');
+      for (const m of line.matchAll(
+        /([A-Za-z_$][\w$]*)\s*:\s*(-?\d+(?:\.\d+)?|true|false)/g
+      )) {
+        found.set(`${base}.${m[1]}`, m[2]);
+      }
+      continue;
+    }
 
     const scalar = line.match(/^\s*([A-Za-z_$][\w$]*)\s*:\s*(-?\d+(?:\.\d+)?|true|false)\s*,?\s*$/);
     if (scalar) {
@@ -73,9 +126,33 @@ function scalars(region) {
       continue;
     }
 
-    /* A closing brace at the end of a line ends the object it opened. */
-    const closes = (line.match(/\}/g) || []).length - (line.match(/\{/g) || []).length;
-    for (let i = 0; i < closes; i++) stack.pop();
+    /* A nested object written on one line, which is how the container
+       rates are written:
+         small_10m3: { monthlyRate: 209, weeklyRate: 69 },
+       Without this the whole object is invisible — the open-brace branch
+       above only fires when `key: {` ends a line — so every container
+       price went unreported and the tool said "no change" while rates
+       moved. That is worse than having no check, and it is why this
+       exists. */
+    const inline = line.match(/^\s*([A-Za-z_$][\w$]*)\s*:\s*\{(.+)\}\s*,?\s*$/);
+    if (inline) {
+      const base = [...stack, inline[1]].join('.');
+      for (const m of inline[2].matchAll(
+        /([A-Za-z_$][\w$]*)\s*:\s*(-?\d+(?:\.\d+)?|true|false)/g
+      )) {
+        found.set(`${base}.${m[1]}`, m[2]);
+      }
+      continue;
+    }
+
+    /* Closing brackets end whatever they opened. Brackets count too, since
+       a list can close here. */
+    const opened = (line.match(/[{[]/g) || []).length;
+    const closed = (line.match(/[}\]]/g) || []).length;
+    for (let i = 0; i < closed - opened; i++) {
+      stack.pop();
+      if (stack.length < arrayDepth) arrayDepth = 0;
+    }
   }
   return found;
 }
@@ -84,7 +161,7 @@ const before = scalars(configRegion(fs.readFileSync(oldPath, 'utf8')));
 const after = scalars(configRegion(fs.readFileSync(newPath, 'utf8')));
 
 if (!before || !after) {
-  console.log('DEFAULT_CONFIG could not be located in one of the two revisions,');
+  console.log('No top-level constants could be read in one of the two revisions,');
   console.log('so prices and flag defaults were NOT compared. Check them by hand,');
   console.log('and re-anchor tools/diff-pricing.cjs.');
   process.exit(3);
@@ -110,7 +187,7 @@ const flags = changed.filter(([, a, b]) => isFlag(a) || isFlag(b));
 const say = console.log;
 
 if (!changed.length && !addedKeys.length && !removedKeys.length) {
-  say(`No change to any number or flag default in DEFAULT_CONFIG (${after.size} values compared).`);
+  say(`No number or flag default changed in any top-level constant (${after.size} values compared).`);
   process.exit(0);
 }
 

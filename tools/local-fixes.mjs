@@ -316,7 +316,12 @@ fix(
      that takes the public page down. */
   (s) => !/AIza[A-Za-z0-9_-]{20,}/.test(s) && /signedOutAuth/.test(s),
   (s) => s.replace(
-    /const firebaseConfig = \{[\s\S]*?\};\s*\n+const app = !getApps\(\)\.length \? initializeApp\(firebaseConfig\) : getApps\(\)\[0\];\s*\nexport const db = getFirestore\(app\);\s*\nexport const auth = getAuth\(app\);/,
+    /* The whole span from the config literal to the auth export, rather
+       than each line. Upstream rearranges the middle of this block most
+       drops — it has gained a Firestore database id and a Microsoft
+       provider since this was written — and matching the ends survives
+       that where matching every line did not. */
+    /const firebaseConfig = \{[\s\S]*?export const auth = getAuth\(app\);/,
     `/**\n` +
     ` * Shipped with the original developer's own Firebase project hardcoded,\n` +
     ` * key and all. Two problems: the credentials are not Portabox's, and\n` +
@@ -357,7 +362,20 @@ fix(
     `   of them and re-doing it on each drop. Unconfigured, a call throws where\n` +
     `   it is made, so the admin feature fails rather than the page. Guard with\n` +
     `   hasFirebaseConfig before reaching for it. */\n` +
-    `export const db = (app ? getFirestore(app) : null) as Firestore;\n\n` +
+    `/* Upstream's own choice of database, kept: "(default)" in production,\n` +
+    `   "staging" otherwise, so local work never reads or writes production\n` +
+    `   data. Only the guard against an uninitialised app is added. */\n` +
+    `const firestoreDatabaseId =\n` +
+    `  envVar('VITE_FIRESTORE_DATABASE_ID') ||\n` +
+    `  (typeof process !== 'undefined' ? process.env?.FIRESTORE_DATABASE_ID : '') ||\n` +
+    `  'staging';\n\n` +
+    `export const db = (\n` +
+    `  app\n` +
+    `    ? firestoreDatabaseId === '(default)'\n` +
+    `      ? getFirestore(app)\n` +
+    `      : getFirestore(app, firestoreDatabaseId)\n` +
+    `    : null\n` +
+    `) as Firestore;\n\n` +
     `/* auth cannot be null, and that is not a style preference.\n` +
     `   App.tsx calls onAuthStateChanged(auth, ...) as the component mounts,\n` +
     `   so this module is now reached by the public quote flow and not only by\n` +
@@ -389,12 +407,20 @@ fix(
     `  signOut: async () => {},\n` +
     `};\n\n` +
     `export const auth = (app ? getAuth(app) : signedOutAuth) as unknown as Auth;`
+  /* The type-only imports are added to whatever upstream's import line
+     already names, rather than by matching the exact list. That list
+     changes — OAuthProvider arrived with Microsoft sign-in — and a literal
+     match silently stopped adding the types. */
   ).replace(
-    /^import \{ getFirestore \} from 'firebase\/firestore';$/m,
-    `import { getFirestore, type Firestore } from 'firebase/firestore';`
+    /^import \{([^}]*)\} from 'firebase\/firestore';$/m,
+    (m, names) => names.includes('Firestore,') || /\bFirestore\b/.test(names.replace('getFirestore', ''))
+      ? m
+      : `import { ${names.trim()}, type Firestore } from 'firebase/firestore';`
   ).replace(
-    /^import \{ getAuth, signInWithPopup, GoogleAuthProvider, User \} from 'firebase\/auth';$/m,
-    `import { getAuth, signInWithPopup, GoogleAuthProvider, type Auth, User } from 'firebase/auth';`
+    /^import \{([^}]*)\} from 'firebase\/auth';$/m,
+    (m, names) => /\btype Auth\b/.test(names)
+      ? m
+      : `import { ${names.trim()}, type Auth } from 'firebase/auth';`
   )
 );
 
@@ -613,6 +639,37 @@ fix(
     if (!anchor.test(out)) throw new Error('the AdminGate import is not there to anchor to');
     return out.replace(anchor, `$1\nimport { StaffOnly } from './components/StaffOnly';`);
   }
+);
+
+/* -- 16. upstream's Cloud Run deploy config ------------------------------
+   The drop that split upstream's own staging from production added
+   deploy/*.env.yaml, and deploy/staging.env.yaml carries a live Google
+   Maps browser key.
+
+   Upstream's comment argues it is fine — a browser key ships in every page
+   anyway, and theirs is restricted by HTTP referrer in Google Cloud. In
+   their repository that holds: it is private. Ours is public, and a key
+   committed to a public repository is scraped within minutes and has to be
+   rotated rather than merely deleted. Three Google keys are already in this
+   history for exactly that reason.
+
+   So the value is replaced with a placeholder. The file is kept rather than
+   dropped: it is how upstream deploys, it documents their environment
+   split, and quietly discarding whole directories is how you stop noticing
+   what a drop contains.
+
+   Only the key is touched. The Smartsheet sheet ids, project ids and URLs
+   in these files are identifiers rather than credentials — they open
+   nothing without a token, and the tokens live in Secret Manager, which
+   deploy/*.secrets maps by name only. */
+fix(
+  'deploy config: placeholder the live Maps key in upstream\'s Cloud Run env',
+  'deploy/staging.env.yaml',
+  (s) => !/AIza[A-Za-z0-9_-]{30,}/.test(s),
+  (s) => s.replace(
+    /AIza[A-Za-z0-9_-]{30,}/g,
+    'REPLACE-WITH-REFERRER-RESTRICTED-MAPS-BROWSER-KEY'
+  )
 );
 
 /* -- report --------------------------------------------------------------- */

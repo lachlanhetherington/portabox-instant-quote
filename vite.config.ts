@@ -6,6 +6,11 @@ import {defineConfig} from 'vite';
 export default defineConfig(() => {
   return {
     plugins: [react(), tailwindcss()],
+    // Local dev: the browser uses the same Firestore database as the server (from .env).
+    // Production builds leave this empty; the server injects it at runtime.
+    define: {
+      'import.meta.env.VITE_FIRESTORE_DATABASE_ID': JSON.stringify(process.env.FIRESTORE_DATABASE_ID || ''),
+    },
     resolve: {
       alias: {
         '@': path.resolve(__dirname, '.'),

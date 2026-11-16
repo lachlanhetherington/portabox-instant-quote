@@ -1,6 +1,7 @@
 import { initializeApp, getApps } from 'firebase/app';
 import { getFirestore, type Firestore } from 'firebase/firestore';
-import { getAuth, signInWithPopup, GoogleAuthProvider, type Auth, User } from 'firebase/auth';
+import { publicEnv } from '../utils/publicEnv';
+import { getAuth, signInWithPopup, GoogleAuthProvider, OAuthProvider, User, type Auth } from 'firebase/auth';
 
 /**
  * Shipped with the original developer's own Firebase project hardcoded,
@@ -46,7 +47,21 @@ const app = hasFirebaseConfig
    of them and re-doing it on each drop. Unconfigured, a call throws where
    it is made, so the admin feature fails rather than the page. Guard with
    hasFirebaseConfig before reaching for it. */
-export const db = (app ? getFirestore(app) : null) as Firestore;
+/* Upstream's own choice of database, kept: "(default)" in production,
+   "staging" otherwise, so local work never reads or writes production
+   data. Only the guard against an uninitialised app is added. */
+const firestoreDatabaseId =
+  envVar('VITE_FIRESTORE_DATABASE_ID') ||
+  (typeof process !== 'undefined' ? process.env?.FIRESTORE_DATABASE_ID : '') ||
+  'staging';
+
+export const db = (
+  app
+    ? firestoreDatabaseId === '(default)'
+      ? getFirestore(app)
+      : getFirestore(app, firestoreDatabaseId)
+    : null
+) as Firestore;
 
 /* auth cannot be null, and that is not a style preference.
    App.tsx calls onAuthStateChanged(auth, ...) as the component mounts,
@@ -94,6 +109,17 @@ export const googleSignIn = async (): Promise<{ user: User; accessToken: string 
         return { user: result.user, accessToken: cachedAccessToken };
     }
     return null;
+};
+
+/**
+ * Signs in with a Microsoft work account (Entra ID) from the given tenant.
+ * The Azure app registration behind Firebase's Microsoft provider must be single-tenant.
+ */
+export const microsoftSignIn = async (tenantId: string): Promise<User> => {
+    const microsoft = new OAuthProvider('microsoft.com');
+    microsoft.setCustomParameters({ tenant: tenantId, prompt: 'select_account' });
+    const result = await signInWithPopup(auth, microsoft);
+    return result.user;
 };
 
 export const getAccessToken = async (): Promise<string | null> => {

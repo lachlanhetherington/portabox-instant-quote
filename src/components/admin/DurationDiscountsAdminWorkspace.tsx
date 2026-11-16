@@ -44,15 +44,80 @@ import {
   ContainerSizeId,
   ServiceType,
   EarlyTerminationResult,
+  UpfrontDiscountSettings,
 } from '../../types/quote';
 import {
   DEFAULT_DISCOUNT_MATRIX_RULES,
   evaluateDiscountMatrix,
   calculateEarlyTerminationClawback,
   getLockUnitValue,
+  DEFAULT_UPFRONT_DISCOUNTS,
 } from '../../services/pricingEngine';
 
-const METRO_HUBS: MetroHub[] = ['Adelaide', 'Sydney', 'Melbourne', 'Brisbane'];
+const METRO_HUBS: MetroHub[] = ['Adelaide', 'Brisbane', 'Melbourne', 'Sydney'];
+
+type MatrixContainerSize = DiscountMatrixRule['containerSizes'][number];
+const MATRIX_SIZES: { id: MatrixContainerSize; label: string }[] = [
+  { id: 'small_10m3', label: "7'" },
+  { id: 'medium_19m3', label: "12'" },
+  { id: 'large_25m3', label: "16'" },
+];
+
+/** Duration blocks offered for matrix rules (2-week storage has been removed product-wide). */
+const DURATION_BLOCKS: { key: string; label: string; min: number; max?: number }[] = [
+  { key: '1', label: '1 Month', min: 1, max: 1 },
+  { key: '2', label: '2 Months', min: 2, max: 2 },
+  { key: '3', label: '3 Months', min: 3, max: 3 },
+  { key: '4-5', label: '4–5 Months', min: 4, max: 5 },
+  { key: '6-8', label: '6–8 Months', min: 6, max: 8 },
+  { key: '9-11', label: '9–11 Months', min: 9, max: 11 },
+  { key: '12+', label: '12+ Months', min: 12, max: undefined },
+];
+
+const findDurationBlockKey = (min: number, max?: number): string | null => {
+  const block = DURATION_BLOCKS.find((b) => b.min === min && b.max === max);
+  return block ? block.key : null;
+};
+
+const formatRuleDuration = (rule: Pick<DiscountMatrixRule, 'minMonths' | 'maxMonths'>): string => {
+  const { minMonths, maxMonths } = rule;
+  if (maxMonths === undefined || minMonths >= 12) return `${minMonths}+ Months`;
+  if (maxMonths > minMonths) return `${minMonths}–${maxMonths} Months`;
+  return `${minMonths} Month${minMonths > 1 ? 's' : ''}`;
+};
+
+// Checkbox <-> field mapping helpers
+const scopeToChecks = (scope: DiscountMatrixRule['moveScope']) => ({
+  local: scope === 'all' || scope === 'local',
+  interstate: scope === 'all' || scope === 'interstate',
+});
+const checksToScope = (local: boolean, interstate: boolean): DiscountMatrixRule['moveScope'] | null =>
+  local && interstate ? 'all' : local ? 'local' : interstate ? 'interstate' : null;
+
+const placementToChecks = (placement: DiscountMatrixRule['storagePlacement']) => ({
+  customer: placement === 'all' || placement === 'my_place',
+  ours: placement === 'all' || placement === 'facility',
+});
+const checksToPlacement = (customer: boolean, ours: boolean): DiscountMatrixRule['storagePlacement'] | null =>
+  customer && ours ? 'all' : customer ? 'my_place' : ours ? 'facility' : null;
+
+const hubIsTicked = (hubs: ('all' | MetroHub)[], hub: MetroHub) => hubs.includes('all') || hubs.includes(hub);
+/** Toggle one hub; returns null if it would leave no hub ticked. All hubs ticked collapses to ['all']. */
+const toggleHub = (hubs: ('all' | MetroHub)[], hub: MetroHub): ('all' | MetroHub)[] | null => {
+  const current = new Set<MetroHub>(hubs.includes('all') ? METRO_HUBS : (hubs.filter((h) => h !== 'all') as MetroHub[]));
+  if (current.has(hub)) current.delete(hub);
+  else current.add(hub);
+  if (current.size === 0) return null;
+  if (METRO_HUBS.every((h) => current.has(h))) return ['all'];
+  return METRO_HUBS.filter((h) => current.has(h));
+};
+
+/** Toggle one size; returns null if it would leave no size ticked (empty means "any size" in the engine). */
+const toggleSize = (sizes: MatrixContainerSize[], size: MatrixContainerSize): MatrixContainerSize[] | null => {
+  const next = sizes.includes(size) ? sizes.filter((s) => s !== size) : [...sizes, size];
+  if (next.length === 0) return null;
+  return MATRIX_SIZES.map((m) => m.id).filter((id) => next.includes(id));
+};
 
 interface DurationDiscountsAdminWorkspaceProps {
   config: AppConfig;
@@ -70,6 +135,15 @@ export const DurationDiscountsAdminWorkspace: React.FC<DurationDiscountsAdminWor
       : [...DEFAULT_DISCOUNT_MATRIX_RULES];
   });
 
+  // Upfront % is edited on the Billing Type Discounts page; shown read-only here.
+  const upfrontDiscounts: UpfrontDiscountSettings = {
+    ...DEFAULT_UPFRONT_DISCOUNTS,
+    ...(config.upfrontDiscounts || {}),
+  };
+
+  // "Add location row" picker: the rule being duplicated for a single hub
+  const [locationRowSource, setLocationRowSource] = useState<DiscountMatrixRule | null>(null);
+
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [saveSuccess, setSaveSuccess] = useState<boolean>(false);
   const [isCreateModalOpen, setIsCreateModalOpen] = useState<boolean>(false);
@@ -86,6 +160,7 @@ export const DurationDiscountsAdminWorkspace: React.FC<DurationDiscountsAdminWor
   // Form State for Create / Edit Modal
   const [formName, setFormName] = useState<string>('');
   const [formMinMonths, setFormMinMonths] = useState<number>(3);
+  const [formDurationKey, setFormDurationKey] = useState<string>('3');
   const [formMaxMonths, setFormMaxMonths] = useState<string>('3');
   const [formSizes, setFormSizes] = useState<('small_10m3' | 'medium_19m3' | 'large_25m3')[]>([
     'medium_19m3',
@@ -116,8 +191,8 @@ export const DurationDiscountsAdminWorkspace: React.FC<DurationDiscountsAdminWor
   const filteredRules = useMemo(() => {
     return rules.filter((r) => {
       if (filterDuration !== 'all') {
-        const d = parseFloat(filterDuration);
-        if (r.minMonths !== d) return false;
+        const block = DURATION_BLOCKS.find((b) => b.key === filterDuration);
+        if (block && (r.minMonths !== block.min || r.maxMonths !== block.max)) return false;
       }
       if (filterSize !== 'all') {
         if (!r.containerSizes.includes(filterSize as any)) return false;
@@ -207,6 +282,32 @@ export const DurationDiscountsAdminWorkspace: React.FC<DurationDiscountsAdminWor
     setSelectedIds(new Set());
   };
 
+  // Inline row edits (checkbox columns)
+  const updateRule = (id: string, patch: Partial<DiscountMatrixRule>) => {
+    setRules((prev) => prev.map((r) => (r.id === id ? { ...r, ...patch } : r)));
+  };
+
+  // Duplicate a rule as a location-specific row (e.g. Adelaide 1 month free while Sydney gets 2).
+  // Hub-specific rows take priority over "all locations" rows in the pricing engine.
+  const handleAddLocationRow = (source: DiscountMatrixRule, hub: MetroHub) => {
+    const baseName = source.name.replace(/\s*\((Adelaide|Sydney|Melbourne|Brisbane)\)\s*$/, '');
+    const newRule: DiscountMatrixRule = {
+      ...source,
+      id: `dm-loc-${hub.toLowerCase()}-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+      name: `${baseName} (${hub})`,
+      hubLocations: [hub],
+      active: true,
+    };
+    setRules((prev) => {
+      const idx = prev.findIndex((r) => r.id === source.id);
+      const next = [...prev];
+      next.splice(idx >= 0 ? idx + 1 : next.length, 0, newRule);
+      return next;
+    });
+    setLocationRowSource(null);
+    handleOpenEdit(newRule);
+  };
+
   // Save changes
   const handleSaveAll = () => {
     const sorted = [...rules].sort((a, b) => a.minMonths - b.minMonths);
@@ -240,6 +341,7 @@ export const DurationDiscountsAdminWorkspace: React.FC<DurationDiscountsAdminWor
     setFormName(rule.name);
     setFormMinMonths(rule.minMonths);
     setFormMaxMonths(rule.maxMonths !== undefined ? String(rule.maxMonths) : '');
+    setFormDurationKey(findDurationBlockKey(rule.minMonths, rule.maxMonths) ?? 'custom');
     setFormSizes(rule.containerSizes);
     setFormScope(rule.moveScope);
     setFormPlacement(rule.storagePlacement);
@@ -261,6 +363,7 @@ export const DurationDiscountsAdminWorkspace: React.FC<DurationDiscountsAdminWor
     setFormName('New Duration Discount Rule');
     setFormMinMonths(3);
     setFormMaxMonths('3');
+    setFormDurationKey('3');
     setFormSizes(['medium_19m3', 'large_25m3']);
     setFormScope('all');
     setFormPlacement('all');
@@ -279,14 +382,16 @@ export const DurationDiscountsAdminWorkspace: React.FC<DurationDiscountsAdminWor
   // Save Modal Form
   const handleSaveModalForm = (e: React.FormEvent) => {
     e.preventDefault();
-    const maxM = formMaxMonths.trim() ? parseFloat(formMaxMonths) : undefined;
-    const is12Plus = formMinMonths >= 12;
+    const block = DURATION_BLOCKS.find((b) => b.key === formDurationKey);
+    const minM = block ? block.min : Math.max(1, Math.round(formMinMonths));
+    const maxM = block ? block.max : formMaxMonths.trim() ? Math.max(minM, Math.round(parseFloat(formMaxMonths))) : undefined;
+    const is12Plus = minM >= 12;
 
     const ruleData: DiscountMatrixRule = {
       id: editingRule ? editingRule.id : `dm-custom-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-      name: formName.trim() || `${formMinMonths} Months Discount`,
+      name: formName.trim() || `${formatRuleDuration({ minMonths: minM, maxMonths: maxM })} Discount`,
       active: editingRule ? editingRule.active : true,
-      minMonths: formMinMonths,
+      minMonths: minM,
       maxMonths: is12Plus ? undefined : maxM,
       containerSizes: formSizes.length > 0 ? formSizes : ['medium_19m3', 'large_25m3'],
       moveScope: formScope,
@@ -301,7 +406,7 @@ export const DurationDiscountsAdminWorkspace: React.FC<DurationDiscountsAdminWor
       isPriceFreezeProtected: formPriceFreeze,
       earlyTerminationClawbackEnabled: formClawback,
       notes: formNotes.trim(),
-      description: `${formFirstMonthFree ? '1st Month Free · ' : ''}${formFreeBlankets > 0 ? `${formFreeBlankets} Free Blankets · ` : ''}${formFreeLock ? 'Free Lock' : ''}`.trim() || 'Custom duration discount rule',
+      description: `${formFirstMonthFree ? '1st Month Free · ' : ''}${formFreeBlankets > 0 ? `Free Blanket Rental (${formFreeBlankets}) · ` : ''}${formFreeLock ? 'Free Lock' : ''}`.trim() || 'Custom duration discount rule',
     };
 
     if (editingRule) {
@@ -395,8 +500,8 @@ export const DurationDiscountsAdminWorkspace: React.FC<DurationDiscountsAdminWor
             </span>
             <div className="mt-1.5 space-y-1 text-slate-200 text-[11px]">
               <div>• Monthly Ongoing: Standard rate</div>
-              <div>• 6 Months Upfront: <strong>5% off</strong> + duration incentives</div>
-              <div>• 12 Months Upfront: <strong>10% off</strong> + duration incentives</div>
+              <div>• 6 Months Upfront: <strong>{upfrontDiscounts.sixMonthsPercent}% off</strong> + duration incentives</div>
+              <div>• 12 Months Upfront: <strong>{upfrontDiscounts.twelveMonthsPercent}% off</strong> + duration incentives</div>
             </div>
           </div>
 
@@ -460,12 +565,11 @@ export const DurationDiscountsAdminWorkspace: React.FC<DurationDiscountsAdminWor
               className="px-2.5 py-1.5 rounded-xl border border-slate-200 bg-white text-slate-700 font-bold focus:border-[#15385E]"
             >
               <option value="all">All Durations</option>
-              <option value="0.5">2 Weeks</option>
-              <option value="1">1 Month</option>
-              <option value="2">2 Months</option>
-              <option value="3">3 Months</option>
-              <option value="6">6 Months</option>
-              <option value="12">12+ Months</option>
+              {DURATION_BLOCKS.map((b) => (
+                <option key={b.key} value={b.key}>
+                  {b.label}
+                </option>
+              ))}
             </select>
 
             {/* Container Size Filter */}
@@ -486,7 +590,7 @@ export const DurationDiscountsAdminWorkspace: React.FC<DurationDiscountsAdminWor
               onChange={(e) => setFilterScope(e.target.value)}
               className="px-2.5 py-1.5 rounded-xl border border-slate-200 bg-white text-slate-700 font-bold focus:border-[#15385E]"
             >
-              <option value="all">All Scopes (Local & IF)</option>
+              <option value="all">Local and Interstate</option>
               <option value="local">Local Only</option>
               <option value="interstate">Interstate Only</option>
             </select>
@@ -497,9 +601,9 @@ export const DurationDiscountsAdminWorkspace: React.FC<DurationDiscountsAdminWor
               onChange={(e) => setFilterPlacement(e.target.value)}
               className="px-2.5 py-1.5 rounded-xl border border-slate-200 bg-white text-slate-700 font-bold focus:border-[#15385E]"
             >
-              <option value="all">All Placements</option>
-              <option value="my_place">Your Home (Customer Site)</option>
-              <option value="facility">Our Location (Portabox Site)</option>
+              <option value="all">Customer Site & Our Site</option>
+              <option value="my_place">Customer Site</option>
+              <option value="facility">Our Site</option>
             </select>
 
             {/* Hub Filter */}
@@ -508,10 +612,10 @@ export const DurationDiscountsAdminWorkspace: React.FC<DurationDiscountsAdminWor
               onChange={(e) => setFilterHub(e.target.value)}
               className="px-2.5 py-1.5 rounded-xl border border-slate-200 bg-white text-slate-700 font-bold focus:border-[#15385E]"
             >
-              <option value="all">All Depot Locations</option>
+              <option value="all">All Our Locations</option>
               {METRO_HUBS.map((hub) => (
                 <option key={hub} value={hub}>
-                  {hub} Depot
+                  {hub}
                 </option>
               ))}
             </select>
@@ -584,6 +688,14 @@ export const DurationDiscountsAdminWorkspace: React.FC<DurationDiscountsAdminWor
 
       {/* Main High-Density Matrix Table */}
       <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden">
+        <div className="px-4 py-2.5 border-b border-slate-100 bg-slate-50/60 flex items-start gap-2 text-[11px] text-slate-600">
+          <MapPin className="w-3.5 h-3.5 text-emerald-700 shrink-0 mt-0.5" />
+          <span>
+            Need different benefits for one location (e.g. Adelaide 1 month free, Sydney 2 months free)? Use the{' '}
+            <strong>Add location row</strong> pin on a rule. Location-specific rows override “all locations” rows for that
+            location.
+          </span>
+        </div>
         <div className="overflow-x-auto">
           <table className="w-full text-left text-xs border-collapse">
             <thead>
@@ -597,10 +709,10 @@ export const DurationDiscountsAdminWorkspace: React.FC<DurationDiscountsAdminWor
                   />
                 </th>
                 <th className="py-3 px-3">Duration / Months</th>
-                <th className="py-3 px-3">Container Size</th>
-                <th className="py-3 px-3">Scope</th>
-                <th className="py-3 px-3">Placement</th>
-                <th className="py-3 px-3">Hub Location</th>
+                <th className="py-3 px-3">Size</th>
+                <th className="py-3 px-3">Local / Interstate</th>
+                <th className="py-3 px-3">Customer Site / Our Site</th>
+                <th className="py-3 px-3">Our Locations</th>
                 <th className="py-3 px-3">Discounts & Benefits</th>
                 <th className="py-3 px-2 text-center">Freeze</th>
                 <th className="py-3 px-2 text-center">Clawback</th>
@@ -618,8 +730,7 @@ export const DurationDiscountsAdminWorkspace: React.FC<DurationDiscountsAdminWor
               ) : (
                 filteredRules.map((rule) => {
                   const isSelected = selectedIds.has(rule.id);
-                  const isSmallExempt = rule.containerSizes.length === 1 && rule.containerSizes[0] === 'small_10m3';
-
+                  
                   return (
                     <tr
                       key={rule.id}
@@ -643,49 +754,126 @@ export const DurationDiscountsAdminWorkspace: React.FC<DurationDiscountsAdminWor
 
                       {/* Duration */}
                       <td className="py-2 px-3 whitespace-nowrap">
-                        <span className="font-bold text-[#15385E] tabular-nums">
-                          {rule.minMonths === 0.5
-                            ? '2 Weeks (0.5 mo)'
-                            : rule.maxMonths === undefined || rule.minMonths >= 12
-                            ? `${rule.minMonths}+ Months`
-                            : `${rule.minMonths} Month${rule.minMonths > 1 ? 's' : ''}`}
-                        </span>
-                      </td>
-
-                      {/* Container Size */}
-                      <td className="py-2 px-3 whitespace-nowrap">
-                        {isSmallExempt ? (
-                          <span className="text-slate-500 font-semibold">7' Small (Exempt)</span>
-                        ) : rule.containerSizes.length >= 2 ? (
-                          <span className="font-semibold text-slate-800">12' Medium & 16' Large</span>
-                        ) : (
-                          <span className="font-semibold text-slate-800">
-                            {rule.containerSizes.map((s) => s.replace('_', ' ')).join(', ')}
+                        <span className="font-bold text-[#15385E] tabular-nums">{formatRuleDuration(rule)}</span>
+                        {!rule.hubLocations.includes('all') && (
+                          <span className="block text-[10px] font-semibold text-slate-500 truncate max-w-[160px]" title={rule.name}>
+                            {rule.name}
                           </span>
                         )}
                       </td>
 
-                      {/* Scope */}
-                      <td className="py-2 px-3 whitespace-nowrap text-slate-600">
-                        {rule.moveScope === 'all'
-                          ? 'Both (Local & IF)'
-                          : rule.moveScope === 'interstate'
-                          ? 'Interstate'
-                          : 'Local'}
+                      {/* Size (multi-select) */}
+                      <td className="py-2 px-3 whitespace-nowrap">
+                        <div className="flex items-center gap-2">
+                          {MATRIX_SIZES.map((sz) => (
+                            <label
+                              key={sz.id}
+                              className="flex items-center gap-1 cursor-pointer font-semibold text-slate-700"
+                              title={sz.id === 'small_10m3' ? "7' containers are exempt from duration discounts in the pricing engine" : undefined}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={rule.containerSizes.includes(sz.id)}
+                                onChange={() => {
+                                  const next = toggleSize(rule.containerSizes, sz.id);
+                                  if (next) updateRule(rule.id, { containerSizes: next });
+                                }}
+                                className="w-3.5 h-3.5 rounded text-[#15385E] cursor-pointer"
+                              />
+                              <span>{sz.label}</span>
+                            </label>
+                          ))}
+                        </div>
                       </td>
 
-                      {/* Placement */}
-                      <td className="py-2 px-3 whitespace-nowrap text-slate-600">
-                        {rule.storagePlacement === 'all'
-                          ? 'Both'
-                          : rule.storagePlacement === 'my_place'
-                          ? 'Your Home'
-                          : 'Our Location'}
+                      {/* Local / Interstate (multi-select) */}
+                      <td className="py-2 px-3 whitespace-nowrap">
+                        {(() => {
+                          const c = scopeToChecks(rule.moveScope);
+                          return (
+                            <div className="flex items-center gap-2">
+                              <label className="flex items-center gap-1 cursor-pointer font-semibold text-slate-700">
+                                <input
+                                  type="checkbox"
+                                  checked={c.local}
+                                  onChange={() => {
+                                    const next = checksToScope(!c.local, c.interstate);
+                                    if (next) updateRule(rule.id, { moveScope: next });
+                                  }}
+                                  className="w-3.5 h-3.5 rounded text-[#15385E] cursor-pointer"
+                                />
+                                <span>Local</span>
+                              </label>
+                              <label className="flex items-center gap-1 cursor-pointer font-semibold text-slate-700">
+                                <input
+                                  type="checkbox"
+                                  checked={c.interstate}
+                                  onChange={() => {
+                                    const next = checksToScope(c.local, !c.interstate);
+                                    if (next) updateRule(rule.id, { moveScope: next });
+                                  }}
+                                  className="w-3.5 h-3.5 rounded text-[#15385E] cursor-pointer"
+                                />
+                                <span>Interstate</span>
+                              </label>
+                            </div>
+                          );
+                        })()}
                       </td>
 
-                      {/* Hub Location */}
-                      <td className="py-2 px-3 whitespace-nowrap text-slate-600">
-                        {rule.hubLocations.includes('all') ? 'All Hubs' : rule.hubLocations.join(', ')}
+                      {/* Customer Site / Our Site (multi-select) */}
+                      <td className="py-2 px-3 whitespace-nowrap">
+                        {(() => {
+                          const c = placementToChecks(rule.storagePlacement);
+                          return (
+                            <div className="flex items-center gap-2">
+                              <label className="flex items-center gap-1 cursor-pointer font-semibold text-slate-700">
+                                <input
+                                  type="checkbox"
+                                  checked={c.customer}
+                                  onChange={() => {
+                                    const next = checksToPlacement(!c.customer, c.ours);
+                                    if (next) updateRule(rule.id, { storagePlacement: next });
+                                  }}
+                                  className="w-3.5 h-3.5 rounded text-[#15385E] cursor-pointer"
+                                />
+                                <span>Customer Site</span>
+                              </label>
+                              <label className="flex items-center gap-1 cursor-pointer font-semibold text-slate-700">
+                                <input
+                                  type="checkbox"
+                                  checked={c.ours}
+                                  onChange={() => {
+                                    const next = checksToPlacement(c.customer, !c.ours);
+                                    if (next) updateRule(rule.id, { storagePlacement: next });
+                                  }}
+                                  className="w-3.5 h-3.5 rounded text-[#15385E] cursor-pointer"
+                                />
+                                <span>Our Site</span>
+                              </label>
+                            </div>
+                          );
+                        })()}
+                      </td>
+
+                      {/* Our Locations (multi-select) */}
+                      <td className="py-2 px-3">
+                        <div className="grid grid-cols-2 gap-x-2 gap-y-0.5 min-w-[170px]">
+                          {METRO_HUBS.map((hub) => (
+                            <label key={hub} className="flex items-center gap-1 cursor-pointer font-semibold text-slate-700 whitespace-nowrap">
+                              <input
+                                type="checkbox"
+                                checked={hubIsTicked(rule.hubLocations, hub)}
+                                onChange={() => {
+                                  const next = toggleHub(rule.hubLocations, hub);
+                                  if (next) updateRule(rule.id, { hubLocations: next });
+                                }}
+                                className="w-3.5 h-3.5 rounded text-[#15385E] cursor-pointer"
+                              />
+                              <span>{hub}</span>
+                            </label>
+                          ))}
+                        </div>
                       </td>
 
                       {/* Discounts & Benefits */}
@@ -703,7 +891,7 @@ export const DurationDiscountsAdminWorkspace: React.FC<DurationDiscountsAdminWor
                           )}
                           {rule.freeBlanketsCount ? (
                             <span className="text-[10px] font-black uppercase tracking-wider bg-sky-100 text-[#15385E] border border-sky-300 px-2 py-0.5 rounded">
-                              {rule.freeBlanketsCount} Blankets
+                              Free Blanket Rental ({rule.freeBlanketsCount})
                             </span>
                           ) : null}
                           {rule.milestoneDiscountAmount ? (
@@ -774,6 +962,14 @@ export const DurationDiscountsAdminWorkspace: React.FC<DurationDiscountsAdminWor
                         <div className="flex items-center justify-end gap-1.5">
                           <button
                             type="button"
+                            onClick={() => setLocationRowSource(rule)}
+                            className="p-1 rounded text-slate-400 hover:text-emerald-700 hover:bg-slate-100 transition-colors"
+                            title="Add location row (copy this rule for one location with its own benefits)"
+                          >
+                            <MapPin className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            type="button"
                             onClick={() => handleOpenEdit(rule)}
                             className="p-1 rounded text-slate-400 hover:text-[#15385E] hover:bg-slate-100 transition-colors"
                             title="Edit Rule"
@@ -802,131 +998,133 @@ export const DurationDiscountsAdminWorkspace: React.FC<DurationDiscountsAdminWor
         </div>
       </div>
 
-      {/* Early Termination Clawback Live Simulator */}
-      <div className="p-6 rounded-3xl bg-white border border-slate-200 shadow-sm space-y-4">
-        <div className="flex items-center justify-between gap-3">
-          <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-xl bg-amber-100 text-amber-900 flex items-center justify-center shrink-0">
-              <AlertTriangle className="w-5 h-5 stroke-[2.5]" />
+      {/* Early Termination Clawback Live Simulator (feature-flagged, off by default) */}
+      {config.enableEarlyTerminationClawback && (
+        <div className="p-6 rounded-3xl bg-white border border-slate-200 shadow-sm space-y-4">
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2.5">
+              <div className="w-9 h-9 rounded-xl bg-amber-100 text-amber-900 flex items-center justify-center shrink-0">
+                <AlertTriangle className="w-5 h-5 stroke-[2.5]" />
+              </div>
+              <div>
+                <h3 className="text-sm sm:text-base font-black text-slate-900">
+                  Early Termination Clawback Engine
+                </h3>
+                <p className="text-xs text-slate-500">
+                  Calculates automatic reversal when customer vacates earlier than committed duration
+                </p>
+              </div>
             </div>
+            <span className="text-[10px] font-black uppercase tracking-wider bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded">
+              Live Settlement Audit
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 p-4 rounded-2xl bg-slate-50 border border-slate-200 text-xs">
             <div>
-              <h3 className="text-sm sm:text-base font-black text-slate-900">
-                Early Termination Clawback Engine
-              </h3>
-              <p className="text-xs text-slate-500">
-                Calculates automatic reversal when customer vacates earlier than committed duration
-              </p>
+              <label className="text-[11px] font-bold text-slate-600 block mb-1">Committed Duration</label>
+              <select
+                value={simCommittedMonths}
+                onChange={(e) => setSimCommittedMonths(parseInt(e.target.value, 10))}
+                className="w-full px-3 py-2 rounded-xl border border-slate-300 bg-white font-bold"
+              >
+                <option value={2}>2 Months</option>
+                <option value={3}>3 Months</option>
+                <option value={6}>6 Months</option>
+                <option value={12}>12 Months</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="text-[11px] font-bold text-slate-600 block mb-1">Actual Completed Months</label>
+              <select
+                value={simActualMonths}
+                onChange={(e) => setSimActualMonths(parseInt(e.target.value, 10))}
+                className="w-full px-3 py-2 rounded-xl border border-slate-300 bg-white font-bold"
+              >
+                <option value={0}>0 Months (Under 1 Month)</option>
+                <option value={1}>1 Month</option>
+                <option value={2}>2 Months</option>
+                <option value={3}>3 Months</option>
+                <option value={4}>4 Months</option>
+                <option value={5}>5 Months</option>
+                <option value={6}>6 Months (Completed)</option>
+                <option value={12}>12 Months (Completed)</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="text-[11px] font-bold text-slate-600 block mb-1">Monthly Rack Rate ($)</label>
+              <input
+                type="number"
+                value={simBaseMonthly}
+                onChange={(e) => setSimBaseMonthly(parseFloat(e.target.value) || 0)}
+                className="w-full px-3 py-2 rounded-xl border border-slate-300 bg-white font-bold"
+              />
+            </div>
+
+            <div className="flex flex-col justify-end space-y-1">
+              <label className="flex items-center gap-2 cursor-pointer font-bold text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={simHadFirstMonthFree}
+                  onChange={(e) => setSimHadFirstMonthFree(e.target.checked)}
+                  className="w-4 h-4 rounded text-[#15385E]"
+                />
+                <span>1st Month Was Free ($0)</span>
+              </label>
+              <label className="flex items-center gap-2 cursor-pointer font-bold text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={simLockProvided}
+                  onChange={(e) => setSimLockProvided(e.target.checked)}
+                  className="w-4 h-4 rounded text-[#15385E]"
+                />
+                <span>Free Lock Received (${getLockUnitValue(config.packingSupplies)})</span>
+              </label>
             </div>
           </div>
-          <span className="text-[10px] font-black uppercase tracking-wider bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded">
-            Live Settlement Audit
-          </span>
-        </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 p-4 rounded-2xl bg-slate-50 border border-slate-200 text-xs">
-          <div>
-            <label className="text-[11px] font-bold text-slate-600 block mb-1">Committed Duration</label>
-            <select
-              value={simCommittedMonths}
-              onChange={(e) => setSimCommittedMonths(parseInt(e.target.value, 10))}
-              className="w-full px-3 py-2 rounded-xl border border-slate-300 bg-white font-bold"
-            >
-              <option value={2}>2 Months</option>
-              <option value={3}>3 Months</option>
-              <option value={6}>6 Months</option>
-              <option value={12}>12 Months</option>
-            </select>
-          </div>
-
-          <div>
-            <label className="text-[11px] font-bold text-slate-600 block mb-1">Actual Completed Months</label>
-            <select
-              value={simActualMonths}
-              onChange={(e) => setSimActualMonths(parseInt(e.target.value, 10))}
-              className="w-full px-3 py-2 rounded-xl border border-slate-300 bg-white font-bold"
-            >
-              <option value={0}>0 Months (Under 1 Month)</option>
-              <option value={1}>1 Month</option>
-              <option value={2}>2 Months</option>
-              <option value={3}>3 Months</option>
-              <option value={4}>4 Months</option>
-              <option value={5}>5 Months</option>
-              <option value={6}>6 Months (Completed)</option>
-              <option value={12}>12 Months (Completed)</option>
-            </select>
-          </div>
-
-          <div>
-            <label className="text-[11px] font-bold text-slate-600 block mb-1">Monthly Rack Rate ($)</label>
-            <input
-              type="number"
-              value={simBaseMonthly}
-              onChange={(e) => setSimBaseMonthly(parseFloat(e.target.value) || 0)}
-              className="w-full px-3 py-2 rounded-xl border border-slate-300 bg-white font-bold"
-            />
-          </div>
-
-          <div className="flex flex-col justify-end space-y-1">
-            <label className="flex items-center gap-2 cursor-pointer font-bold text-slate-700">
-              <input
-                type="checkbox"
-                checked={simHadFirstMonthFree}
-                onChange={(e) => setSimHadFirstMonthFree(e.target.checked)}
-                className="w-4 h-4 rounded text-[#15385E]"
-              />
-              <span>1st Month Was Free ($0)</span>
-            </label>
-            <label className="flex items-center gap-2 cursor-pointer font-bold text-slate-700">
-              <input
-                type="checkbox"
-                checked={simLockProvided}
-                onChange={(e) => setSimLockProvided(e.target.checked)}
-                className="w-4 h-4 rounded text-[#15385E]"
-              />
-              <span>Free Lock Received (${getLockUnitValue(config.packingSupplies)})</span>
-            </label>
-          </div>
-        </div>
-
-        {/* Live Clawback Result Banner */}
-        <div
-          className={`p-4 rounded-2xl border ${
-            simClawbackResult.isViolation
-              ? 'bg-rose-50 border-rose-300 text-rose-950'
-              : 'bg-emerald-50 border-emerald-300 text-emerald-950'
-          }`}
-        >
-          <div className="flex items-start justify-between gap-4">
-            <div className="space-y-1">
-              <div className="flex items-center gap-2">
-                <span className="font-black text-sm uppercase tracking-wide">
-                  {simClawbackResult.isViolation ? '⚠️ Discount Reversal Triggered' : '✓ Commitment Fulfilled'}
-                </span>
-                {simClawbackResult.isViolation && (
-                  <span className="text-xs font-black bg-rose-200 text-rose-900 px-2 py-0.5 rounded">
-                    Clawback Total: +${simClawbackResult.totalClawbackAmount.toFixed(2)}
+          {/* Live Clawback Result Banner */}
+          <div
+            className={`p-4 rounded-2xl border ${
+              simClawbackResult.isViolation
+                ? 'bg-rose-50 border-rose-300 text-rose-950'
+                : 'bg-emerald-50 border-emerald-300 text-emerald-950'
+            }`}
+          >
+            <div className="flex items-start justify-between gap-4">
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <span className="font-black text-sm uppercase tracking-wide">
+                    {simClawbackResult.isViolation ? '⚠️ Discount Reversal Triggered' : '✓ Commitment Fulfilled'}
                   </span>
+                  {simClawbackResult.isViolation && (
+                    <span className="text-xs font-black bg-rose-200 text-rose-900 px-2 py-0.5 rounded">
+                      Clawback Total: +${simClawbackResult.totalClawbackAmount.toFixed(2)}
+                    </span>
+                  )}
+                </div>
+                <p className="text-xs text-slate-700 leading-relaxed">
+                  {simClawbackResult.customerNotificationText}
+                </p>
+                {simClawbackResult.itemizedClawbacks.length > 0 && (
+                  <div className="pt-2 space-y-1 text-xs">
+                    <span className="font-bold text-slate-900">Itemized Deductions for Settlement:</span>
+                    <ul className="list-disc list-inside text-slate-700 space-y-0.5">
+                      {simClawbackResult.itemizedClawbacks.map((item, idx) => (
+                        <li key={idx}>
+                          <strong>{item.item}</strong>: +${item.waivedValue.toFixed(2)} ({item.reason})
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
                 )}
               </div>
-              <p className="text-xs text-slate-700 leading-relaxed">
-                {simClawbackResult.customerNotificationText}
-              </p>
-              {simClawbackResult.itemizedClawbacks.length > 0 && (
-                <div className="pt-2 space-y-1 text-xs">
-                  <span className="font-bold text-slate-900">Itemized Deductions for Settlement:</span>
-                  <ul className="list-disc list-inside text-slate-700 space-y-0.5">
-                    {simClawbackResult.itemizedClawbacks.map((item, idx) => (
-                      <li key={idx}>
-                        <strong>{item.item}</strong>: +${item.waivedValue.toFixed(2)} ({item.reason})
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
             </div>
           </div>
         </div>
-      </div>
+      )}
 
       {/* Create / Edit Rule Modal */}
       {isCreateModalOpen && (
@@ -963,71 +1161,153 @@ export const DurationDiscountsAdminWorkspace: React.FC<DurationDiscountsAdminWor
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="font-bold text-slate-700 block mb-1">Min Duration (Months)</label>
-                  <input
-                    type="number"
-                    step="0.5"
-                    min="0"
-                    required
-                    value={formMinMonths}
-                    onChange={(e) => setFormMinMonths(parseFloat(e.target.value) || 0)}
-                    className="w-full px-3 py-2 rounded-xl border border-slate-300 font-bold text-slate-800"
-                  />
-                </div>
-                <div>
-                  <label className="font-bold text-slate-700 block mb-1">Max Duration (Blank = +)</label>
-                  <input
-                    type="text"
-                    value={formMaxMonths}
-                    onChange={(e) => setFormMaxMonths(e.target.value)}
-                    placeholder="e.g. 3 or leave blank for 12+"
-                    className="w-full px-3 py-2 rounded-xl border border-slate-300 font-bold text-slate-800"
-                  />
-                </div>
+              <div>
+                <label className="font-bold text-slate-700 block mb-1">Duration</label>
+                <select
+                  value={formDurationKey}
+                  onChange={(e) => setFormDurationKey(e.target.value)}
+                  className="w-full px-2.5 py-2 rounded-xl border border-slate-300 font-bold text-slate-800"
+                >
+                  {DURATION_BLOCKS.map((b) => (
+                    <option key={b.key} value={b.key}>
+                      {b.label}
+                    </option>
+                  ))}
+                  {formDurationKey === 'custom' && <option value="custom">Custom range (legacy)</option>}
+                </select>
+                {formDurationKey === 'custom' && (
+                  <div className="grid grid-cols-2 gap-3 mt-2">
+                    <input
+                      type="number"
+                      step="1"
+                      min="1"
+                      value={formMinMonths}
+                      onChange={(e) => setFormMinMonths(parseInt(e.target.value, 10) || 1)}
+                      className="w-full px-3 py-2 rounded-xl border border-slate-300 font-bold text-slate-800"
+                      title="Min months"
+                    />
+                    <input
+                      type="text"
+                      value={formMaxMonths}
+                      onChange={(e) => setFormMaxMonths(e.target.value)}
+                      placeholder="Max months (blank = +)"
+                      className="w-full px-3 py-2 rounded-xl border border-slate-300 font-bold text-slate-800"
+                    />
+                  </div>
+                )}
               </div>
 
               {/* Dimensions */}
-              <div className="grid grid-cols-3 gap-3">
+              <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="font-bold text-slate-700 block mb-1">Move Scope</label>
-                  <select
-                    value={formScope}
-                    onChange={(e) => setFormScope(e.target.value as any)}
-                    className="w-full px-2.5 py-2 rounded-xl border border-slate-300 font-bold text-slate-800"
-                  >
-                    <option value="all">Both (Local & IF)</option>
-                    <option value="local">Local Only</option>
-                    <option value="interstate">Interstate Only</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="font-bold text-slate-700 block mb-1">Placement</label>
-                  <select
-                    value={formPlacement}
-                    onChange={(e) => setFormPlacement(e.target.value as any)}
-                    className="w-full px-2.5 py-2 rounded-xl border border-slate-300 font-bold text-slate-800"
-                  >
-                    <option value="all">Both</option>
-                    <option value="my_place">Your Home</option>
-                    <option value="facility">Our Location</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="font-bold text-slate-700 block mb-1">Depot Hub</label>
-                  <select
-                    value={formHubs[0] || 'all'}
-                    onChange={(e) => setFormHubs([e.target.value as any])}
-                    className="w-full px-2.5 py-2 rounded-xl border border-slate-300 font-bold text-slate-800"
-                  >
-                    <option value="all">All Hubs</option>
-                    {METRO_HUBS.map((h) => (
-                      <option key={h} value={h}>
-                        {h}
-                      </option>
+                  <span className="font-bold text-slate-700 block mb-1">Size</span>
+                  <div className="flex items-center gap-3">
+                    {MATRIX_SIZES.map((sz) => (
+                      <label key={sz.id} className="flex items-center gap-1.5 cursor-pointer font-bold text-slate-700">
+                        <input
+                          type="checkbox"
+                          checked={formSizes.includes(sz.id)}
+                          onChange={() => {
+                            const next = toggleSize(formSizes, sz.id);
+                            if (next) setFormSizes(next);
+                          }}
+                          className="w-4 h-4 rounded text-[#15385E]"
+                        />
+                        <span>{sz.label}</span>
+                      </label>
                     ))}
-                  </select>
+                  </div>
+                </div>
+                <div>
+                  <span className="font-bold text-slate-700 block mb-1">Local / Interstate</span>
+                  <div className="flex items-center gap-3">
+                    {(() => {
+                      const c = scopeToChecks(formScope);
+                      return (
+                        <>
+                          <label className="flex items-center gap-1.5 cursor-pointer font-bold text-slate-700">
+                            <input
+                              type="checkbox"
+                              checked={c.local}
+                              onChange={() => {
+                                const next = checksToScope(!c.local, c.interstate);
+                                if (next) setFormScope(next);
+                              }}
+                              className="w-4 h-4 rounded text-[#15385E]"
+                            />
+                            <span>Local</span>
+                          </label>
+                          <label className="flex items-center gap-1.5 cursor-pointer font-bold text-slate-700">
+                            <input
+                              type="checkbox"
+                              checked={c.interstate}
+                              onChange={() => {
+                                const next = checksToScope(c.local, !c.interstate);
+                                if (next) setFormScope(next);
+                              }}
+                              className="w-4 h-4 rounded text-[#15385E]"
+                            />
+                            <span>Interstate</span>
+                          </label>
+                        </>
+                      );
+                    })()}
+                  </div>
+                </div>
+                <div>
+                  <span className="font-bold text-slate-700 block mb-1">Customer Site / Our Site</span>
+                  <div className="flex items-center gap-3">
+                    {(() => {
+                      const c = placementToChecks(formPlacement);
+                      return (
+                        <>
+                          <label className="flex items-center gap-1.5 cursor-pointer font-bold text-slate-700">
+                            <input
+                              type="checkbox"
+                              checked={c.customer}
+                              onChange={() => {
+                                const next = checksToPlacement(!c.customer, c.ours);
+                                if (next) setFormPlacement(next);
+                              }}
+                              className="w-4 h-4 rounded text-[#15385E]"
+                            />
+                            <span>Customer Site</span>
+                          </label>
+                          <label className="flex items-center gap-1.5 cursor-pointer font-bold text-slate-700">
+                            <input
+                              type="checkbox"
+                              checked={c.ours}
+                              onChange={() => {
+                                const next = checksToPlacement(c.customer, !c.ours);
+                                if (next) setFormPlacement(next);
+                              }}
+                              className="w-4 h-4 rounded text-[#15385E]"
+                            />
+                            <span>Our Site</span>
+                          </label>
+                        </>
+                      );
+                    })()}
+                  </div>
+                </div>
+                <div>
+                  <span className="font-bold text-slate-700 block mb-1">Our Locations</span>
+                  <div className="grid grid-cols-2 gap-x-3 gap-y-1">
+                    {METRO_HUBS.map((h) => (
+                      <label key={h} className="flex items-center gap-1.5 cursor-pointer font-bold text-slate-700">
+                        <input
+                          type="checkbox"
+                          checked={hubIsTicked(formHubs, h)}
+                          onChange={() => {
+                            const next = toggleHub(formHubs, h);
+                            if (next) setFormHubs(next);
+                          }}
+                          className="w-4 h-4 rounded text-[#15385E]"
+                        />
+                        <span>{h}</span>
+                      </label>
+                    ))}
+                  </div>
                 </div>
               </div>
 
@@ -1057,7 +1337,7 @@ export const DurationDiscountsAdminWorkspace: React.FC<DurationDiscountsAdminWor
 
                 <div className="grid grid-cols-2 gap-3 pt-1">
                   <div>
-                    <label className="font-bold text-slate-700 block mb-1">Free Blankets Count</label>
+                    <label className="font-bold text-slate-700 block mb-1">Free Blanket Rental (count)</label>
                     <input
                       type="number"
                       step="10"
@@ -1131,6 +1411,51 @@ export const DurationDiscountsAdminWorkspace: React.FC<DurationDiscountsAdminWor
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Add Location Row picker */}
+      {locationRowSource && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-sm w-full p-6 space-y-4 border border-slate-200 shadow-2xl">
+            <div className="flex items-center justify-between">
+              <h3 className="text-base font-black text-slate-900">Add location row</h3>
+              <button
+                type="button"
+                onClick={() => setLocationRowSource(null)}
+                className="p-1 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <p className="text-xs text-slate-600">
+              Copies <strong>{locationRowSource.name}</strong> ({formatRuleDuration(locationRowSource)}) for one location so you
+              can give it its own benefits. It overrides the “all locations” rule for that location.
+            </p>
+            <div className="grid grid-cols-2 gap-2">
+              {METRO_HUBS.map((hub) => {
+                const exists = rules.some(
+                  (r) =>
+                    r.id !== locationRowSource.id &&
+                    r.hubLocations.length === 1 &&
+                    r.hubLocations[0] === hub &&
+                    r.minMonths === locationRowSource.minMonths &&
+                    r.maxMonths === locationRowSource.maxMonths
+                );
+                return (
+                  <button
+                    key={hub}
+                    type="button"
+                    onClick={() => handleAddLocationRow(locationRowSource, hub)}
+                    className="px-3 py-2 rounded-xl border border-slate-200 text-xs font-bold text-[#15385E] hover:bg-slate-50 cursor-pointer text-left"
+                  >
+                    {hub}
+                    {exists && <span className="block text-[10px] font-semibold text-amber-700">Already has a row</span>}
+                  </button>
+                );
+              })}
+            </div>
           </div>
         </div>
       )}

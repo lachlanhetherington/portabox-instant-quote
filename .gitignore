@@ -10,3 +10,9 @@ coverage/
 # Firebase service-account keys
 *service-account*.json
 serviceAccount*.json
+
+# Test output
+playwright-report/
+test-results/
+firebase-debug.log
+firestore-debug.log

@@ -22,11 +22,27 @@ import {
   X,
   Sparkles,
 } from 'lucide-react';
-import { QuoteBreakdown } from '../types/quote';
+import { QuoteBreakdown, QuoteLegBreakdown as QuoteLeg } from '../types/quote';
 import { formatMoney } from '../utils/currency';
+import { useQuoteNumber, usePublicSettings } from '../services/quoteNumberService';
+import { SALES_EMAIL } from '../utils/contact';
+import { getQuoteDurationLabel } from '../services/pricingEngine';
+import { getQuoteCostSections, CostLine, INITIAL_PAYMENT_DISCLAIMER } from '../services/quoteCostSections';
+
+/** Leg description without the fuel-levy wording (the "Fuel levy – $X" line and columns show it). */
+function cleanLegDescription(description: string): string {
+  return description
+    .replace(/\s*\+\s*\$[\d.,]+ fuel levy \([^)]*\)/gi, '')
+    .split(' · ')
+    .filter((part) => !/fuel levy/i.test(part))
+    .join(' · ')
+    .trim();
+}
 
 interface TraditionalQuoteDocumentProps {
   quote: QuoteBreakdown;
+  /** The saved quote's own number. Without it, the number of the quote being built in this browser is shown. */
+  quoteNumber?: string;
   customerData?: {
     firstName: string;
     companyName?: string;
@@ -35,6 +51,8 @@ interface TraditionalQuoteDocumentProps {
   };
   phone?: string;
   onBookNow?: () => void;
+  /** Show the "Delivery window & date selected in Next Steps" note. Follows the Next Steps flow feature flag. */
+  showNextStepsDeliveryNote?: boolean;
 }
 
 export const TraditionalQuoteDocument: React.FC<TraditionalQuoteDocumentProps> = ({
@@ -42,12 +60,18 @@ export const TraditionalQuoteDocument: React.FC<TraditionalQuoteDocumentProps> =
   customerData,
   phone = '1800 467 637',
   onBookNow,
+  showNextStepsDeliveryNote = false,
+  quoteNumber,
 }) => {
   const [isMessageModalOpen, setIsMessageModalOpen] = useState(false);
   const [copiedMessage, setCopiedMessage] = useState(false);
-  const [inquirySent, setInquirySent] = useState(false);
 
-  const quoteRef = `Q-${(quote.quoteCreatedAt ? new Date(quote.quoteCreatedAt).getTime() : Date.now()).toString().slice(-6)}`;
+  // A saved quote shows its own number; only the quote being built uses this browser's current number.
+  const currentQuoteNumber = useQuoteNumber();
+  const quoteRef = quoteNumber || currentQuoteNumber || 'Q-…';
+  // The note shows when the Next Steps flow is on, or when the CEO has switched it on for everyone.
+  const { showDeliveryWindowNote } = usePublicSettings();
+  const showDeliveryNote = showNextStepsDeliveryNote || showDeliveryWindowNote;
   const issueDateStr = quote.quoteCreatedAt
     ? new Date(quote.quoteCreatedAt).toLocaleDateString('en-AU', {
         day: 'numeric',
@@ -78,37 +102,79 @@ export const TraditionalQuoteDocument: React.FC<TraditionalQuoteDocumentProps> =
 
   const isMulti = quote.containerCount > 1;
 
-  // Group 1 Subtotal (Initial Move-In Upfront Fees)
-  const initialDeliveryBase = quote.initialDeliveryFee;
-  const initialMoveSubtotal = initialDeliveryBase;
-
   // Group 2 Subtotal (Monthly Storage)
   const monthlyStorageRate = quote.monthlyStorageFee;
   const baseMonthlyRate = quote.baseMonthlyStorageFee || monthlyStorageRate;
   const durationDiscountAud = quote.durationDiscountAmount || 0;
 
-  // Group 3 Subtotal (Supplies & Insurance)
-  const suppliesTotal = quote.packingSupplies?.totalSuppliesPrice || 0;
-  const insuranceMonthlyFee = quote.insurance?.selected && !quote.insurance.isFreePromo
-    ? quote.insurance.totalMonthlyInsuranceFee
-    : 0;
+  // Dan (16 Nov): 1. Initial Upfront Payment, 2. Ongoing monthly costs (no separate supplies section)
+  const costSections = getQuoteCostSections(quote);
+  const upfrontNonLegLines = costSections.upfront.lines.filter((l) => !l.key.startsWith('leg-'));
 
   // Total Upfront Payable
   const upfrontPayable = quote.firstPaymentTotal;
   const gstUpfrontComponent = Math.round((upfrontPayable / 11) * 100) / 100;
   const netUpfrontBeforeGst = Math.round((upfrontPayable - gstUpfrontComponent) * 100) / 100;
 
-  // Total Ongoing Monthly Storage (Storage + Insurance if selected)
-  const recurringMonthlyTotal = monthlyStorageRate + insuranceMonthlyFee;
+  // Total ongoing monthly costs: storage + blanket rental + CPO / COO
+  const recurringMonthlyTotal = costSections.ongoing.total;
+
+  // Every transport leg is shown the same way in sections 1 and 1b:
+  // Qty | Delivery Rate (per container, excl. fuel) | Subtotal incl. Fuel Levy.
+  // Payable-now legs already have the levy inside leg.fee; later legs carry it separately
+  // (fuelSurchargeEstimatedAmount) because it is charged when that leg happens.
+  const legFuelLevy = (leg: QuoteLeg) =>
+    leg.fuelSurchargeDeferred ? leg.fuelSurchargeEstimatedAmount || 0 : leg.fuelSurcharge || 0;
+  const legDeliveryTotal = (leg: QuoteLeg) =>
+    leg.fuelSurchargeDeferred ? leg.fee : leg.fee - (leg.fuelSurcharge || 0);
+  const legSubtotalInclFuel = (leg: QuoteLeg) => legDeliveryTotal(leg) + legFuelLevy(leg);
+
+  const renderLegRow = (leg: QuoteLeg, key: string) => {
+    const count = leg.containerCount || quote.containerCount;
+    const fuel = legFuelLevy(leg);
+    return (
+      <tr key={key} className="bg-white">
+        <td className="py-3 px-4">
+          <p className="font-bold text-slate-900">{leg.label}</p>
+          {/* Dan 16 Nov: the fuel levy sits at the end of the same line as the leg description */}
+          <p className="text-[11px] text-slate-500 mt-0.5">
+            {cleanLegDescription(leg.description)}
+            {fuel > 0 && <> · Fuel levy – ${formatMoney(fuel)}</>}
+          </p>
+        </td>
+        <td className="py-3 px-4 text-center font-mono">
+          {count} container{count > 1 ? 's' : ''}
+        </td>
+        <td className="py-3 px-4 text-right font-mono">
+          ${formatMoney(legDeliveryTotal(leg) / Math.max(1, count))}
+        </td>
+        <td className="py-3 px-4 text-right font-mono font-bold text-slate-900">
+          ${formatMoney(legSubtotalInclFuel(leg))}
+        </td>
+      </tr>
+    );
+  };
+
+  const renderCostLine = (line: CostLine, suffix = '') => (
+    <tr key={line.key} className="bg-white">
+      <td className="py-3 px-4" colSpan={3}>
+        <p className="font-bold text-slate-900">{line.label}</p>
+        {line.detail && <p className="text-[11px] text-emerald-700 font-bold mt-0.5">{line.detail}</p>}
+      </td>
+      <td className="py-3 px-4 text-right font-mono font-bold text-slate-900 whitespace-nowrap">
+        {line.listAmount !== undefined && (
+          <span className="line-through text-slate-400 font-normal mr-1.5">${formatMoney(line.listAmount)}</span>
+        )}
+        {line.amount < 0 ? `-$${formatMoney(-line.amount)}` : `$${formatMoney(line.amount)}`}
+        {suffix}
+      </td>
+    </tr>
+  );
 
   // Transport legs billed later (pick-up, interstate line-haul, final delivery and collection),
-  // plus the fuel levies deferred to those legs. Not part of the first payment.
+  // including the fuel levy for each leg. Not part of the first payment.
   const laterLegs = quote.legs.filter((leg) => !leg.isPayableNow);
-  const laterFuelEstimate = laterLegs.reduce(
-    (sum, leg) => sum + (leg.fuelSurchargeDeferred ? leg.fuelSurchargeEstimatedAmount || 0 : 0),
-    0,
-  );
-  const laterTransportTotal = laterLegs.reduce((sum, leg) => sum + leg.fee, 0) + laterFuelEstimate;
+  const laterTransportTotal = laterLegs.reduce((sum, leg) => sum + legSubtotalInclFuel(leg), 0);
 
   // Ongoing monthly billing starts after any prepaid months.
   const prepaidMonths: Record<string, number> = { '3_months_upfront': 3, '6_months_upfront': 6, '12_months_upfront': 12 };
@@ -129,8 +195,6 @@ export const TraditionalQuoteDocument: React.FC<TraditionalQuoteDocumentProps> =
           </div>
           <div className="text-xs text-slate-600 flex items-center gap-3 pt-1 font-semibold flex-wrap">
             <span>📞 {phone}</span>
-            <span>·</span>
-            <span>✉️ quotes@portabox.au</span>
             <span>·</span>
             <span>🌐 www.portabox.au</span>
           </div>
@@ -181,16 +245,21 @@ export const TraditionalQuoteDocument: React.FC<TraditionalQuoteDocumentProps> =
           <p className="text-slate-600">
             Servicing Facility: <span className="font-medium text-slate-900">{quote.originDepot.name}</span>
           </p>
-          <div className="mt-1.5 pt-1.5 border-t border-slate-200/80 flex items-center gap-1.5 text-[11px] text-[#00a9d7] font-bold">
-            <Clock className="w-3.5 h-3.5 shrink-0" />
-            <span>Delivery window &amp; date selected in Next Steps upon booking</span>
-          </div>
+          <p className="text-slate-600">
+            Storage Duration: <span className="font-bold text-slate-900">{getQuoteDurationLabel(quote)}</span>
+          </p>
+          {showDeliveryNote && (
+            <div className="mt-1.5 pt-1.5 border-t border-slate-200/80 flex items-center gap-1.5 text-[11px] text-[#00a9d7] font-bold">
+              <Clock className="w-3.5 h-3.5 shrink-0" />
+              <span>Delivery window &amp; date selected in Next Steps upon booking</span>
+            </div>
+          )}
         </div>
       </div>
 
       {/* 3. ITEMISED CHARGES LEDGER TABLE */}
       <div className="space-y-6">
-        {/* GROUP 1: INITIAL MOVE-IN & DELIVERY (Payable Today) */}
+        {/* GROUP 1: INITIAL UPFRONT PAYMENT */}
         <div className="border border-slate-200 rounded-2xl overflow-hidden shadow-2xs">
           <div className="bg-slate-100/90 px-4 py-2.5 border-b border-slate-200 flex items-center justify-between">
             <div className="flex items-center gap-2">
@@ -198,10 +267,9 @@ export const TraditionalQuoteDocument: React.FC<TraditionalQuoteDocumentProps> =
                 1
               </span>
               <h4 className="text-xs font-black uppercase tracking-wider text-[#15385E]">
-                Initial Move-In &amp; Transport Fees (Payable Today)
+                Initial Upfront Payment
               </h4>
             </div>
-            <span className="text-[10px] font-bold text-slate-500 uppercase">One-Off Upfront Charge</span>
           </div>
 
           <table className="w-full text-xs text-left">
@@ -209,28 +277,12 @@ export const TraditionalQuoteDocument: React.FC<TraditionalQuoteDocumentProps> =
               <tr>
                 <th className="py-2.5 px-4 font-black">Description</th>
                 <th className="py-2.5 px-4 font-black text-center">Qty / Route</th>
-                <th className="py-2.5 px-4 font-black text-right">Unit Rate</th>
-                <th className="py-2.5 px-4 font-black text-right">Subtotal (AUD)</th>
+                <th className="py-2.5 px-4 font-black text-right">Delivery Rate</th>
+                <th className="py-2.5 px-4 font-black text-right">Subtotal incl. Fuel Levy (AUD)</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {quote.legs.filter((leg) => leg.isPayableNow).map((leg, idx) => (
-                <tr key={idx} className="bg-white">
-                  <td className="py-3 px-4">
-                    <p className="font-bold text-slate-900">{leg.label}</p>
-                    <p className="text-[11px] text-slate-500 mt-0.5">{leg.description}</p>
-                  </td>
-                  <td className="py-3 px-4 text-center font-mono">
-                    {leg.containerCount || quote.containerCount} container{quote.containerCount > 1 ? 's' : ''}
-                  </td>
-                  <td className="py-3 px-4 text-right font-mono">
-                    ${formatMoney(leg.feePerContainer || leg.fee)}
-                  </td>
-                  <td className="py-3 px-4 text-right font-mono font-bold text-slate-900">
-                    ${formatMoney(leg.fee)}
-                  </td>
-                </tr>
-              ))}
+              {quote.legs.filter((leg) => leg.isPayableNow).map((leg, idx) => renderLegRow(leg, `now-${idx}`))}
               {quote.waivedLegs && quote.waivedLegs.map((wLeg, wIdx) => (
                 <tr key={`waived-${wIdx}`} className="bg-emerald-50/40 text-emerald-900 border-t border-emerald-100">
                   <td className="py-3 px-4">
@@ -253,6 +305,20 @@ export const TraditionalQuoteDocument: React.FC<TraditionalQuoteDocumentProps> =
                   </td>
                 </tr>
               ))}
+              {upfrontNonLegLines.map((line) => renderCostLine(line))}
+              <tr className="bg-slate-50">
+                <td className="py-3 px-4 font-black text-[#15385E]" colSpan={3}>
+                  Initial upfront payment total
+                </td>
+                <td className="py-3 px-4 text-right font-mono font-black text-[#15385E]">
+                  ${formatMoney(costSections.upfront.total)}
+                </td>
+              </tr>
+              <tr>
+                <td colSpan={4} className="py-2 px-4 text-[11px] text-slate-500 italic">
+                  {INITIAL_PAYMENT_DISCLAIMER}
+                </td>
+              </tr>
             </tbody>
           </table>
         </div>
@@ -277,42 +343,15 @@ export const TraditionalQuoteDocument: React.FC<TraditionalQuoteDocumentProps> =
                 <tr>
                   <th className="py-2.5 px-4 font-black">Description</th>
                   <th className="py-2.5 px-4 font-black text-center">Qty / Route</th>
-                  <th className="py-2.5 px-4 font-black text-right">Unit Rate</th>
-                  <th className="py-2.5 px-4 font-black text-right">Subtotal (AUD)</th>
+                  <th className="py-2.5 px-4 font-black text-right">Delivery Rate</th>
+                  <th className="py-2.5 px-4 font-black text-right">Subtotal incl. Fuel Levy (AUD)</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {laterLegs.map((leg, idx) => (
-                  <tr key={`later-${idx}`} className="bg-white">
-                    <td className="py-3 px-4">
-                      <p className="font-bold text-slate-900">{leg.label}</p>
-                      <p className="text-[11px] text-slate-500 mt-0.5">{leg.description}</p>
-                    </td>
-                    <td className="py-3 px-4 text-center font-mono">
-                      {leg.containerCount || quote.containerCount} container{quote.containerCount > 1 ? 's' : ''}
-                    </td>
-                    <td className="py-3 px-4 text-right font-mono">
-                      ${formatMoney(leg.feePerContainer || leg.fee)}
-                    </td>
-                    <td className="py-3 px-4 text-right font-mono font-bold text-slate-900">
-                      ${formatMoney(leg.fee)}
-                    </td>
-                  </tr>
-                ))}
-                {laterFuelEstimate > 0 && (
-                  <tr className="bg-white">
-                    <td className="py-3 px-4" colSpan={3}>
-                      <p className="font-bold text-slate-900">Estimated fuel levies on these legs</p>
-                      <p className="text-[11px] text-slate-500 mt-0.5">Charged with each leg at the levy applying at the time.</p>
-                    </td>
-                    <td className="py-3 px-4 text-right font-mono font-bold text-slate-900">
-                      ${formatMoney(laterFuelEstimate)}
-                    </td>
-                  </tr>
-                )}
+                {laterLegs.map((leg, idx) => renderLegRow(leg, `later-${idx}`))}
                 <tr className="bg-slate-50">
                   <td className="py-3 px-4 font-black text-[#15385E]" colSpan={3}>
-                    Total later transport fees (estimate)
+                    Total later transport fees
                   </td>
                   <td className="py-3 px-4 text-right font-mono font-black text-[#15385E]">
                     ${formatMoney(laterTransportTotal)}
@@ -323,7 +362,7 @@ export const TraditionalQuoteDocument: React.FC<TraditionalQuoteDocumentProps> =
           </div>
         )}
 
-        {/* GROUP 2: ONGOING MONTHLY CONTAINER STORAGE */}
+        {/* GROUP 2: ONGOING MONTHLY COSTS */}
         <div className="border border-slate-200 rounded-2xl overflow-hidden shadow-2xs">
           <div className="bg-slate-100/90 px-4 py-2.5 border-b border-slate-200 flex items-center justify-between">
             <div className="flex items-center gap-2">
@@ -331,28 +370,25 @@ export const TraditionalQuoteDocument: React.FC<TraditionalQuoteDocumentProps> =
                 2
               </span>
               <h4 className="text-xs font-black uppercase tracking-wider text-[#15385E]">
-                Ongoing Monthly Storage Rental
+                Ongoing Monthly Costs
               </h4>
             </div>
-            <span className="text-[10px] font-bold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-full uppercase">
-              1-Year Booking Price Guarantee Included
-            </span>
+            <span className="text-[10px] font-bold text-slate-500 uppercase">From month {ongoingStartsMonth}</span>
           </div>
 
           <table className="w-full text-xs text-left">
             <thead className="bg-slate-50/80 text-[10px] font-bold uppercase text-slate-500 border-b border-slate-200">
               <tr>
-                <th className="py-2.5 px-4 font-black">Description &amp; Specifications</th>
-                <th className="py-2.5 px-4 font-black text-center">Billing Period</th>
-                <th className="py-2.5 px-4 font-black text-right">Standard Rate</th>
-                <th className="py-2.5 px-4 font-black text-right">Monthly Rate (AUD)</th>
+                <th className="py-2.5 px-4 font-black">Description</th>
+                <th className="py-2.5 px-4 font-black text-right" colSpan={2}>Standard Rate</th>
+                <th className="py-2.5 px-4 font-black text-right">Monthly (AUD)</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               <tr className="bg-white">
                 <td className="py-3 px-4">
                   <p className="font-bold text-slate-900">
-                    {isMulti ? `${quote.containerCount} × ` : ''}{quote.containerName} ({quote.containerVolume})
+                    Monthly storage rental: {isMulti ? `${quote.containerCount} × ` : ''}{quote.containerName} ({quote.containerVolume})
                   </p>
                   <p className="text-[11px] text-slate-500 mt-0.5">
                     Storage: {quote.serviceType === 'storage_at_place' ? 'Kept on your driveway / property' : 'Secure indoor facility storage'} · Heavy weatherproof steel container
@@ -363,10 +399,7 @@ export const TraditionalQuoteDocument: React.FC<TraditionalQuoteDocumentProps> =
                     </span>
                   )}
                 </td>
-                <td className="py-3 px-4 text-center font-medium">
-                  {quote.billingCycleLabel || 'Monthly (calendar)'}
-                </td>
-                <td className="py-3 px-4 text-right font-mono text-slate-400">
+                <td className="py-3 px-4 text-right font-mono text-slate-400" colSpan={2}>
                   {durationDiscountAud > 0 ? (
                     <span className="line-through">${formatMoney(baseMonthlyRate)}/mo</span>
                   ) : (
@@ -377,135 +410,15 @@ export const TraditionalQuoteDocument: React.FC<TraditionalQuoteDocumentProps> =
                   ${formatMoney(monthlyStorageRate)} /month
                 </td>
               </tr>
-            </tbody>
-          </table>
-        </div>
-
-        {/* GROUP 3: SUPPLIES & INSURANCE PROTECTION (CPO) */}
-        <div className="border border-slate-200 rounded-2xl overflow-hidden shadow-2xs">
-          <div className="bg-slate-100/90 px-4 py-2.5 border-b border-slate-200 flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <span className="w-5 h-5 rounded-full bg-[#15385E] text-white text-[11px] font-black flex items-center justify-center">
-                3
-              </span>
-              <h4 className="text-xs font-black uppercase tracking-wider text-[#15385E]">
-                Packing Supplies, Padlocks &amp; Insurance Protection (CPO)
-              </h4>
-            </div>
-            <span className="text-[10px] font-bold text-slate-500 uppercase">Itemised Options</span>
-          </div>
-
-          <table className="w-full text-xs text-left">
-            <thead className="bg-slate-50/80 text-[10px] font-bold uppercase text-slate-500 border-b border-slate-200">
-              <tr>
-                <th className="py-2.5 px-4 font-black">Option / Item Description</th>
-                <th className="py-2.5 px-4 font-black text-center">Quantity / Term</th>
-                <th className="py-2.5 px-4 font-black text-right">Unit Price</th>
-                <th className="py-2.5 px-4 font-black text-right">Line Total (AUD)</th>
+              {costSections.ongoing.lines.filter((l) => l.key !== 'storage').map((line) => renderCostLine(line, ' /mo'))}
+              <tr className="bg-slate-50">
+                <td className="py-3 px-4 font-black text-[#15385E]" colSpan={3}>
+                  Total ongoing monthly costs
+                </td>
+                <td className="py-3 px-4 text-right font-mono font-black text-[#15385E]">
+                  ${formatMoney(recurringMonthlyTotal)} /mo
+                </td>
               </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100 bg-white">
-              {/* Blanket Rental */}
-              {quote.packingSupplies?.blanketsCount !== undefined && quote.packingSupplies.blanketsCount > 0 && (
-                <tr>
-                  <td className="py-2.5 px-4">
-                    <p className="font-bold text-slate-900">Quilted Moving Blankets (Hire)</p>
-                    <p className="text-[11px] text-slate-500">
-                      First {quote.packingSupplies.freeBlanketsAllowance || 10} blankets free for your booking
-                    </p>
-                  </td>
-                  <td className="py-2.5 px-4 text-center font-mono">
-                    {quote.packingSupplies.blanketsCount} blankets ({Math.min(quote.packingSupplies.blanketsCount, quote.packingSupplies.freeBlanketsAllowance || 10)} Free)
-                  </td>
-                  <td className="py-2.5 px-4 text-right font-mono text-slate-600">
-                    $25 / 10pk block
-                  </td>
-                  <td className="py-2.5 px-4 text-right font-mono font-bold text-slate-900">
-                    {quote.packingSupplies.blanketsPrice === 0 ? (
-                      <span className="text-emerald-700 font-bold">$0 (100% Free)</span>
-                    ) : (
-                      `$${formatMoney(quote.packingSupplies.blanketsPrice)}`
-                    )}
-                  </td>
-                </tr>
-              )}
-
-              {/* Padlocks */}
-              {quote.packingSupplies?.locksCount !== undefined && quote.packingSupplies.locksCount > 0 && (
-                <tr>
-                  <td className="py-2.5 px-4">
-                    <p className="font-bold text-slate-900">Heavy-Duty Discus Padlock (Sales)</p>
-                    <p className="text-[11px] text-slate-500">
-                      Stainless-steel anti-bolt cutter disc lock fitted for lockbox shroud
-                    </p>
-                  </td>
-                  <td className="py-2.5 px-4 text-center font-mono">
-                    {quote.packingSupplies.locksCount} padlock{quote.packingSupplies.locksCount > 1 ? 's' : ''}
-                  </td>
-                  <td className="py-2.5 px-4 text-right font-mono text-slate-600">
-                    ${formatMoney(quote.packingSupplies.lockUnitPrice || 20)} each
-                  </td>
-                  <td className="py-2.5 px-4 text-right font-mono font-bold text-slate-900">
-                    {quote.packingSupplies.isLockFreePromo ? (
-                      <span className="text-emerald-700 font-bold">$0 (Free Promo)</span>
-                    ) : (
-                      `$${formatMoney(quote.packingSupplies.locksPrice)}`
-                    )}
-                  </td>
-                </tr>
-              )}
-
-              {/* Moving Boxes */}
-              {quote.packingSupplies?.boxesCount !== undefined && quote.packingSupplies.boxesCount > 0 && (
-                <tr>
-                  <td className="py-2.5 px-4">
-                    <p className="font-bold text-slate-900">Double-Walled Moving Boxes (Sales)</p>
-                    <p className="text-[11px] text-slate-500">
-                      Heavy-duty cartons delivered inside container ready to pack
-                    </p>
-                  </td>
-                  <td className="py-2.5 px-4 text-center font-mono">
-                    {quote.packingSupplies.boxesCount} cartons
-                  </td>
-                  <td className="py-2.5 px-4 text-right font-mono text-slate-600">
-                    Bundle Rate
-                  </td>
-                  <td className="py-2.5 px-4 text-right font-mono font-bold text-slate-900">
-                    ${formatMoney(quote.packingSupplies.boxesPrice)}
-                  </td>
-                </tr>
-              )}
-
-              {/* CPO Insurance */}
-              {quote.insurance && quote.insurance.selected ? (
-                <tr>
-                  <td className="py-2.5 px-4">
-                    <p className="font-bold text-slate-900">Container Protection Option (CPO Insurance)</p>
-                    <p className="text-[11px] text-slate-500">
-                      Up to ${(quote.insurance.coverageAmount || 10000).toLocaleString()} contents protection against water, storm, fire, transit &amp; theft
-                    </p>
-                  </td>
-                  <td className="py-2.5 px-4 text-center font-mono">
-                    {quote.containerCount} container{quote.containerCount > 1 ? 's' : ''} (Monthly)
-                  </td>
-                  <td className="py-2.5 px-4 text-right font-mono text-slate-600">
-                    ${formatMoney(quote.insurance.monthlyPricePerContainer || 15)}/mo
-                  </td>
-                  <td className="py-2.5 px-4 text-right font-mono font-bold text-slate-900">
-                    {quote.insurance.isFreePromo ? (
-                      <span className="text-emerald-700 font-bold">$0 (Free Promo)</span>
-                    ) : (
-                      `$${formatMoney(quote.insurance.totalMonthlyInsuranceFee)} /mo`
-                    )}
-                  </td>
-                </tr>
-              ) : (
-                <tr>
-                  <td colSpan={4} className="py-2 px-4 text-center text-slate-400 italic text-[11px]">
-                    No packing supplies or optional insurance selected.
-                  </td>
-                </tr>
-              )}
             </tbody>
           </table>
         </div>
@@ -515,7 +428,7 @@ export const TraditionalQuoteDocument: React.FC<TraditionalQuoteDocumentProps> =
       {quote.savingsBreakdown && quote.savingsBreakdown.length > 0 && (
         <div className="rounded-2xl border-2 border-emerald-200 bg-emerald-50/60 p-4 sm:p-5">
           <div className="flex items-baseline justify-between gap-4 pb-2 mb-2 border-b border-emerald-200">
-            <span className="text-xs font-black uppercase tracking-wider text-emerald-900">Your savings on this booking</span>
+            <span className="text-xs font-black uppercase tracking-wider text-emerald-900">Your savings on this quote</span>
             <span className="font-mono text-xl font-black text-emerald-800">${formatMoney(quote.totalSavings || 0)}</span>
           </div>
           <ul className="space-y-1 text-xs text-emerald-900">
@@ -536,14 +449,11 @@ export const TraditionalQuoteDocument: React.FC<TraditionalQuoteDocumentProps> =
           <div className="space-y-2 max-w-md text-xs text-slate-600">
             <div className="flex items-center gap-2 text-emerald-800 font-black text-xs">
               <ShieldCheck className="w-4 h-4 text-emerald-600" />
-              <span>30-Day Quote Price Guarantee &amp; 1-Year Booking Price Guarantee</span>
+              <span>30-Day Quote Price Guarantee</span>
             </div>
             <p className="text-[11px] leading-relaxed">
               This quotation is issued pursuant to Portabox Standard Terms of Service. Rates quoted are in Australian Dollars (AUD) and inclusive of 10% Goods and Services Tax (GST).
             </p>
-            <div className="text-[11px] text-slate-500">
-              Payment Terms: First payment payable upon booking confirmation via Credit/Debit Card. Subsequent monthly storage is billed in 30-day advance cycles.
-            </div>
           </div>
 
           {/* Grand Totals Box */}
@@ -562,7 +472,6 @@ export const TraditionalQuoteDocument: React.FC<TraditionalQuoteDocumentProps> =
                 <span className="text-xs font-black uppercase tracking-wider text-[#F7D347] block">
                   FIRST PAYMENT TOTAL
                 </span>
-                <span className="text-[10px] text-slate-300">Due at booking (incl. delivery)</span>
               </div>
               <span className="font-mono text-2xl font-black text-white">
                 ${formatMoney(upfrontPayable, true)}
@@ -571,8 +480,8 @@ export const TraditionalQuoteDocument: React.FC<TraditionalQuoteDocumentProps> =
 
             <div className="pt-2 border-t border-sky-800 flex items-baseline justify-between text-xs">
               <div>
-                <span className="font-bold text-sky-100 block">ONGOING MONTHLY STORAGE</span>
-                <span className="text-[10px] text-slate-300">Commences month {ongoingStartsMonth} (12-mo freeze)</span>
+                <span className="font-bold text-sky-100 block">ONGOING MONTHLY COSTS</span>
+                <span className="text-[10px] text-slate-300">Commences month {ongoingStartsMonth}</span>
               </div>
               <span className="font-mono font-extrabold text-[#F7D347] text-base">
                 ${formatMoney(recurringMonthlyTotal, recurringMonthlyTotal % 1 !== 0)} /mo
@@ -671,11 +580,11 @@ export const TraditionalQuoteDocument: React.FC<TraditionalQuoteDocumentProps> =
             </div>
             <div className="pt-3 mt-3 border-t border-slate-100">
               <a
-                href={`mailto:quotes@portabox.au?subject=${encodeURIComponent(`Booking Form Request - ${quoteRef} (${customerName})`)}&body=${encodeURIComponent(`Hi Portabox,\n\nPlease send through the booking form for Quote ${quoteRef}.\n\nCustomer: ${customerName}\nPhone: ${customerMobile}\nEmail: ${customerEmail}\n\nThank you!`)}`}
+                href={`mailto:${SALES_EMAIL}?subject=${encodeURIComponent(`Booking Form Request - ${quoteRef} (${customerName})`)}&body=${encodeURIComponent(`Hi Portabox,\n\nPlease send through the booking form for Quote ${quoteRef}.\n\nCustomer: ${customerName}\nPhone: ${customerMobile}\nEmail: ${customerEmail}\n\nThank you!`)}`}
                 className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-[#15385E] font-bold text-xs transition-colors"
               >
                 <Mail className="w-3.5 h-3.5 text-[#00a9d7]" />
-                <span>Email quotes@portabox.au</span>
+                <span>Email {SALES_EMAIL}</span>
               </a>
             </div>
           </div>
@@ -700,40 +609,14 @@ export const TraditionalQuoteDocument: React.FC<TraditionalQuoteDocumentProps> =
               </div>
               <button
                 type="button"
-                onClick={() => {
-                  setIsMessageModalOpen(false);
-                  setInquirySent(false);
-                }}
+                onClick={() => setIsMessageModalOpen(false)}
                 className="p-1.5 rounded-xl hover:bg-slate-100 text-slate-400 hover:text-slate-700 cursor-pointer transition-colors"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            {inquirySent ? (
-              <div className="p-5 rounded-2xl bg-emerald-50 border-2 border-emerald-300 text-emerald-950 space-y-2 text-center animate-in zoom-in-95">
-                <div className="w-12 h-12 rounded-full bg-emerald-600 text-white flex items-center justify-center mx-auto shadow-sm">
-                  <Check className="w-6 h-6" />
-                </div>
-                <h4 className="text-base font-black">Message Sent Successfully!</h4>
-                <p className="text-xs text-emerald-800 leading-relaxed">
-                  Your booking request for <strong>{quoteRef}</strong> has been received by Portabox Dispatch. Our team will contact you at <strong>{customerMobile}</strong> shortly to finalize your delivery date and container placement.
-                </p>
-                <div className="pt-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setIsMessageModalOpen(false);
-                      setInquirySent(false);
-                    }}
-                    className="px-5 py-2 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-black cursor-pointer shadow-xs transition-colors"
-                  >
-                    Done
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <div className="space-y-4">
+            <div className="space-y-4">
                 <div className="p-3.5 rounded-2xl bg-amber-50/80 border border-amber-200 text-xs space-y-1.5">
                   <div className="flex items-center justify-between text-slate-700">
                     <span className="font-semibold">Quotation Reference:</span>
@@ -786,35 +669,7 @@ export const TraditionalQuoteDocument: React.FC<TraditionalQuoteDocumentProps> =
                   </button>
                 </div>
 
-                <div className="pt-2 border-t border-slate-200">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setInquirySent(true);
-                      // Notify Smartsheet / dispatch log
-                      window.dispatchEvent(
-                        new CustomEvent('portabox-quote-inquiry-sent', {
-                          detail: {
-                            quoteRef,
-                            customerName,
-                            customerMobile,
-                            customerEmail,
-                            timestamp: new Date().toISOString(),
-                          },
-                        })
-                      );
-                    }}
-                    className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white font-black text-xs shadow-sm transition-all cursor-pointer"
-                  >
-                    <Send className="w-4 h-4 text-[#F7D347]" />
-                    <span>Send Online Booking Request to Dispatch Desk</span>
-                  </button>
-                  <p className="text-[11px] text-slate-400 text-center mt-1.5">
-                    Our team typically responds in under 15 minutes during operating hours.
-                  </p>
-                </div>
-              </div>
-            )}
+            </div>
           </div>
         </div>
       )}

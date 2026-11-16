@@ -50,9 +50,29 @@ export async function finishStaffEmailLinkSignIn(
  * Asks the server whether this signed-in identity is staff and what role it has,
  * then builds the local UI session. Signs out again if the server says no.
  */
+export type StaffSignInProvider = 'google' | 'microsoft' | 'email_link';
+
+const CARRIER_ROUTE: Record<StaffSignInProvider, string> = {
+  google: 'Google / Firebase Authentication',
+  microsoft: 'Microsoft work account / Firebase Authentication',
+  email_link: 'Email link / Firebase Authentication',
+};
+
+/** Which sign-in options the server has switched on. Fails safe to "none extra". */
+export async function fetchStaffSignInProviders(): Promise<{ microsoft: { tenantId: string } | null }> {
+  try {
+    const res = await fetch('/api/auth/providers');
+    if (!res.ok) return { microsoft: null };
+    const data = await res.json();
+    return { microsoft: data?.microsoft?.tenantId ? { tenantId: String(data.microsoft.tenantId) } : null };
+  } catch {
+    return { microsoft: null };
+  }
+}
+
 export async function completeStaffLogin(
   user: User,
-  provider: 'google' | 'email_link',
+  provider: StaffSignInProvider,
 ): Promise<StaffSession> {
   const attemptedEmail = user.email || 'unknown';
   const fail = async (message: string): Promise<never> => {
@@ -66,7 +86,7 @@ export async function completeStaffLogin(
       method: 'google',
       status: 'failed',
       failureReason: message,
-      carrierRoute: provider === 'google' ? 'Google / Firebase Authentication' : 'Email link / Firebase Authentication',
+      carrierRoute: CARRIER_ROUTE[provider],
     });
     throw new Error(message);
   };
@@ -112,7 +132,7 @@ export async function completeStaffLogin(
     maskedMobile: '',
     method: 'google',
     status: 'success',
-    carrierRoute: provider === 'google' ? 'Google / Firebase Authentication' : 'Email link / Firebase Authentication',
+    carrierRoute: CARRIER_ROUTE[provider],
   });
   return session;
 }

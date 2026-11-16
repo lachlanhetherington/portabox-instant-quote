@@ -6,7 +6,9 @@
 type PublicEnvKey =
   | 'VITE_GOOGLE_MAPS_API_KEY'
   | 'VITE_BRAINTREE_MERCHANT_ID'
-  | 'VITE_BRAINTREE_TOKENIZATION_KEY';
+  | 'VITE_BRAINTREE_TOKENIZATION_KEY'
+  | 'VITE_FIRESTORE_DATABASE_ID'
+  | 'VITE_APP_ENV';
 
 export function publicEnv(key: PublicEnvKey): string {
   const runtime =

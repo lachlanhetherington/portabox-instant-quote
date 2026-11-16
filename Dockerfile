@@ -10,9 +10,12 @@ COPY package.json bun.lock ./
 RUN bun install --frozen-lockfile
 
 COPY . .
+# Builds the site into dist/ and the server into build/server.mjs (outside dist/,
+# so the server code is never served as a static file).
 RUN npm run build
 
 ENV NODE_ENV=production
 # Cloud Run sets PORT (8080 by default); server.ts listens on it.
 EXPOSE 8080
-CMD ["npx", "tsx", "server.ts"]
+# Plain node on the bundled server: no TypeScript compile at startup.
+CMD ["node", "--enable-source-maps", "build/server.mjs"]

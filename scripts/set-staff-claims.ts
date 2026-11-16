@@ -8,10 +8,17 @@
  *   npm run staff:claims                     # apply
  *   npm run staff:claims -- --prune          # also remove staff claims from anyone not listed
  *
- * Needs a Firebase service-account key (Firebase Console → Project settings →
- * Service accounts → Generate new private key). Point to it with
- *   GOOGLE_APPLICATION_CREDENTIALS=/path/to/key.json
- * Keep that file out of git.
+ * Reads STAFF_EMAILS / STAFF_ROLES_MAP from .env, or from another file with
+ *   DOTENV_CONFIG_PATH=.env.staging npm run staff:claims -- --dry-run
+ *
+ * Credentials: your own Google sign-in (no key file to leak):
+ *   gcloud auth application-default login
+ *   gcloud auth application-default set-quota-project gen-lang-client-0776892310
+ * A service-account key via GOOGLE_APPLICATION_CREDENTIALS also works; keep it out of git.
+ *
+ * Staging and production share one Firebase Auth project, so a staff claim
+ * grants access to both. Claims are the main staff list; STAFF_EMAILS is a
+ * fallback so a new person can sign in before their claims are set.
  *
  * Staff who have never signed in are created up front (no password, email
  * marked verified) so their claims are ready before their first sign-in.

@@ -107,6 +107,21 @@ export function detectBraintreeCardBrand(num: string): string {
 export async function processBraintreePayment(
   params: BraintreePaymentParams
 ): Promise<BraintreePaymentResult> {
+  // This is a simulator: no card is charged. Production must never report a fake payment.
+  if (publicEnv('VITE_APP_ENV') === 'production') {
+    return {
+      success: false,
+      transactionId: '',
+      status: 'failed',
+      paymentMethod: '',
+      paymentMethodType: params.paymentMethodType,
+      amount: params.amount,
+      currency: params.currency || 'AUD',
+      settledAt: new Date().toISOString(),
+      error: 'Online payment is not available yet. Our team will contact you to arrange payment.',
+    };
+  }
+
   // Realistic processing latency for Braintree gateway communication (900ms)
   await new Promise((resolve) => setTimeout(resolve, 950));
 

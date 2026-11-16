@@ -1,4 +1,6 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
+import { resetQuoteNumber } from '../../services/quoteNumberService';
+import { submitQuoteRecord } from '../../services/quoteRecordService';
 import {
   PhoneCall,
   X,
@@ -65,6 +67,11 @@ export const AdminPhoneIntakeDrawer: React.FC<AdminPhoneIntakeDrawerProps> = ({
   onBookingCreated,
   initialNoPhoneOrEmail = false,
 }) => {
+  // Each new phone caller gets a new quote number.
+  useEffect(() => {
+    if (isOpen) resetQuoteNumber();
+  }, [isOpen]);
+
   // Customer details
   const [customerName, setCustomerName] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
@@ -355,6 +362,15 @@ Payment: ${hasNoPhoneOrEmail || paymentPreference.includes('Credit Card') ? 'Cre
       });
 
       setDispatchResult(result);
+
+      // Save the quote and add one row per container to the quotes sheet (Smartsheet).
+      void submitQuoteRecord(quote, {
+        name: customerName.trim(),
+        email: customerEmail.trim() || undefined,
+        mobile: (hasNoPhoneOrEmail ? landlinePhone : customerPhone).trim() || undefined,
+        agentName: agentName.trim() || 'Call centre',
+        channels: { email: sendViaEmail, sms: sendViaSms, portal: publishToPortal },
+      });
     } catch (err) {
       console.error('Error dispatching quote:', err);
       alert('An error occurred while dispatching the quote.');

@@ -5,6 +5,7 @@ import { BillingCycle, ContainerSizeId, DeliverySlotWindow, LogisticsMethod, Met
 import { calculateCompetitorComparison } from '../services/competitorPricingService';
 import { generateGoogleCalendarUrl } from '../services/deliveryCalendarService';
 import { formatMoney } from '../utils/currency';
+import { getDurationBlock } from '../services/pricingEngine';
 
 interface RightSidebarProps {
   currentStep: number;
@@ -25,6 +26,8 @@ interface RightSidebarProps {
   containerSelections?: Record<ContainerSizeId, number>;
   totalVolumeM3?: number;
   storageDuration: StorageDuration;
+  /** Exact months the customer picked on Duration & Billing (0.5 = 2 weeks). */
+  storageDurationMonths?: number;
   preferredDate: string;
   selectedSlot?: DeliverySlotWindow;
   metroHubName?: string;
@@ -74,6 +77,7 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({
   containerSelections,
   totalVolumeM3: propTotalVolumeM3,
   storageDuration,
+  storageDurationMonths,
   preferredDate,
   selectedSlot,
   metroHubName = 'Adelaide',
@@ -181,10 +185,13 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({
 
   const getDurationLabel = () => {
     let dur = storageDuration.replace(/_/g, ' ');
-    if (storageDuration === '2_weeks') dur = '2 weeks';
-    if (storageDuration === '1_to_3_months') dur = '1 to 3 months';
-    if (storageDuration === '4_to_11_months') dur = '4 to 11 months';
-    if (storageDuration === '12_plus_months') dur = '12+ months';
+    // Prefer the exact months picked (e.g. "2 months") over the pricing bucket ("1 to 3 months").
+    const months = storageDurationMonths;
+    if (storageDuration === '2_weeks' || months === 0.5) dur = '2 weeks';
+    else if (months !== undefined && months >= 1) dur = getDurationBlock(months).label.toLowerCase();
+    else if (storageDuration === '1_to_3_months') dur = '1 to 3 months';
+    else if (storageDuration === '4_to_11_months') dur = '4 to 11 months';
+    else if (storageDuration === '12_plus_months') dur = '12+ months';
 
     let cycle = 'Monthly billing';
     if (billingCycle === 'weekly') cycle = 'Weekly billing';
@@ -680,7 +687,11 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({
             </div>
             {currentStep > 7 && (
               <div className="mt-1 ml-7.5 space-y-0.5 text-[11px] text-[#15385E]">
-                {protectionPlan === 'cpo' ? (
+                {protectionPlan === 'cpo_coo' ? (
+                  <p className="text-slate-600 font-medium">
+                    CPO (${(5000 * containerCount).toLocaleString()} cover) + COO (container) · {insuranceMonthlyFee ? `$${insuranceMonthlyFee}/mo` : 'Included'}
+                  </p>
+                ) : protectionPlan === 'cpo' ? (
                   <p className="text-slate-600 font-medium">
                     CPO (${(5000 * containerCount).toLocaleString()} cover) · {insuranceMonthlyFee ? `$${insuranceMonthlyFee}/mo` : 'Included'}
                   </p>
@@ -736,40 +747,60 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({
         </div>
       </div>
 
-      {/* 3 Value Guarantee Cards: Reordered by step and removed on Page 8 */}
+      {/* 3 Value Guarantee Cards (removed on Page 8) */}
       {currentStep >= 2 && currentStep <= 7 && (
         <>
           {/* Helper Card Renderers */}
           {(() => {
             const priceLockCard = (
-              <div key="price-lock" className="rounded-2xl border border-slate-200/90 bg-white p-4 sm:p-5 shadow-xs space-y-2">
-                <div className="flex items-center gap-2">
-                  <Sparkles className="w-4 h-4 sm:w-5 sm:h-5 text-[#00a9d7] shrink-0" />
-                  <h4 className="text-xs sm:text-sm font-extrabold tracking-wide uppercase text-[#15385E]">
-                    30–DAY QUOTE PRICE GUARANTEE
-                  </h4>
-                </div>
-                <p className="text-xs text-slate-600 leading-relaxed font-normal">
+              <details key="price-lock" className="group rounded-2xl border border-slate-200/90 bg-white p-4 sm:p-5 shadow-xs">
+                <summary className="flex items-center justify-between gap-2 cursor-pointer list-none select-none [&::-webkit-details-marker]:hidden">
+                  <span className="flex items-center gap-2">
+                    <Sparkles className="w-4 h-4 sm:w-5 sm:h-5 text-[#00a9d7] shrink-0" />
+                    <h4 className="text-xs sm:text-sm font-extrabold tracking-wide uppercase text-[#15385E] group-hover:text-[#008fbb]">
+                      30–DAY QUOTE PRICE GUARANTEE
+                    </h4>
+                  </span>
+                  <ChevronDown className="w-4 h-4 text-[#15385E] shrink-0 transition-transform group-open:rotate-180" />
+                </summary>
+                <p className="mt-2 text-xs text-slate-600 leading-relaxed font-normal">
                   Quoted prices are locked for 30 days from quote date. Changes to quotes that affect pricing will result in updated pricing and a new 30–day quote price guarantee period. This does not include date changes or other non-pricing items.
                 </p>
-              </div>
+              </details>
             );
 
             const rateFreezeCard = (
-              <div key="rate-freeze" className="rounded-2xl border border-slate-200/90 bg-white p-4 sm:p-5 shadow-xs space-y-2">
-                <div className="flex items-center gap-2">
-                  <ShieldCheck className="w-4 h-4 sm:w-5 sm:h-5 text-emerald-600 shrink-0" />
-                  <h4 className="text-xs sm:text-sm font-extrabold tracking-wide uppercase text-[#15385E]">
-                    1–YEAR BOOKING PRICE GUARANTEE
-                  </h4>
-                </div>
-                <p className="text-xs text-slate-600 leading-relaxed font-normal">
+              <details key="rate-freeze" className="group rounded-2xl border border-slate-200/90 bg-white p-4 sm:p-5 shadow-xs">
+                <summary className="flex items-center justify-between gap-2 cursor-pointer list-none select-none [&::-webkit-details-marker]:hidden">
+                  <span className="flex items-center gap-2">
+                    <ShieldCheck className="w-4 h-4 sm:w-5 sm:h-5 text-emerald-600 shrink-0" />
+                    <h4 className="text-xs sm:text-sm font-extrabold tracking-wide uppercase text-[#15385E] group-hover:text-[#008fbb]">
+                      1–YEAR BOOKING PRICE GUARANTEE
+                    </h4>
+                  </span>
+                  <ChevronDown className="w-4 h-4 text-[#15385E] shrink-0 transition-transform group-open:rotate-180" />
+                </summary>
+                <p className="mt-2 text-xs text-slate-600 leading-relaxed font-normal">
                   When a booking is made, prices on all attributes (container rental, delivery fees, ancillaries, etc.) are locked for 1 year with our 1-Year Booking Price Guarantee. Beyond 1 year, delivery fees will default to live pricing and container rental prices can go up or down with a 30–day notification.
                 </p>
+              </details>
+            );
+
+            // Pages 2–4: same look as the Page 1 Price Match card (not expandable)
+            const priceMatchCompactCard = (
+              <div key="price-match" className="p-3.5 sm:p-4 rounded-2xl bg-white border-2 border-[#DAD7D1] shadow-2xs flex items-center gap-3">
+                <div className="w-9 h-9 rounded-xl bg-[#F7D347]/20 border border-[#F7D347] text-[#1A1A1A] flex items-center justify-center shrink-0">
+                  <ShieldCheck className="w-5 h-5 text-[#15385E]" />
+                </div>
+                <div>
+                  <div className="text-xs font-black text-[#15385E] uppercase tracking-wide">Price Match Guarantee</div>
+                  <div className="text-[11px] text-slate-500 font-semibold">We beat comparable quotes per m³</div>
+                </div>
               </div>
             );
 
-            const priceMatchCard = (
+            // Pages 5–7: the full card, and the customer can open the competitor prices
+            const priceMatchFullCard = (
               <div key="price-match" className="rounded-2xl border-2 border-[#DAD7D1] bg-[#112F4F] p-4 sm:p-5 space-y-3 shadow-xs">
                 <div>
                   {/* Badge: Pure White #FFFFFF background with #1A1A1A text */}
@@ -787,7 +818,8 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({
                   </p>
                 </div>
 
-                {/* Check out our competitors prices container (closed by default on pages 2-7) */}
+                {/* Competitor prices: Pages 5–7, closed by default */}
+                {currentStep >= 5 && (
                 <details className="group border border-[#DAD7D1] rounded-xl bg-white p-3.5 transition-all">
                   <summary className="flex items-center justify-between cursor-pointer list-none select-none text-xs font-bold text-[#15385E] hover:text-[#5CC1EF] transition-colors">
                     <span className="flex items-center gap-2 text-[#15385E]">
@@ -880,32 +912,16 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({
                     </div>
                   </div>
                 </details>
+                )}
               </div>
             );
 
-            // Page 2 & 3 order:
-            // 1. 30-Day Quote Price Guarantee
-            // 2. 1-Year Booking Price Guarantee
-            // 3. Price Match Guarantee (closed by default)
-            if (currentStep === 2 || currentStep === 3) {
-              return (
-                <>
-                  {priceLockCard}
-                  {rateFreezeCard}
-                  {priceMatchCard}
-                </>
-              );
-            }
-
-            // Page 4, 5, 6, and 7 order:
-            // 1. Price Match Guarantee (closed by default)
-            // 2. 1-Year Booking Price Guarantee
-            // 3. 30-Day Quote Price Guarantee
+            // Same order on every page: 30-Day, 1-Year, Price Match
             return (
               <>
-                {priceMatchCard}
-                {rateFreezeCard}
                 {priceLockCard}
+                {rateFreezeCard}
+                {currentStep <= 4 ? priceMatchCompactCard : priceMatchFullCard}
               </>
             );
           })()}
